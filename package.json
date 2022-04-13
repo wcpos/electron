@@ -1,43 +1,73 @@
 {
 	"name": "@wcpos/app-electron",
-	"description": "Electron app for WooCommerce POS",
-	"author": "kilbot",
 	"version": "1.0.0",
-	"main": "index.js",
+	"private": true,
+	"author": "kilbot <paul@kilbot.com>",
+	"description": "Electron Desktop App for WooCommerce POS",
+	"main": "./public/electron.js",
+	"homepage": "./",
 	"scripts": {
-		"start": "expo-electron start",
-		"build": "electron-builder --dir -c.compression=store -c.mac.identity=null",
-		"prepare": "yarn workspace @wcpos/hello-world build"
+		"cra:start": "craco start",
+		"cra:build": "craco build",
+		"start": "concurrently -k \"cross-env BROWSER=none yarn cra:start\" \"wait-on http://localhost:3000 && electronmon .\"",
+		"package:mac": "yarn cra:build && electron-builder -m -c.extraMetadata.main=build/electron.js",
+		"package:win": "yarn cra:build && electron-builder -w -c.extraMetadata.main=build/electron.js",
+		"package:linux": "yarn cra:build && electron-builder -l -c.extraMetadata.main=build/electron.js",
+		"test": "react-scripts test --watchAll=false --passWithNoTests",
+		"eject": "react-scripts eject",
+		"lint": "eslint .",
+		"lint:fix": "yarn lint --fix"
 	},
 	"dependencies": {
-		"@react-native-community/netinfo": "8.2.0",
+		"@react-native-async-storage/async-storage": "1.17.3",
+		"@testing-library/jest-dom": "5.16.4",
+		"@testing-library/react": "11.2.7",
+		"@testing-library/user-event": "12.8.3",
 		"@wcpos/hello-world": "*",
-		"expo": "44.0.6",
-		"expo-status-bar": "1.2.0",
 		"react": "17.0.2",
 		"react-dom": "17.0.2",
 		"react-native": "0.64.3",
-		"react-native-get-random-values": "1.7.2",
-		"react-native-pager-view": "5.4.15",
-		"react-native-reanimated": "2.7.0",
-		"react-native-safe-area-context": "4.2.4",
-		"react-native-screens": "3.13.1",
-		"react-native-svg": "12.3.0",
-		"react-native-web": "0.17.7"
+		"react-native-web": "0.17.7",
+		"react-scripts": "4.0.3"
 	},
 	"devDependencies": {
-		"@babel/core": "7.17.9",
-		"@expo/electron-adapter": "0.0.55",
-		"@expo/webpack-config": "0.16.20",
-		"@svgr/webpack": "5.5.0",
+		"@craco/craco": "6.4.3",
 		"@types/react": "17.0.44",
-		"@types/react-native": "0.67.4",
-		"@wcpos/babel-preset-expo": "*",
-		"@wcpos/eslint-config": "*",
-		"electron": "18.0.3",
-		"electron-builder": "^23.0.4",
-		"react-native-svg-transformer": "1.0.0",
-		"typescript": "4.6.3"
+		"@types/react-dom": "17.0.15",
+		"concurrently": "6.5.1",
+		"cross-env": "7.0.3",
+		"electron": "14.2.9",
+		"electron-builder": "22.14.13",
+		"electronmon": "2.0.2",
+		"react-native-monorepo-tools": "1.1.4",
+		"wait-on": "6.0.1"
 	},
-	"private": true
+	"browserslist": {
+		"production": [
+			"last 1 electron version"
+		],
+		"development": [
+			"last 1 electron version"
+		]
+	},
+	"build": {
+		"appId": "com.wcpos.electron",
+		"productName": "WooCommerce POS",
+		"files": [
+			"build/**/*",
+			"node_modules/**/*"
+		],
+		"directories": {
+			"buildResources": "public"
+		},
+		"mac": {
+			"target": "dmg"
+		},
+		"win": {
+			"target": "nsis"
+		},
+		"linux": {
+			"target": "deb"
+		}
+	}
 }
