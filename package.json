@@ -9,6 +9,7 @@
 	"scripts": {
 		"cra:start": "craco start",
 		"cra:build": "craco build",
+		"build": "yarn cra:build",
 		"start": "concurrently -k \"cross-env BROWSER=none yarn cra:start\" \"wait-on http://localhost:3000 && electronmon .\"",
 		"package:mac": "yarn cra:build && electron-builder -m -c.extraMetadata.main=build/electron.js",
 		"package:win": "yarn cra:build && electron-builder -w -c.extraMetadata.main=build/electron.js",
