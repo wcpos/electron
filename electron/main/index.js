@@ -8,7 +8,13 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
 let mainWindow;
 
 function createMainWindow() {
-	const browserWindow = new BrowserWindow({ webPreferences: { nodeIntegration: true } });
+	const browserWindow = new BrowserWindow({
+		webPreferences: {
+			nodeIntegration: true,
+			contextIsolation: false,
+			enableRemoteModule: true,
+		},
+	});
 
 	if (isDevelopment) {
 		browserWindow.webContents.openDevTools();

@@ -2,6 +2,7 @@ const { withExpoWebpack } = require('@expo/electron-adapter');
 
 module.exports = (_config) => {
 	const config = withExpoWebpack(_config);
+	console.log(config);
 
 	// config.module.rules[1].oneOf[2].use.options.plugins = ['react-native-reanimated/plugin'];
 

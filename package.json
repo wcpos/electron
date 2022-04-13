@@ -6,10 +6,12 @@
 	"main": "index.js",
 	"scripts": {
 		"start": "expo-electron start",
-		"build": "electron-builder --dir -c.compression=store -c.mac.identity=null"
+		"build": "electron-builder --dir -c.compression=store -c.mac.identity=null",
+		"prepare": "yarn workspace @wcpos/hello-world build"
 	},
 	"dependencies": {
 		"@react-native-community/netinfo": "8.2.0",
+		"@wcpos/hello-world": "*",
 		"expo": "44.0.6",
 		"expo-status-bar": "1.2.0",
 		"react": "17.0.2",
