@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "@wcpos/tsconfig",
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": [
