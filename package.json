@@ -6,12 +6,19 @@
 	"main": "index.js",
 	"scripts": {
 		"start": "expo-electron start",
-		"build": "electron-builder --dir -c.compression=store -c.mac.identity=null",
-		"prepare": "yarn workspace @wcpos/hello-world build"
+		"build": "electron-builder --dir -c.compression=store -c.mac.identity=null"
+	},
+	"eslintConfig": {
+		"extends": "@wcpos/eslint-config"
+	},
+	"resolutions": {
+		"react": "17.0.2",
+		"react-dom": "17.0.2",
+		"react-native": "0.64.3"
 	},
 	"dependencies": {
 		"@react-native-community/netinfo": "8.2.0",
-		"@wcpos/hello-world": "*",
+		"@wcpos/core": "*",
 		"expo": "44.0.6",
 		"expo-status-bar": "1.2.0",
 		"react": "17.0.2",
