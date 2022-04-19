@@ -6,8 +6,8 @@
 	"version": "1.0.0",
 	"scripts": {
 		"start": "expo-electron start",
-		"build": "electron-builder --dir -c.compression=store -c.mac.identity=null",
-		"dist": "electron-builder"
+		"build": "yarn electron-webpack",
+		"package": "yarn build && yarn electron-builder --dir -c.compression=store -c.mac.identity=null"
 	},
 	"eslintConfig": {
 		"extends": "@wcpos/eslint-config"
@@ -16,6 +16,42 @@
 		"react": "17.0.2",
 		"react-dom": "17.0.2",
 		"react-native": "0.64.3"
+	},
+	"browserslist": {
+		"production": [
+			"last 1 electron version"
+		],
+		"development": [
+			"last 1 electron version"
+		]
+	},
+	"build": {
+		"appId": "com.wcpos.electron",
+		"productName": "WooCommerce POS",
+		"nsis": {
+			"deleteAppDataOnUninstall": true
+		},
+		"extraMetadata": {
+			"main": "main.js"
+		},
+		"files": [
+			{
+				"from": "dist/main/",
+				"to": "./",
+				"filter": [
+					"**/*"
+				]
+			},
+			{
+				"from": "dist/renderer",
+				"to": "./",
+				"filter": [
+					"**/*"
+				]
+			},
+			"package.json",
+			"**/node_modules/**/*"
+		]
 	},
 	"dependencies": {
 		"@react-native-community/netinfo": "8.2.0",
