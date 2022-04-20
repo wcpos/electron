@@ -3,6 +3,7 @@ const { withExpoWebpack } = require('@expo/electron-adapter');
 module.exports = (_config) => {
 	const config = withExpoWebpack(_config);
 
+	console.log(config);
 
 	// Remove existing rules about SVG and inject our own
 	// (Inspired by https://github.com/storybookjs/storybook/issues/6758#issuecomment-495598635)

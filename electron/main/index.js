@@ -1,6 +1,8 @@
 import { app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import { format as formatUrl } from 'url';
+import { main } from './main';
+import { isMac } from './utils';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -9,12 +11,16 @@ let mainWindow;
 
 function createMainWindow() {
 	const browserWindow = new BrowserWindow({
+		show: false,
+		titleBarStyle: isMac ? 'customButtonsOnHover' : 'hidden',
 		webPreferences: {
 			nodeIntegration: true,
 			contextIsolation: false,
-			enableRemoteModule: true,
+			// enableRemoteModule: true,
 		},
 	});
+	browserWindow.maximize();
+	browserWindow.show();
 
 	if (isDevelopment) {
 		browserWindow.webContents.openDevTools();
@@ -65,3 +71,12 @@ app.on('activate', () => {
 app.on('ready', () => {
 	mainWindow = createMainWindow();
 });
+
+app.setAboutPanelOptions({
+	applicationName: 'WooCommerce POS',
+	applicationVersion: app.getVersion(),
+	copyright: 'Copyright © 2022 WooCommerce POS',
+	version: app.getVersion(),
+});
+
+main();
