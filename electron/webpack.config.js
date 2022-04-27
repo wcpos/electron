@@ -17,7 +17,7 @@ module.exports = (_config) => {
 		}
 		return rule;
 	});
-	
+
 	// Add new rule to use svgr
 	// Place at the beginning so that the default loader doesn't catch it
 	// https://github.com/facebook/create-react-app/blob/main/packages/react-scripts/config/webpack.config.js#L389
@@ -48,7 +48,11 @@ module.exports = (_config) => {
 		},
 	});
 
-	console.log(config.module.rules);
+	const WatchFilterPlugin = config.plugins[5];
+	const originalFilter = WatchFilterPlugin.filter;
+	WatchFilterPlugin.filter = (file) => {
+		return true;
+	};
 
 	return config;
 };

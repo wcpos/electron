@@ -2,9 +2,8 @@ import { app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import { format as formatUrl } from 'url';
 import { main } from './main';
-import { isMac } from './utils';
-
-const isDevelopment = process.env.NODE_ENV !== 'production';
+import { isMac, isDevelopment } from './utils';
+import './dev-tools';
 
 // global reference to mainWindow (necessary to prevent window from being garbage collected)
 let mainWindow;

@@ -1,4 +1,5 @@
 import { registerRootComponent } from 'expo';
+import './assets/app.global.css';
 
 import App from '@wcpos/core';
 

@@ -1,5 +1,6 @@
 import { checkForUpdates } from './update';
 import { registerMenu } from './menu';
+import { initProtocolHandling } from './protocol';
 
 /**
  * This function is executed at the earliest possible moment in the app lifecycle.
@@ -17,6 +18,7 @@ import { registerMenu } from './menu';
  */
 export const main = () => {
 	checkForUpdates();
+	initProtocolHandling();
 	// configHandlers.register(null);
 	// globalHandlers.register(null);
 	// launcherHandlers.register(null);

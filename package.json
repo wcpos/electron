@@ -1,13 +1,15 @@
 {
 	"name": "@wcpos/app-electron",
+	"productName": "WooCommerce POS",
 	"description": "Electron app for WooCommerce POS",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
-	"version": "1.0.0-beta.1",
+	"version": "1.0.0",
 	"scripts": {
 		"start": "expo-electron start",
 		"build": "yarn electron-webpack",
-		"package": "yarn build && yarn electron-builder --dir -c.compression=store -c.mac.identity=null"
+		"package": "yarn build && yarn electron-builder --dir -c.compression=store",
+		"package:nosign": "yarn build && yarn electron-builder --dir -c.compression=store -c.mac.identity=null"
 	},
 	"eslintConfig": {
 		"extends": "@wcpos/eslint-config"
@@ -65,7 +67,7 @@
 		}
 	},
 	"dependencies": {
-		"@react-native-community/netinfo": "8.2.0",
+		"@react-native-community/netinfo": "8.3.0",
 		"@wcpos/core": "*",
 		"electron-log": "^4.4.6",
 		"expo": "44.0.6",
@@ -75,8 +77,8 @@
 		"react-native": "0.64.3",
 		"react-native-get-random-values": "1.7.2",
 		"react-native-pager-view": "5.4.15",
-		"react-native-reanimated": "2.7.0",
-		"react-native-safe-area-context": "4.2.4",
+		"react-native-reanimated": "2.8.0",
+		"react-native-safe-area-context": "4.2.5",
 		"react-native-screens": "3.13.1",
 		"react-native-svg": "12.3.0",
 		"react-native-web": "0.17.7",
@@ -85,14 +87,16 @@
 	"devDependencies": {
 		"@babel/core": "7.17.9",
 		"@expo/electron-adapter": "0.0.55",
-		"@expo/webpack-config": "0.16.20",
+		"@expo/webpack-config": "0.16.21",
 		"@svgr/webpack": "5.5.0",
 		"@types/react": "17.0.44",
-		"@types/react-native": "0.67.4",
+		"@types/react-native": "0.67.6",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
-		"electron": "18.0.4",
-		"electron-builder": "^23.0.6",
+		"electron": "18.1.0",
+		"electron-builder": "^23.0.8",
+		"electron-devtools-installer": "^3.2.0",
+		"electron-webpack": "^2.8.2",
 		"react-native-svg-transformer": "1.0.0",
 		"typescript": "4.6.3",
 		"url-loader": "^4.1.1",
