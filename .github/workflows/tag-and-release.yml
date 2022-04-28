@@ -9,17 +9,26 @@ jobs:
   tag-new-versions:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.maybe-tag.outputs.tag }}
+      id: ${{ steps.maybe-release.outputs.id }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Check out Git repository
+        uses: actions/checkout@v3
         with:
           fetch-depth: 2
-      - id: maybe-tag
+      - name: Detect and Tag New Version
+        id: maybe-tag
         uses: salsify/action-detect-and-tag-new-version@v2
+      - name: Create Release
+        id: maybe-release
+        if: ${{ success() && steps.maybe-tag.outputs.tag }}
+        uses: softprops/action-gh-release@v1
+        with: 
+          draft: true
+          prerelease: false
         
   release:
     needs: tag-new-versions
-    if: ${{ success() && needs.tag-new-versions.outputs.tag }}
+    if: ${{ success() && needs.tag-new-versions.outputs.id }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -37,7 +46,7 @@ jobs:
           node-version: 16
 
       - name: Build/release Electron app
-        uses: wcpos/action-electron-builder@v1
+        uses: samuelmeuli/action-electron-builder@v1
         with:
           # GitHub token, automatically provided to the action
           # (No need to define this secret in the repo settings)
