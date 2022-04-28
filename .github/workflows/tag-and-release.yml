@@ -24,8 +24,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with: 
           name: ${{ steps.maybe-tag.outputs.tag }}
-          draft: true
-          prerelease: false
           files: |
             LICENSE
         
