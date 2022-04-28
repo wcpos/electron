@@ -13,10 +13,10 @@ jobs:
         with:
           fetch-depth: 2
       - uses: salsify/action-detect-and-tag-new-version@v2
-        id: new_tag
         
   release:
-    if: ${{ success() && steps.new_tag.outputs.tag }}
+    needs: tag-new-versions
+    if: ${{ success() && needs.tag-new-versions.outputs.tag }}
     runs-on: ${{ matrix.os }}
 
     strategy:
