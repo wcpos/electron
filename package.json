@@ -4,7 +4,7 @@
 	"description": "Electron app for WooCommerce POS",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
-	"version": "1.0.0",
+	"version": "1.0.0-alpha.1",
 	"scripts": {
 		"start": "expo-electron start",
 		"build": "yarn electron-webpack",
@@ -32,10 +32,19 @@
 		"productName": "WooCommerce POS",
 		"mac": {
 			"icon": "./assets/square-icon.icns",
-			"category": "public.app-category.utilities"
+			"category": "public.app-category.business"
 		},
 		"win": {
 			"icon": "./assets/square-icon-256x256.png"
+		},
+		"linux": {
+			"target": [
+				"AppImage"
+			],
+			"category": "Office"
+		},
+		"dmg": {
+			"icon": false
 		},
 		"nsis": {
 			"deleteAppDataOnUninstall": true
@@ -87,7 +96,7 @@
 	"devDependencies": {
 		"@babel/core": "7.17.9",
 		"@expo/electron-adapter": "0.0.55",
-		"@expo/webpack-config": "0.16.21",
+		"@expo/webpack-config": "0.16.23",
 		"@svgr/webpack": "5.5.0",
 		"@types/react": "17.0.44",
 		"@types/react-native": "0.67.6",

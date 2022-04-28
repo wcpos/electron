@@ -1,8 +1,6 @@
-name: Build/release
+name: Release Desktop Apps
 
-on:
-  release:
-    types: [published]
+on: push
 
 jobs:
   release:
