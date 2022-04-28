@@ -30,6 +30,11 @@
 	"build": {
 		"appId": "com.wcpos.electron",
 		"productName": "WooCommerce POS",
+		"publish": [
+			{
+				"provider": "github"
+			}
+		],
 		"mac": {
 			"icon": "./assets/square-icon.icns",
 			"category": "public.app-category.business"

@@ -9,7 +9,7 @@ jobs:
   tag-new-versions:
     runs-on: ubuntu-latest
     outputs:
-      id: ${{ steps.maybe-release.outputs.id }}
+      tag: ${{ steps.maybe-tag.outputs.tag }}
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v3
@@ -18,18 +18,10 @@ jobs:
       - name: Detect and Tag New Version
         id: maybe-tag
         uses: salsify/action-detect-and-tag-new-version@v2
-      - name: Create Release
-        id: maybe-release
-        if: ${{ success() && steps.maybe-tag.outputs.tag }}
-        uses: softprops/action-gh-release@v1
-        with: 
-          name: ${{ steps.maybe-tag.outputs.tag }}
-          draft: true
-          prerelease: false
         
   release:
     needs: tag-new-versions
-    if: ${{ success() && needs.tag-new-versions.outputs.id }}
+    if: ${{ success() && needs.tag-new-versions.outputs.tag }}
     runs-on: ${{ matrix.os }}
 
     strategy:
