@@ -1,6 +1,9 @@
 name: Tag New Versions
 
-on: push
+on:
+  push:
+    branches:
+      - main
 
 jobs:
   tag-new-versions:

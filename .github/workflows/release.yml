@@ -3,7 +3,7 @@ name: Release Desktop Apps
 on:
   push:
     tags:
-      - v1.*
+      - '*'
 
 jobs:
   release:
