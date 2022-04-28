@@ -1,12 +1,22 @@
-name: Release Desktop Apps
+name: Tag & Release
 
 on:
   push:
-    tags:
-      - '*'
+    branches:
+      - main
 
 jobs:
+  tag-new-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+      - uses: salsify/action-detect-and-tag-new-version@v2
+        id: new_tag
+        
   release:
+    if: ${{ success() && steps.new_tag.outputs.tag }}
     runs-on: ${{ matrix.os }}
 
     strategy:
