@@ -11,11 +11,11 @@ jobs:
     outputs:
       tag: ${{ steps.maybe-tag.outputs.tag }}
     steps:
-      - id: maybe-tag
       - uses: actions/checkout@v3
         with:
           fetch-depth: 2
-      - uses: salsify/action-detect-and-tag-new-version@v2
+      - id: maybe-tag
+        uses: salsify/action-detect-and-tag-new-version@v2
         
   release:
     needs: tag-new-versions
