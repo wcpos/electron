@@ -98,7 +98,7 @@
 		"@expo/electron-adapter": "0.0.55",
 		"@expo/webpack-config": "0.16.23",
 		"@svgr/webpack": "5.5.0",
-		"@types/react": "17.0.44",
+		"@types/react": "18.0.8",
 		"@types/react-native": "0.67.6",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
