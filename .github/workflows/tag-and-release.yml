@@ -1,4 +1,4 @@
-name: Tag & Release
+name: Tag and Release
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
           node-version: 16
 
       - name: Build/release Electron app
-        uses: samuelmeuli/action-electron-builder@v1
+        uses: wcpos/action-electron-builder@v1
         with:
           # GitHub token, automatically provided to the action
           # (No need to define this secret in the repo settings)
