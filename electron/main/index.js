@@ -11,7 +11,7 @@ let mainWindow;
 function createMainWindow() {
 	const browserWindow = new BrowserWindow({
 		show: false,
-		titleBarStyle: isMac ? 'customButtonsOnHover' : 'default',
+		// titleBarStyle: isMac ? 'customButtonsOnHover' : 'default',
 		webPreferences: {
 			nodeIntegration: true,
 			contextIsolation: false,
