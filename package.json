@@ -73,7 +73,7 @@
 	"dependencies": {
 		"@wcpos/core": "*",
 		"electron-log": "^4.4.6",
-		"expo": "44.0.6",
+		"expo": "45.0.0-beta.9",
 		"update-electron-app": "^2.0.1"
 	},
 	"devDependencies": {
