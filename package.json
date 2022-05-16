@@ -82,7 +82,7 @@
 		"@svgr/webpack": "5.5.0",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
-		"electron": "18.2.0",
+		"electron": "18.2.3",
 		"electron-builder": "^23.0.8",
 		"electron-devtools-installer": "^3.2.0",
 		"electron-webpack": "^2.8.2",
