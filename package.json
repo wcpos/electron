@@ -72,18 +72,18 @@
 	},
 	"dependencies": {
 		"@wcpos/core": "*",
-		"electron-log": "^4.4.6",
-		"expo": "45.0.0-beta.9",
+		"electron-log": "^4.4.7",
+		"expo": "45.0.4",
 		"update-electron-app": "^2.0.1"
 	},
 	"devDependencies": {
 		"@expo/electron-adapter": "0.0.55",
-		"@expo/webpack-config": "0.16.23",
+		"@expo/webpack-config": "0.16.24",
 		"@svgr/webpack": "5.5.0",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
-		"electron": "18.2.0",
-		"electron-builder": "^23.0.8",
+		"electron": "18.2.3",
+		"electron-builder": "^23.0.9",
 		"electron-devtools-installer": "^3.2.0",
 		"electron-webpack": "^2.8.2",
 		"typescript": "4.6.4",
