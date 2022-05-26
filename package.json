@@ -82,11 +82,11 @@
 		"@svgr/webpack": "5.5.0",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
-		"electron": "18.2.3",
+		"electron": "19.0.1",
 		"electron-builder": "^23.0.9",
 		"electron-devtools-installer": "^3.2.0",
 		"electron-webpack": "^2.8.2",
-		"typescript": "4.6.4",
+		"typescript": "4.7.2",
 		"url-loader": "^4.1.1",
 		"webpack": "4.46.0"
 	}
