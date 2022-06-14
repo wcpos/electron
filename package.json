@@ -79,7 +79,7 @@
 	"devDependencies": {
 		"@expo/electron-adapter": "0.0.55",
 		"@expo/webpack-config": "0.16.24",
-		"@svgr/webpack": "5.5.0",
+		"@svgr/webpack": "6.2.1",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
 		"electron": "19.0.4",
