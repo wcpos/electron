@@ -4,7 +4,7 @@
 	"description": "Electron app for WooCommerce POS",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
-	"version": "1.0.0-alpha.21",
+	"version": "1.0.0-alpha.22",
 	"scripts": {
 		"start": "expo-electron start",
 		"build": "yarn electron-webpack",
@@ -82,7 +82,7 @@
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
 		"electron": "19.0.8",
-		"electron-builder": "^23.3.1",
+		"electron-builder": "^23.3.2",
 		"electron-devtools-installer": "^3.2.0",
 		"electron-webpack": "^2.8.2",
 		"typescript": "4.7.4",
