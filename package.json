@@ -75,7 +75,7 @@
 		"electron-log": "^4.4.8",
 		"expo": "next",
 		"react": "18.2.0",
-		"react-native": "0.69.2",
+		"react-native": "0.69.3",
 		"update-electron-app": "^2.0.1"
 	},
 	"devDependencies": {
