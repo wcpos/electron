@@ -16,6 +16,7 @@ function createMainWindow() {
 			nodeIntegration: true,
 			contextIsolation: false,
 			// enableRemoteModule: true,
+			webSecurity: false, // https://github.com/electron/electron/issues/13528
 		},
 	});
 	browserWindow.maximize();
