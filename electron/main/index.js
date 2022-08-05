@@ -1,9 +1,12 @@
 import { app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import { format as formatUrl } from 'url';
+import * as Sentry from '@sentry/electron';
 import { main } from './main';
 import { isMac, isDevelopment } from './utils';
 import './dev-tools';
+
+Sentry.init({ dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733' });
 
 // global reference to mainWindow (necessary to prevent window from being garbage collected)
 let mainWindow;

@@ -71,6 +71,7 @@
 		}
 	},
 	"dependencies": {
+		"@sentry/electron": "^3.0.7",
 		"@wcpos/core": "*",
 		"electron-log": "^4.4.8",
 		"expo": "^46.0.2",
