@@ -4,7 +4,7 @@
 	"description": "Electron app for WooCommerce POS",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
-	"version": "1.0.0-alpha.26",
+	"version": "1.0.0-alpha.27",
 	"scripts": {
 		"start": "expo-electron start",
 		"build": "yarn electron-webpack",
@@ -76,7 +76,7 @@
 		"electron-log": "^4.4.8",
 		"expo": "^46.0.2",
 		"react": "18.2.0",
-		"react-native": "0.69.3",
+		"react-native": "0.69.4",
 		"update-electron-app": "^2.0.1"
 	},
 	"devDependencies": {
