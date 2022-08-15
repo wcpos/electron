@@ -84,7 +84,7 @@
 		"@expo/webpack-config": "^0.17.0",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
-		"electron": "20.0.1",
+		"electron": "20.0.2",
 		"electron-builder": "^23.3.3",
 		"electron-devtools-installer": "^3.2.0",
 		"electron-webpack": "^2.8.2",
