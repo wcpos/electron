@@ -4,32 +4,87 @@
 	"description": "Electron app for WooCommerce POS",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
+	"contributors": [
+		{
+			"name": "Electron React Boilerplate Maintainers",
+			"email": "electronreactboilerplate@gmail.com",
+			"url": "https://electron-react-boilerplate.js.org"
+		}
+	],
 	"version": "1.0.0-alpha.29",
 	"scripts": {
-		"start": "expo-electron start",
-		"build": "yarn electron-webpack",
-		"package": "yarn build && yarn electron-builder --dir -c.compression=store",
-		"package:nosign": "yarn build && yarn electron-builder --dir -c.compression=store -c.mac.identity=null"
+		"build": "concurrently \"npm run build:main\" \"npm run build:renderer\"",
+		"build:main": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.main.prod.ts",
+		"build:renderer": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.renderer.prod.ts",
+		"rebuild": "electron-rebuild --parallel --types prod,dev,optional --module-dir src",
+		"lint": "cross-env NODE_ENV=development eslint . --cache --ext .js,.jsx,.ts,.tsx",
+		"package": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish never",
+		"postinstall": "ts-node .erb/scripts/check-native-dep.js && electron-builder install-app-deps && cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.renderer.dev.dll.ts",
+		"start": "ts-node ./.erb/scripts/check-port-in-use.js && npm run start:renderer",
+		"start:main": "cross-env NODE_ENV=development electron -r ts-node/register/transpile-only ./src/main/main.ts",
+		"start:renderer": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true webpack serve --config ./.erb/configs/webpack.config.renderer.dev.ts",
+		"test": "jest",
+		"prepare": "husky install"
 	},
-	"eslintConfig": {
-		"extends": "@wcpos/eslint-config"
-	},
-	"browserslist": {
-		"production": [
-			"last 1 electron version"
+	"lint-staged": {
+		"*.{js,jsx,ts,tsx}": [
+			"cross-env NODE_ENV=development eslint --cache"
 		],
-		"development": [
-			"last 1 electron version"
+		"*.json,.{eslintrc,prettierrc}": [
+			"prettier --ignore-path .eslintignore --parser json --write"
+		],
+		"*.{css,scss}": [
+			"prettier --ignore-path .eslintignore --single-quote --write"
+		],
+		"*.{html,md,yml}": [
+			"prettier --ignore-path .eslintignore --single-quote --write"
 		]
 	},
 	"build": {
 		"appId": "com.wcpos.electron",
 		"productName": "WooCommerce POS",
+		"asar": true,
+		"asarUnpack": "**\\*.{node,dll}",
+		"files": [
+			"dist",
+			"node_modules",
+			"package.json"
+		],
+		"afterSign": ".erb/scripts/notarize.js",
 		"mac": {
+			"target": {
+				"target": "default",
+				"arch": [
+					"arm64",
+					"x64"
+				]
+			},
+			"type": "distribution",
+			"hardenedRuntime": true,
+			"entitlements": "assets/entitlements.mac.plist",
+			"entitlementsInherit": "assets/entitlements.mac.plist",
+			"gatekeeperAssess": false,
 			"icon": "./assets/square-icon.icns",
 			"category": "public.app-category.business"
 		},
+		"dmg": {
+			"contents": [
+				{
+					"x": 130,
+					"y": 220
+				},
+				{
+					"x": 410,
+					"y": 220,
+					"type": "link",
+					"path": "/Applications"
+				}
+			]
+		},
 		"win": {
+			"target": [
+				"nsis"
+			],
 			"icon": "./assets/square-icon-512x512.png"
 		},
 		"linux": {
@@ -38,58 +93,137 @@
 			],
 			"category": "Office"
 		},
-		"dmg": {
-			"icon": false
-		},
-		"nsis": {
-			"deleteAppDataOnUninstall": true
-		},
-		"extraMetadata": {
-			"main": "main.js"
-		},
-		"files": [
-			{
-				"from": "dist/main/",
-				"to": "./",
-				"filter": [
-					"**/*"
-				]
-			},
-			{
-				"from": "dist/renderer",
-				"to": "./",
-				"filter": [
-					"**/*"
-				]
-			},
-			"package.json",
-			"**/node_modules/**/*",
-			"assets"
-		],
 		"directories": {
-			"buildResources": "assets"
+			"app": "release/app",
+			"buildResources": "assets",
+			"output": "release/build"
+		},
+		"extraResources": [
+			"./assets/**"
+		],
+		"publish": {
+			"provider": "github",
+			"owner": "wcpos",
+			"repo": "electron"
 		}
 	},
-	"dependencies": {
-		"@sentry/electron": "^4.0.0",
-		"@wcpos/core": "*",
-		"electron-log": "^4.4.8",
-		"expo": "^46.0.7",
-		"react": "18.2.0",
-		"react-native": "0.69.4",
-		"update-electron-app": "^2.0.1"
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/wcpos/electron.git"
+	},
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/wcpos/electron/issues"
+	},
+	"homepage": "https://github.com/wcpos/electron#readme",
+	"jest": {
+		"testURL": "http://localhost/",
+		"testEnvironment": "jsdom",
+		"transform": {
+			"\\.(ts|tsx|js|jsx)$": "ts-jest"
+		},
+		"moduleNameMapper": {
+			"\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$": "<rootDir>/.erb/mocks/fileMock.js",
+			"\\.(css|less|sass|scss)$": "identity-obj-proxy"
+		},
+		"moduleFileExtensions": [
+			"js",
+			"jsx",
+			"ts",
+			"tsx",
+			"json"
+		],
+		"moduleDirectories": [
+			"node_modules",
+			"release/app/node_modules"
+		],
+		"testPathIgnorePatterns": [
+			"release/app/dist"
+		],
+		"setupFiles": [
+			"./.erb/scripts/check-build-exists.ts"
+		]
+	},
+	"installConfig": {
+		"hoistingLimits": "dependencies"
 	},
 	"devDependencies": {
-		"@expo/electron-adapter": "0.0.55",
-		"@expo/webpack-config": "^0.17.2",
+		"@babel/core": "^7.18.10",
+		"@pmmmwh/react-refresh-webpack-plugin": "0.5.7",
+		"@teamsupercell/typings-for-css-modules-loader": "^2.5.1",
+		"@testing-library/jest-dom": "^5.16.5",
+		"@testing-library/react": "^13.3.0",
+		"@types/jest": "^28.1.7",
+		"@types/node": "18.7.6",
+		"@types/react": "^18.0.17",
+		"@types/react-dom": "^18.0.6",
+		"@types/react-test-renderer": "^18.0.0",
+		"@types/sqlite3": "^3.1.8",
+		"@types/terser-webpack-plugin": "^5.2.0",
+		"@types/webpack-env": "^1.18.0",
+		"@typescript-eslint/eslint-plugin": "^5.33.1",
 		"@wcpos/babel-preset-expo": "*",
 		"@wcpos/eslint-config": "*",
-		"electron": "20.0.2",
-		"electron-builder": "^23.4.0",
+		"@wcpos/tsconfig": "*",
+		"babel-loader": "^8.2.5",
+		"babel-preset-expo": "9.2.0",
+		"browserslist-config-erb": "^0.0.3",
+		"chalk": "^4.1.2",
+		"concurrently": "^7.3.0",
+		"core-js": "^3.24.1",
+		"cross-env": "^7.0.3",
+		"css-loader": "^6.7.1",
+		"css-minimizer-webpack-plugin": "^4.0.0",
+		"detect-port": "^1.3.0",
+		"electron": "^20.0.3",
+		"electron-builder": "^23.3.3",
 		"electron-devtools-installer": "^3.2.0",
-		"electron-webpack": "^2.8.2",
+		"electron-notarize": "^1.2.1",
+		"electron-rebuild": "^3.2.9",
+		"file-loader": "^6.2.0",
+		"html-webpack-plugin": "^5.5.0",
+		"husky": "^8.0.1",
+		"identity-obj-proxy": "^3.0.0",
+		"jest": "^28.1.3",
+		"lint-staged": "^13.0.3",
+		"mini-css-extract-plugin": "^2.6.1",
+		"prettier": "^2.7.1",
+		"process": "^0.11.10",
+		"react-refresh": "^0.14.0",
+		"react-refresh-typescript": "^2.0.7",
+		"react-test-renderer": "^18.2.0",
+		"rimraf": "^3.0.2",
+		"sass": "^1.54.4",
+		"sass-loader": "^13.0.2",
+		"style-loader": "^3.3.1",
+		"terser-webpack-plugin": "^5.3.5",
+		"ts-jest": "^28.0.8",
+		"ts-loader": "^9.3.1",
+		"ts-node": "^10.9.1",
 		"typescript": "^4.7.4",
 		"url-loader": "^4.1.1",
-		"webpack": "4.46.0"
+		"webpack": "^5.74.0",
+		"webpack-bundle-analyzer": "^4.5.0",
+		"webpack-cli": "^4.10.0",
+		"webpack-dev-server": "^4.10.0",
+		"webpack-merge": "^5.8.0"
+	},
+	"dependencies": {
+		"@wcpos/core": "*",
+		"electron-debug": "^3.2.0",
+		"electron-log": "^4.4.8",
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0",
+		"react-native-reanimated": "~2.9.1",
+		"react-native-web": "~0.18.7",
+		"update-electron-app": "^2.0.1"
+	},
+	"devEngines": {
+		"node": ">=14.x",
+		"npm": ">=7.x"
+	},
+	"browserslist": [],
+	"eslintConfig": {
+		"extends": "@wcpos/eslint-config"
 	}
 }
