@@ -80,10 +80,10 @@ contextBridge.exposeInMainWorld('sqlite', {
 	open: (name) => {
 		return ipcRenderer.invoke('sqlite', { type: 'open', name });
 	},
-	all: (sql) => {
-		return ipcRenderer.invoke('sqlite', { type: 'all', sql });
+	all: (name, sql) => {
+		return ipcRenderer.invoke('sqlite', { type: 'all', name, sql });
 	},
-	run: (sql) => {
-		return ipcRenderer.invoke('sqlite', { type: 'run', sql });
+	run: (name, sql) => {
+		return ipcRenderer.invoke('sqlite', { type: 'run', name, sql });
 	},
 });

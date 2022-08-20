@@ -4,20 +4,7 @@ import path from 'path';
 
 const sqlite3 = sqlite.verbose();
 
-/**
- *
- */
-const db = new sqlite3.Database(
-	':memory:',
-	// sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE,
-	(err) => {
-		if (err) {
-			console.log('Could not connect to database', err);
-		} else {
-			console.log('Connected to database!');
-		}
-	}
-);
+const registry = new Map();
 
 /**
  * The app.getPath() method is only available once the app is 'ready'.
@@ -27,16 +14,16 @@ const db = new sqlite3.Database(
  * https://github.com/electron/electron/blob/main/docs/api/app.md#appgetpathname
  */
 const openDatabase = (name: string) => {
-	// const dbPath =
-	// 	process.env.NODE_ENV === 'development'
-	// 		? `${name}.sqlite3`
-	// 		: path.resolve(app.getPath('appData'), `${name}.sqlite3`);
+	const dbPath =
+		process.env.NODE_ENV === 'development'
+			? `${name}.sqlite3`
+			: path.resolve(app.getPath('appData'), `${name}.sqlite3`);
 
 	/**
 	 *
 	 */
 	const db = new sqlite3.Database(
-		':memory:',
+		dbPath,
 		// sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE,
 		(err) => {
 			if (err) {
@@ -47,18 +34,9 @@ const openDatabase = (name: string) => {
 		}
 	);
 
-	test = db;
-
 	console.log(db);
-	return db;
+	return registry.set(name, db);
 };
-
-// const Hello = {
-// 	db: null,
-// 	openDatabase: (name: string) => {
-// 		return name;
-// 	},
-// };
 
 /**
  *
@@ -66,9 +44,11 @@ const openDatabase = (name: string) => {
 ipcMain.handle('sqlite', (event, obj) => {
 	switch (obj.type) {
 		case 'open':
-			return 'hi';
+			openDatabase(obj.name);
+			return { name: obj.name };
 		case 'all':
 			return new Promise((resolve, reject) => {
+				const db = registry.get(obj.name);
 				db.all(obj.sql.query, obj.sql.params, (err, res) => {
 					console.log('sql response: ', res);
 
@@ -91,6 +71,7 @@ ipcMain.handle('sqlite', (event, obj) => {
 
 		case 'run':
 			return new Promise((resolve, reject) => {
+				const db = registry.get(obj.name);
 				db.run(obj.sql.query, obj.sql.params, (err) => {
 					if (err) {
 						reject(err);
