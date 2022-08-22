@@ -1,4 +1,5 @@
 # Yarn
+yarn.lock
 .pnp.*
 .yarn/*
 !.yarn/patches
