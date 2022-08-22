@@ -15,17 +15,13 @@ const configuration: webpack.Configuration = {
     rules: [
       {
         test: /\.[jt]sx?$/,
-        exclude: /node_modules\/(?!(@wcpos|react-native|@react-native(-community)?|react-native-reanimated)\/).*/,
+        exclude: /node_modules/,
         use: {
-          loader: 'babel-loader',
+          loader: 'ts-loader',
           options: {
-            presets: ['@wcpos/babel-preset-expo'],
+            // Remove this line to enable type checking in webpack builds
+            transpileOnly: true,
           },
-          // loader: 'ts-loader',
-          // options: {
-          //   // Remove this line to enable type checking in webpack builds
-          //   transpileOnly: true,
-          // },
         },
       },
     ],
@@ -43,41 +39,14 @@ const configuration: webpack.Configuration = {
    * Determine the array of extensions that should be used to resolve modules.
    */
   resolve: {
-    extensions: [
-      '.electron.js',
-      '.electron.ts',
-      '.electron.tsx',
-      '.web.mjs',
-      '.mjs',
-      '.web.js',
-      '.js',
-      '.web.ts',
-      '.ts',
-      '.web.tsx',
-      '.tsx',
-      '.json',
-      '.web.jsx',
-      '.jsx',
-    ],
+    extensions: ['.js', '.jsx', '.json', '.ts', '.tsx'],
     modules: [webpackPaths.srcPath, 'node_modules'],
-    alias: {
-      'react-native': 'react-native-web'
-    }
   },
 
   plugins: [
     new webpack.EnvironmentPlugin({
       NODE_ENV: 'production',
     }),
-    new webpack.DefinePlugin({
-      // fix __DEV__ not defined error for react-native-gesture-handler
-      __DEV__: process.env.NODE_ENV !== 'production' || true,
-    }),
-    new webpack.ProvidePlugin({
-      // fix "process is not defined" error for react-native-reanimated
-      // (do "npm install process" before running the build)
-      process: 'process/browser',
-    })
   ],
 };
 

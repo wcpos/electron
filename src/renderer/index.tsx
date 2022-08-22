@@ -1,22 +1,13 @@
-import * as React from 'react';
 import { createRoot } from 'react-dom/client';
-// import { render } from 'react-dom';
-import './app.global.css';
-import App from '@wcpos/core';
+import App from './App';
 
-/**
- * Hack to fix https://github.com/software-mansion/react-native-reanimated/issues/3355
- * REMOVE!!
- */
-window._frameTimestamp = null;
-
-const container = document.getElementById('root');
-const root = createRoot(container!); // createRoot(container!) if you use TypeScript
+const container = document.getElementById('root')!;
+const root = createRoot(container);
 root.render(<App />);
 
-// render(
-// 	<React.StrictMode>
-// 		<App />
-// 	</React.StrictMode>,
-// 	document.getElementById('root')
-// );
+// calling IPC exposed from preload script
+window.electron.ipcRenderer.once('ipc-example', (arg) => {
+  // eslint-disable-next-line no-console
+  console.log(arg);
+});
+window.electron.ipcRenderer.sendMessage('ipc-example', ['ping']);
