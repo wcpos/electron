@@ -8,15 +8,16 @@
  * When running `npm run build` or `npm run build:main`, this file is compiled to
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
-import 'core-js/stable';
-import 'regenerator-runtime/runtime';
 import path from 'path';
 import { app, BrowserWindow, shell, ipcMain } from 'electron';
+// import * as Sentry from '@sentry/electron';
 import { registerMenu } from './menu';
 import { initProtocolHandling } from './protocol';
 import { checkForUpdates } from './update';
 import { resolveHtmlPath } from './util';
 import './database';
+
+// Sentry.init({ dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733' });
 
 let mainWindow: BrowserWindow | null = null;
 
