@@ -15,11 +15,14 @@ const configuration: webpack.Configuration = {
     rules: [
       {
         test: /\.[jt]sx?$/,
-        exclude: /node_modules\/(?!(@wcpos|react-native|@react-native(-community)?|react-native-reanimated)\/).*/,
+        exclude: /node_modules\/(?!(@wcpos|react-native|@react-native(-community)?|react-native-reanimated|react-native-gesture-handler)\/).*/,
         use: {
           loader: 'babel-loader',
           options: {
             presets: ['@wcpos/babel-preset-expo'],
+            plugins: [
+              'react-native-reanimated/plugin',
+            ]
           },
           // loader: 'ts-loader',
           // options: {

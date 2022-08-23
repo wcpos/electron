@@ -31,9 +31,9 @@ if (process.env.NODE_ENV === 'production') {
 	sourceMapSupport.install();
 }
 
-const isDevelopment = process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true';
+const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true';
 
-if (isDevelopment) {
+if (isDebug) {
 	require('electron-debug')();
 }
 
@@ -51,7 +51,7 @@ const installExtensions = async () => {
 };
 
 const createWindow = async () => {
-	if (isDevelopment) {
+	if (isDebug) {
 		await installExtensions();
 	}
 
@@ -70,7 +70,9 @@ const createWindow = async () => {
 		icon: getAssetPath('icon.png'),
 		webPreferences: {
 			sandbox: false, // required for preload script to work
-			preload: path.join(__dirname, 'preload.js'),
+			preload: app.isPackaged
+				? path.join(__dirname, 'preload.js')
+				: path.join(__dirname, '../../.erb/dll/preload.js'),
 			nodeIntegration: false, // prevent node integration for security reasons
 			contextIsolation: true, // protect against prototype pollution
 		},
