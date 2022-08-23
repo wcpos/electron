@@ -8,6 +8,9 @@
     <a href="https://github.com/wcpos/electron/actions/workflows/test.yml">
       <img src="https://github.com/wcpos/electron/actions/workflows/test.yml/badge.svg" alt="Test" />
     </a>
+    <a href="https://github.com/wcpos/electron/actions/workflows/codeql-analysis.yml">
+      <img src="https://github.com/wcpos/electron/actions/workflows/codeql-analysis.yml/badge.svg" alt="CodeQL" />
+    </a>
   </p>
   <p>
     <a href="https://github.com/wcpos/electron#-structure"><b>About</b></a>
