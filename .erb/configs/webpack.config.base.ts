@@ -75,7 +75,6 @@ const configuration: webpack.Configuration = {
     new webpack.DefinePlugin({
       // fix __DEV__ not defined error for react-native-gesture-handler
       __DEV__: process.env.NODE_ENV !== 'production' || true,
-      // 'process.env': JSON.stringify(process.env)
     }),
     // new webpack.ProvidePlugin({
     //   // fix "process is not defined" error for react-native-reanimated
