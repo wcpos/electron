@@ -1,7 +1,8 @@
 {
 	"name": "electron-react-boilerplate",
-	"version": "1.0.0-alpha.39",
-	"description": "A foundation for scalable desktop apps",
+	"productName": "WooCommerce POS",
+	"version": "1.0.0-alpha.40",
+	"description": "A simple front-end for taking WooCommerce orders at the Point of Sale.",
 	"license": "MIT",
 	"author": {
 		"name": "WooCommerce POS",
