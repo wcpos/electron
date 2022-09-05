@@ -16,6 +16,7 @@ import { initProtocolHandling } from './protocol';
 import { checkForUpdates } from './update';
 import { resolveHtmlPath } from './util';
 import './database';
+import './axios';
 
 Sentry.init({ dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733' });
 

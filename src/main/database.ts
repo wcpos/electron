@@ -14,10 +14,20 @@ const registry = new Map();
  * https://github.com/electron/electron/blob/main/docs/api/app.md#appgetpathname
  */
 const openDatabase = (name: string) => {
+	/**
+	 * Check registry
+	 */
+	if (registry.has(name)) {
+		return registry.get(name);
+	}
+
+	/**
+	 *
+	 */
 	const dbPath =
 		process.env.NODE_ENV === 'development'
 			? `${name}.sqlite3`
-			: path.resolve(app.getPath('appData'), `${name}.sqlite3`);
+			: path.resolve(app.getPath('userData'), 'databases', `${name}.sqlite3`);
 
 	/**
 	 *
@@ -34,7 +44,7 @@ const openDatabase = (name: string) => {
 		}
 	);
 
-	console.log(db);
+	console.log('Opening SQLite database', db);
 	return registry.set(name, db);
 };
 
@@ -42,6 +52,7 @@ const openDatabase = (name: string) => {
  *
  */
 ipcMain.handle('sqlite', (event, obj) => {
+	console.log(obj);
 	switch (obj.type) {
 		case 'open':
 			openDatabase(obj.name);
@@ -68,11 +79,21 @@ ipcMain.handle('sqlite', (event, obj) => {
 					return reject(new Error(`Unexpected response from SQLite: ${res}`));
 				});
 			});
-
 		case 'run':
 			return new Promise((resolve, reject) => {
 				const db = registry.get(obj.name);
 				db.run(obj.sql.query, obj.sql.params, (err) => {
+					if (err) {
+						reject(err);
+					} else {
+						resolve();
+					}
+				});
+			});
+		case 'close':
+			return new Promise((resolve, reject) => {
+				const db = registry.get(obj.name);
+				db.close((err) => {
 					if (err) {
 						reject(err);
 					} else {

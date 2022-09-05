@@ -47,24 +47,28 @@ const configuration: webpack.Configuration = {
    */
   resolve: {
     extensions: [
+      '.electron.mjs',
       '.electron.js',
       '.electron.ts',
       '.electron.tsx',
+      '.electron.jsx',
+      '.electron.json',
       '.web.mjs',
-      '.mjs',
       '.web.js',
-      '.js',
       '.web.ts',
-      '.ts',
       '.web.tsx',
-      '.tsx',
-      '.json',
       '.web.jsx',
+      '.web.json',
+      '.mjs',
+      '.js',
+      '.ts',
+      '.tsx',
       '.jsx',
+      '.json',
     ],
     modules: [webpackPaths.srcPath, 'node_modules'],
     alias: {
-      'react-native': 'react-native-web'
+      'react-native$': 'react-native-web'
     }
   },
 

@@ -13,11 +13,10 @@
     <div id="root"></div>
   </body>
   <script>
-    window.electron.ipcRenderer.once('ipc-example', (arg) => {
-      // eslint-disable-next-line no-console
+    window.ipcRenderer.once('ipc-example', (arg) => {
       console.log(arg);
     });
 
-    window.electron.ipcRenderer.myPing();
+    window.ipcRenderer.send('ipc-example', 'ping');
   </script>
 </html>
