@@ -22,16 +22,24 @@ ipcMain.handle('axios', (event, obj) => {
 	console.log(obj);
 	switch (obj.type) {
 		case 'request':
-			return axios.request(obj.config).then((res) => {
-				/**
-				 * config and request contain objects that can't be structuredCloned
-				 * @TODO - do I need anything from config or request?
-				 */
-				// const cloned = structuredClone({ ...res, config: null, request: null });
-				const cloned = { ...res, config: null, request: null };
-				console.log(cloned);
-				return cloned;
-			});
+			return axios
+				.request(obj.config)
+				.then((res) => {
+					/**
+					 * config and request contain objects that can't be structuredCloned
+					 * @TODO - do I need anything from config or request?
+					 */
+					// const cloned = structuredClone({ ...res, config: null, request: null });
+					const cloned = { ...res, config: null, request: null };
+					console.log(cloned);
+					return cloned;
+				})
+				.catch((error) => {
+					const cloned = { ...error, config: null, request: null };
+					console.log(cloned);
+					return cloned;
+				});
+
 		default:
 			return new Error('Unknown type');
 	}
