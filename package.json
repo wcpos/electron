@@ -117,7 +117,7 @@
 		"babel-loader": "^8.2.5",
 		"babel-preset-expo": "9.2.0",
 		"browserslist-config-erb": "^0.0.3",
-		"chalk": "^4.1.2",
+		"chalk": "^5.0.1",
 		"concurrently": "^7.4.0",
 		"cross-env": "^7.0.3",
 		"css-loader": "^6.7.1",
