@@ -30,18 +30,18 @@ ipcMain.handle('axios', (event, obj) => {
 					 * @TODO - do I need anything from config or request?
 					 */
 					// const cloned = structuredClone({ ...res, config: null, request: null });
-					const cloned = { ...res, config: null, request: null };
+					const cloned = { ...res, config: obj.config, request: null };
 					console.log('success', cloned);
 					resolve(cloned);
 				})
 				.catch((error) => {
 					const cloned = {
 						...error,
-						config: null,
+						config: obj.config,
 						request: null,
 						response: {
 							...error.response,
-							config: null,
+							config: obj.config,
 							request: null,
 						},
 					};
