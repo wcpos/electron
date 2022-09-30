@@ -2,6 +2,7 @@
 // import { showLogs } from '../logging/window'
 import { MenuItemConstructorOptions } from 'electron';
 import { isMac } from '../util';
+import { clearAppDataDialog } from '../clear-data';
 
 export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 	{ role: 'minimize' },
@@ -31,6 +32,7 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 			{ role: 'reload' },
 			{ role: 'forceReload' },
 			{ role: 'toggleDevTools' },
+			{ label: 'Clear App Data', click: clearAppDataDialog },
 		],
 	},
 ];
