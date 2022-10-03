@@ -2,7 +2,7 @@
 	"name": "@wcpos/app-electron",
 	"productName": "WooCommerce POS",
 	"description": "Electron app for WooCommerce POS",
-	"version": "1.0.0-alpha.51",
+	"version": "1.0.0-alpha.52",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
 	"contributors": [
@@ -93,7 +93,7 @@
 		"fs-extra": "^10.1.0",
 		"react": "^18.2.0",
 		"react-dom": "^18.2.0",
-		"react-native-reanimated": "~2.9.1",
+		"react-native-reanimated": "2.6.0",
 		"react-native-web": "~0.18.9",
 		"update-electron-app": "^2.0.1"
 	},
@@ -104,8 +104,8 @@
 		"@testing-library/jest-dom": "^5.16.5",
 		"@testing-library/react": "^13.4.0",
 		"@types/fs-extra": "^9.0.13",
-		"@types/jest": "^29.1.0",
-		"@types/node": "18.7.23",
+		"@types/jest": "^29.1.1",
+		"@types/node": "18.8.0",
 		"@types/react": "^18.0.21",
 		"@types/react-dom": "^18.0.6",
 		"@types/react-test-renderer": "^18.0.0",
