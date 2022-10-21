@@ -10,15 +10,13 @@
  */
 import path from 'path';
 import { app, BrowserWindow, shell, ipcMain } from 'electron';
-import * as Sentry from '@sentry/electron';
+import logger from './log';
 import { registerMenu } from './menu';
 import { initProtocolHandling } from './protocol';
 import { checkForUpdates } from './update';
 import { resolveHtmlPath } from './util';
 import './database';
 import './axios';
-
-Sentry.init({ dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733' });
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -139,4 +137,4 @@ app
 			if (mainWindow === null) createWindow();
 		});
 	})
-	.catch(console.log);
+	.catch(logger.error);

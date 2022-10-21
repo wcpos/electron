@@ -1,6 +1,7 @@
 import { app, ipcMain } from 'electron';
 import sqlite from 'sqlite3';
 import path from 'path';
+import logger from './log';
 
 const sqlite3 = sqlite.verbose();
 
@@ -37,9 +38,9 @@ const openDatabase = (name: string) => {
 		// sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE,
 		(err) => {
 			if (err) {
-				console.log('Could not connect to database', err);
+				logger.error('Could not connect to database', err);
 			} else {
-				console.log('Connected to database!');
+				logger.info('Connected to database!');
 			}
 		}
 	);
