@@ -13,8 +13,8 @@ import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import logger from './log';
 import { registerMenu } from './menu';
 import { initProtocolHandling } from './protocol';
-import { checkForUpdates } from './update';
 import { resolveHtmlPath } from './util';
+import './update';
 import './database';
 import './axios';
 
@@ -109,7 +109,6 @@ const createWindow = async () => {
 	});
 
 	// remaining setup
-	checkForUpdates();
 	initProtocolHandling();
 	registerMenu();
 };
