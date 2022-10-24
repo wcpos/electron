@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { app, ipcMain } from 'electron';
 import sqlite from 'sqlite3';
 import path from 'path';
@@ -19,7 +20,7 @@ const openDatabase = (name: string) => {
 	 * Check registry
 	 */
 	if (registry.has(name)) {
-		return registry.get(name);
+		return { name };
 	}
 
 	/**
@@ -29,6 +30,15 @@ const openDatabase = (name: string) => {
 		process.env.NODE_ENV === 'development'
 			? `${name}.sqlite3`
 			: path.resolve(app.getPath('userData'), 'databases', `${name}.sqlite3`);
+
+	/**
+	 *
+	 */
+	const dbFolder = path.resolve(app.getPath('userData'), 'databases');
+	if (process.env.NODE_ENV !== 'development' && !fs.existsSync(dbFolder)) {
+		fs.mkdirSync(dbFolder);
+		logger.info(`Folder '${dbFolder}' created`);
+	}
 
 	/**
 	 *
@@ -46,7 +56,8 @@ const openDatabase = (name: string) => {
 	);
 
 	console.log('Opening SQLite database', db);
-	return registry.set(name, db);
+	registry.set(name, db);
+	return { name };
 };
 
 /**
@@ -56,8 +67,7 @@ ipcMain.handle('sqlite', (event, obj) => {
 	console.log(obj);
 	switch (obj.type) {
 		case 'open':
-			openDatabase(obj.name);
-			return { name: obj.name };
+			return openDatabase(obj.name);
 		case 'all':
 			return new Promise((resolve, reject) => {
 				const db = registry.get(obj.name);

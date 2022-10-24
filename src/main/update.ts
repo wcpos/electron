@@ -1,53 +1,10 @@
-import { dialog, app } from 'electron';
+import fs from 'fs';
+import { dialog, MenuItem } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from './log';
 
-autoUpdater.logger = log;
-autoUpdater.logger.transports.file.level = 'info';
-
-// -------------------------------------------------------------------
-// Auto updates - Option 1 - Simplest version
-//
-// This will immediately download an update, then install when the
-// app quits.
-// -------------------------------------------------------------------
-app.on('ready', function () {
-	autoUpdater.checkForUpdatesAndNotify();
-});
-
-// -------------------------------------------------------------------
-// Auto updates - Option 2 - More control
-//
-// For details about these events, see the Wiki:
-// https://github.com/electron-userland/electron-builder/wiki/Auto-Update#events
-//
-// The app doesn't need to listen to any events except `update-downloaded`
-//
-// Uncomment any of the below events to listen for them.  Also,
-// look in the previous section to see them being used.
-// -------------------------------------------------------------------
-// app.on('ready', function()  {
-//   autoUpdater.checkForUpdates();
-// });
-// autoUpdater.on('checking-for-update', () => {
-// })
-// autoUpdater.on('update-available', (info) => {
-// })
-// autoUpdater.on('update-not-available', (info) => {
-// })
-// autoUpdater.on('error', (err) => {
-// })
-// autoUpdater.on('download-progress', (progressObj) => {
-// })
-// autoUpdater.on('update-downloaded', (info) => {
-//   autoUpdater.quitAndInstall();
-// })
-
-// -------------------------------------------------------------------
-// Manual updates
-//
-// -------------------------------------------------------------------
-let updater;
+let updater: MenuItem | undefined;
+let isSilentCheck = true;
 autoUpdater.autoDownload = false;
 
 autoUpdater.on('error', (error) => {
@@ -67,18 +24,20 @@ autoUpdater.on('update-available', () => {
 				autoUpdater.downloadUpdate();
 			} else {
 				updater.enabled = true;
-				updater = null;
+				updater = undefined;
 			}
 		});
 });
 
 autoUpdater.on('update-not-available', () => {
-	dialog.showMessageBox({
-		title: 'No Updates',
-		message: 'Current version is up-to-date.',
-	});
-	updater.enabled = true;
-	updater = null;
+	if (!isSilentCheck) {
+		dialog.showMessageBox({
+			title: 'No Updates',
+			message: 'Current version is up-to-date.',
+		});
+		updater.enabled = true;
+		updater = undefined;
+	}
 });
 
 autoUpdater.on('update-downloaded', () => {
@@ -92,12 +51,36 @@ autoUpdater.on('update-downloaded', () => {
 		});
 });
 
+const canUpdate = () => {
+	// TODO: Figure out how to resolve the protected app access error
+	const _au: any = autoUpdater;
+	// Don't check for updates if update config is not found (auto-update via electron is not supported)
+	return _au.app && _au.app.appUpdateConfigPath && fs.existsSync(_au.app.appUpdateConfigPath);
+};
+
+export const setupAutoUpdates = () => {
+	if (!canUpdate()) {
+		return;
+	}
+
+	log.transports.file.level = 'info';
+	autoUpdater.logger = log;
+	// autoUpdater.checkForUpdatesAndNotify();
+	autoUpdater.checkForUpdates();
+};
+
 // export this to MenuItem click callback
-function checkForUpdates(menuItem, focusedWindow, event) {
-	updater = menuItem;
-	updater.enabled = false;
+export function checkForUpdates(menuItem, focusedWindow, event) {
+	if (!canUpdate()) {
+		return;
+	}
+
+	if (menuItem) {
+		updater = menuItem;
+		updater.enabled = false;
+	}
+	isSilentCheck = false;
 	autoUpdater.checkForUpdates();
 }
 
-export { checkForUpdates };
 export default autoUpdater;
