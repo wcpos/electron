@@ -2,7 +2,7 @@
 	"name": "@wcpos/app-electron",
 	"productName": "WooCommerce POS",
 	"description": "Electron app for WooCommerce POS",
-	"version": "1.0.0-alpha.56",
+	"version": "1.0.0-alpha.57",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
 	"contributors": [

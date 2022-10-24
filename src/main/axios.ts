@@ -1,6 +1,8 @@
 import { ipcMain } from 'electron';
 import axios from 'axios';
 import https from 'https';
+import logger from './log';
+
 // import structuredClone from 'core-js-pure/stable/structured-clone';
 
 /**
@@ -31,7 +33,7 @@ ipcMain.handle('axios', (event, obj) => {
 					 */
 					// const cloned = structuredClone({ ...res, config: null, request: null });
 					const cloned = { ...res, config: obj.config, request: null };
-					console.log('success', cloned);
+					logger.info('success', cloned);
 					resolve(cloned);
 				})
 				.catch((error) => {
@@ -45,7 +47,7 @@ ipcMain.handle('axios', (event, obj) => {
 							request: null,
 						},
 					};
-					console.log('failed', cloned);
+					logger.error('request failed', cloned);
 					resolve(cloned);
 				});
 		});
