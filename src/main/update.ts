@@ -22,7 +22,7 @@ autoUpdater.on('update-available', () => {
 		.then((buttonIndex) => {
 			if (buttonIndex === 0) {
 				autoUpdater.downloadUpdate();
-			} else {
+			} else if (updater) {
 				updater.enabled = true;
 				updater = undefined;
 			}
@@ -35,8 +35,10 @@ autoUpdater.on('update-not-available', () => {
 			title: 'No Updates',
 			message: 'Current version is up-to-date.',
 		});
-		updater.enabled = true;
-		updater = undefined;
+		if (updater) {
+			updater.enabled = true;
+			updater = undefined;
+		}
 	}
 });
 
