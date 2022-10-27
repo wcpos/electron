@@ -33,7 +33,7 @@ ipcMain.handle('axios', (event, obj) => {
 					 */
 					// const cloned = structuredClone({ ...res, config: null, request: null });
 					const cloned = { ...res, config: obj.config, request: null };
-					logger.info('success', cloned);
+					logger.silly('success', cloned);
 					resolve(cloned);
 				})
 				.catch((error) => {

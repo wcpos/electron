@@ -26,16 +26,12 @@ const openDatabase = (name: string) => {
 	/**
 	 *
 	 */
-	const dbPath =
+	const dbFolder =
 		process.env.NODE_ENV === 'development'
-			? `${name}.sqlite3`
-			: path.resolve(app.getPath('userData'), 'databases', `${name}.sqlite3`);
+			? path.resolve('databases')
+			: path.resolve(app.getPath('userData'), 'databases');
 
-	/**
-	 *
-	 */
-	const dbFolder = path.resolve(app.getPath('userData'), 'databases');
-	if (process.env.NODE_ENV !== 'development' && !fs.existsSync(dbFolder)) {
+	if (!fs.existsSync(dbFolder)) {
 		fs.mkdirSync(dbFolder);
 		logger.info(`Folder '${dbFolder}' created`);
 	}
@@ -44,7 +40,7 @@ const openDatabase = (name: string) => {
 	 *
 	 */
 	const db = new sqlite3.Database(
-		dbPath,
+		path.resolve(dbFolder, `${name}.sqlite3`),
 		// sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE,
 		(err) => {
 			if (err) {

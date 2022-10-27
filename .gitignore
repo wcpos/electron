@@ -38,4 +38,4 @@ npm-debug.log.*
 !.yarn/versions
 
 # Dev DBs
-*.sqlite3
+databases

@@ -17,10 +17,19 @@ autoUpdater.on('update-available', () => {
 			type: 'info',
 			title: 'Found Updates',
 			message: 'Found updates, do you want update now?',
-			buttons: ['Sure', 'No'],
+			buttons: ['Yes', 'No'],
 		})
-		.then((buttonIndex) => {
-			if (buttonIndex === 0) {
+		.then(({ response }) => {
+			if (response === 0) {
+				autoUpdater.downloadUpdate().catch((err) => {
+					log.error('Error downloading update', err);
+					if (err.message && err.message.includes('file already exists') && err.path) {
+						// If the file already exists, then it's probably a partial download
+						// so we'll just delete it and try again
+						// fs.unlinkSync(err.path);
+						// autoUpdater.downloadUpdate();
+					}
+				});
 				autoUpdater.downloadUpdate();
 			} else if (updater) {
 				updater.enabled = true;
