@@ -3,9 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1.00001, viewport-fit=cover">
+    <!-- 
+      Note: unsafe-eval is required for AJV compile 
+      See: https://github.com/ajv-validator/ajv/issues/406
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="script-src 'self' 'unsafe-inline'"
+      content="script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     />
     <title>WooCommerce POS</title>
   </head>
