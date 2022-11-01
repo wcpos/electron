@@ -1,6 +1,8 @@
 import path from 'path';
 import { app, ipcRenderer, dialog } from 'electron';
 import fs from 'fs-extra';
+import logger from './log';
+import { closeAll } from './database';
 
 export const clearAppDataDialog = () => {
 	const clearAppDataMessage =
@@ -21,14 +23,17 @@ export const clearAppDataDialog = () => {
 		})
 		.then(({ response }) => {
 			if (response === 0) {
-				fs.remove(dbFolder)
+				// Close the db connection, delete the db file, and restart the app
+				closeAll()
 					.then(() => {
-						// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
-						app.relaunch();
-						app.quit();
+						return fs.remove(dbFolder).then(() => {
+							// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
+							app.relaunch();
+							app.quit();
+						});
 					})
 					.catch((err) => {
-						console.log(err);
+						logger.error('Could not clear app data', err);
 					});
 			}
 		});

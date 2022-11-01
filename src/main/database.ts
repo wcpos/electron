@@ -59,6 +59,23 @@ const openDatabase = (name: string) => {
 /**
  *
  */
+export const closeAll = () => {
+	return new Promise((resolve, reject) => {
+		registry.forEach((db) => {
+			db.close((err) => {
+				if (err) {
+					reject(err);
+				} else {
+					resolve();
+				}
+			});
+		});
+	});
+};
+
+/**
+ *
+ */
 ipcMain.handle('sqlite', (event, obj) => {
 	console.log(obj);
 	switch (obj.type) {
@@ -108,6 +125,8 @@ ipcMain.handle('sqlite', (event, obj) => {
 					}
 				});
 			});
+		case 'quit':
+			return closeAll();
 		default:
 			return new Error('Unknown type');
 	}
