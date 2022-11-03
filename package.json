@@ -2,7 +2,7 @@
 	"name": "@wcpos/app-electron",
 	"productName": "WooCommerce POS",
 	"description": "Electron app for WooCommerce POS",
-	"version": "1.0.0-alpha.63",
+	"version": "1.0.0-alpha.64",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
 	"contributors": [
@@ -93,12 +93,12 @@
 		"electron-updater": "^5.3.0",
 		"fs-extra": "^10.1.0",
 		"react": "18.1.0",
-		"react-dom": "18.1.0",
+		"react-dom": "18.0.0",
 		"react-native-reanimated": "2.12.0",
-		"react-native-web": "~0.18.7"
+		"react-native-web": "~0.18.10"
 	},
 	"devDependencies": {
-		"@babel/core": "^7.19.3",
+		"@babel/core": "^7.19.6",
 		"@pmmmwh/react-refresh-webpack-plugin": "0.5.8",
 		"@teamsupercell/typings-for-css-modules-loader": "^2.5.1",
 		"@testing-library/jest-dom": "^5.16.5",
@@ -125,7 +125,7 @@
 		"css-loader": "^6.7.1",
 		"css-minimizer-webpack-plugin": "^4.2.2",
 		"detect-port": "^1.5.1",
-		"electron": "^21.2.1",
+		"electron": "^21.2.2",
 		"electron-builder": "23.6.0",
 		"electron-devtools-installer": "^3.2.0",
 		"electron-notarize": "^1.2.2",
