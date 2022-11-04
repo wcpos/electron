@@ -30,7 +30,6 @@ autoUpdater.on('update-available', () => {
 						// autoUpdater.downloadUpdate();
 					}
 				});
-				autoUpdater.downloadUpdate();
 			} else if (updater) {
 				updater.enabled = true;
 				updater = undefined;
