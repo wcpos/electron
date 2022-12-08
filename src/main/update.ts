@@ -1,7 +1,10 @@
 import fs from 'fs';
+
 import { dialog, MenuItem } from 'electron';
 import { autoUpdater } from 'electron-updater';
+
 import log from './log';
+import { t } from './translations';
 
 let updater: MenuItem | undefined;
 let isSilentCheck = true;
@@ -15,9 +18,9 @@ autoUpdater.on('update-available', () => {
 	dialog
 		.showMessageBox({
 			type: 'info',
-			title: 'Found Updates',
-			message: 'Found updates, do you want update now?',
-			buttons: ['Yes', 'No'],
+			title: t('Found Updates', { _tags: 'electron' }),
+			message: t('Found updates, do you want update now?', { _tags: 'electron' }),
+			buttons: [t('Yes'), t('No')],
 		})
 		.then(({ response }) => {
 			if (response === 0) {
@@ -40,8 +43,8 @@ autoUpdater.on('update-available', () => {
 autoUpdater.on('update-not-available', () => {
 	if (!isSilentCheck) {
 		dialog.showMessageBox({
-			title: 'No Updates',
-			message: 'Current version is up-to-date.',
+			title: t('No Updates', { _tags: 'electron' }),
+			message: t('Current version is up-to-date.', { _tags: 'electron' }),
 		});
 		if (updater) {
 			updater.enabled = true;
@@ -53,8 +56,10 @@ autoUpdater.on('update-not-available', () => {
 autoUpdater.on('update-downloaded', () => {
 	dialog
 		.showMessageBox({
-			title: 'Install Updates',
-			message: 'Updates downloaded, application will be quit for update...',
+			title: t('Install Updates', { _tags: 'electron' }),
+			message: t('Updates downloaded, application will restart for update to take effect.', {
+				_tags: 'electron',
+			}),
 		})
 		.then(() => {
 			setImmediate(() => autoUpdater.quitAndInstall());

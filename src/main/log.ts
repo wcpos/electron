@@ -1,6 +1,6 @@
+import * as Sentry from '@sentry/electron';
 import { dialog, app } from 'electron';
 import logger from 'electron-log';
-import * as Sentry from '@sentry/electron';
 
 Sentry.init({ dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733' });
 

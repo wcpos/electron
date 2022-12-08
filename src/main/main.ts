@@ -9,14 +9,17 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
+
 import { app, BrowserWindow, shell, ipcMain } from 'electron';
+
 import logger from './log';
 import { registerMenu } from './menu';
 import { initProtocolHandling } from './protocol';
-import { resolveHtmlPath } from './util';
 import { setupAutoUpdates } from './update';
+import { resolveHtmlPath } from './util';
 import './database';
 import './axios';
+import './translations';
 
 let mainWindow: BrowserWindow | null = null;
 

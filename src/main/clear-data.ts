@@ -1,13 +1,18 @@
 import path from 'path';
+
 import { app, ipcRenderer, dialog } from 'electron';
 import fs from 'fs-extra';
-import logger from './log';
+
 import { closeAll } from './database';
+import logger from './log';
+import { t } from './translations';
 
 export const clearAppDataDialog = () => {
-	const clearAppDataMessage =
+	const clearAppDataMessage = t(
 		'By clicking proceed you will be removing all added accounts and preferences for WooCommerce POS. ' +
-		'When the application restarts, it will be as if you are starting WooCommerce POS for the first time.';
+			'When the application restarts, it will be as if you are starting WooCommerce POS for the first time.',
+		{ _tags: 'electron' }
+	);
 
 	const dbFolder =
 		process.env.NODE_ENV === 'development'
@@ -17,8 +22,8 @@ export const clearAppDataDialog = () => {
 	dialog
 		.showMessageBox({
 			type: 'warning',
-			buttons: ['Yes', 'No'],
-			message: 'Are you sure',
+			buttons: [t('Yes'), t('No')],
+			message: t('Are you sure?'),
 			detail: clearAppDataMessage,
 		})
 		.then(({ response }) => {
@@ -33,7 +38,7 @@ export const clearAppDataDialog = () => {
 						});
 					})
 					.catch((err) => {
-						logger.error('Could not clear app data', err);
+						logger.error(t('Could not clear app data', { _tags: 'electron' }), err);
 					});
 			}
 		});

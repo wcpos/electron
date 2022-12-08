@@ -1,5 +1,7 @@
 // import { showSettings } from '../config/window';
 import { MenuItemConstructorOptions } from 'electron';
+
+import { t } from '../translations';
 import { checkForUpdates } from '../update';
 import { isMac } from '../util';
 
@@ -9,7 +11,7 @@ export const baseAppMenu: MenuItemConstructorOptions[] = isMac
 				label: 'WCPOS',
 				submenu: [
 					{ role: 'about' },
-					{ label: 'Check For Updates…', click: checkForUpdates },
+					{ label: t('Check For Updates…', { _tags: 'electron' }), click: checkForUpdates },
 					// { type: 'separator' },
 					// {
 					// 	label: 'Preferences…',
