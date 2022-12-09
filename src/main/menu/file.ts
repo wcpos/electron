@@ -1,10 +1,12 @@
 // import { showSettings } from '../config/window'
 // import { openProject } from '../project/handlers'
 import { MenuItemConstructorOptions } from 'electron';
+
+import { t } from '../translations';
 import { isWindows } from '../util';
 
 export const baseFileMenu: MenuItemConstructorOptions = {
-	label: 'File',
+	label: t('File', { _tags: 'electron' }),
 	submenu: [
 		// {
 		//   label: 'Open…',

@@ -22,8 +22,8 @@ export const clearAppDataDialog = () => {
 	dialog
 		.showMessageBox({
 			type: 'warning',
-			buttons: [t('Yes'), t('No')],
-			message: t('Are you sure?'),
+			buttons: [t('Yes', { _tags: 'electron' }), t('No', { _tags: 'electron' })],
+			message: t('Are you sure?', { _tags: 'electron' }),
 			detail: clearAppDataMessage,
 		})
 		.then(({ response }) => {

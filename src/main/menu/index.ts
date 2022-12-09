@@ -1,19 +1,25 @@
 import { Menu } from 'electron';
-import { baseAppMenu } from './app';
-import { baseFileMenu } from './file';
-import { baseEditMenu } from './edit';
-import { baseHelpMenu } from './help';
-import { baseViewMenu } from './view';
-import { baseWindowMenu } from './window';
 
-const template = [
-	...baseAppMenu,
-	baseFileMenu,
-	baseEditMenu,
-	baseViewMenu,
-	baseWindowMenu,
-	baseHelpMenu,
-];
+export const registerMenu = () => {
+	/**
+	 * Note: I want to translate the menu labels so we need to load these files after appReady
+	 */
+	const { baseAppMenu } = require('./app');
+	const { baseEditMenu } = require('./edit');
+	const { baseFileMenu } = require('./file');
+	const { baseHelpMenu } = require('./help');
+	const { baseViewMenu } = require('./view');
+	const { baseWindowMenu } = require('./window');
 
-const menu = Menu.buildFromTemplate(template);
-export const registerMenu = () => Menu.setApplicationMenu(menu);
+	const template = [
+		...baseAppMenu,
+		baseFileMenu,
+		baseEditMenu,
+		baseViewMenu,
+		baseWindowMenu,
+		baseHelpMenu,
+	];
+
+	const menu = Menu.buildFromTemplate(template);
+	Menu.setApplicationMenu(menu);
+};

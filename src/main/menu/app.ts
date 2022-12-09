@@ -11,7 +11,10 @@ export const baseAppMenu: MenuItemConstructorOptions[] = isMac
 				label: 'WCPOS',
 				submenu: [
 					{ role: 'about' },
-					{ label: t('Check For Updates…', { _tags: 'electron' }), click: checkForUpdates },
+					{
+						label: t('Check for Updates', { _tags: 'electron' }) + '…',
+						click: checkForUpdates,
+					},
 					// { type: 'separator' },
 					// {
 					// 	label: 'Preferences…',

@@ -1,5 +1,7 @@
 // import { openOnboardingWindow } from '../onboarding/window';
 import { MenuItemConstructorOptions } from 'electron';
+
+import { t } from '../translations';
 import { checkForUpdates } from '../update';
 import { isMac, isWindows } from '../util';
 
@@ -15,14 +17,14 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 		// },
 		// { type: 'separator' },
 		{
-			label: 'Report an Issue…',
+			label: t('Report an Issue', { _tags: 'electron' }) + '…',
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://github.com/wcpos/electron/issues/new');
 			},
 		},
 		{
-			label: 'Request a Feature…',
+			label: t('Request a Feature', { _tags: 'electron' }) + '…',
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://github.com/wcpos/electron/discussions/new');
@@ -32,10 +34,8 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 		...(isMac || isWindows
 			? [
 					{
-						label: 'Check for Updates…',
-						click: () => {
-							checkForUpdates();
-						},
+						label: t('Check for Updates', { _tags: 'electron' }) + '…',
+						click: checkForUpdates,
 					},
 			  ]
 			: []),
@@ -45,14 +45,14 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 		// },
 		{ type: 'separator' },
 		{
-			label: 'Documentation',
+			label: t('Documentation', { _tags: 'electron' }),
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://docs.wcpos.com');
 			},
 		},
 		{
-			label: 'F.A.Q.',
+			label: t('F.A.Q.', { _tags: 'electron' }),
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://faq.wcpos.com');

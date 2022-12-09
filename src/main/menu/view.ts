@@ -1,7 +1,9 @@
 import { MenuItemConstructorOptions } from 'electron';
 
+import { t } from '../translations';
+
 export const baseViewMenu: MenuItemConstructorOptions = {
-	label: 'View',
+	label: t('View', { _tags: 'electron' }),
 	submenu: [
 		{ role: 'resetZoom' },
 		{ role: 'zoomIn' },

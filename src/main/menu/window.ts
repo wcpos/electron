@@ -1,8 +1,10 @@
 // import { openLauncherWindow } from '../launcher/window'
 // import { showLogs } from '../logging/window'
 import { MenuItemConstructorOptions } from 'electron';
-import { isMac } from '../util';
+
 import { clearAppDataDialog } from '../clear-data';
+import { t } from '../translations';
+import { isMac } from '../util';
 
 export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 	{ role: 'minimize' },
@@ -20,7 +22,7 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 		: []),
 	{ type: 'separator' },
 	{
-		label: 'Advanced',
+		label: t('Advanced', { _tags: 'electron' }),
 		submenu: [
 			// {
 			//   label: 'Debug Logs',
@@ -32,7 +34,10 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 			{ role: 'reload' },
 			{ role: 'forceReload' },
 			{ role: 'toggleDevTools' },
-			{ label: 'Clear App Data', click: clearAppDataDialog },
+			{
+				label: t('Clear App Data', { _tags: 'electron' }),
+				click: clearAppDataDialog,
+			},
 		],
 	},
 ];

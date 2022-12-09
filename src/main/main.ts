@@ -15,11 +15,11 @@ import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import logger from './log';
 import { registerMenu } from './menu';
 import { initProtocolHandling } from './protocol';
+import { loadTranslations } from './translations';
 import { setupAutoUpdates } from './update';
 import { resolveHtmlPath } from './util';
 import './database';
 import './axios';
-import './translations';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -110,10 +110,6 @@ const createWindow = async () => {
 		console.log(err);
 		mainWindow.loadURL(resolveHtmlPath('index.html'));
 	});
-
-	// remaining setup
-	initProtocolHandling();
-	registerMenu();
 };
 
 /**
@@ -131,8 +127,11 @@ app.on('window-all-closed', () => {
 
 app
 	.whenReady()
+	.then(loadTranslations)
 	.then(() => {
 		createWindow();
+		initProtocolHandling();
+		registerMenu();
 		setupAutoUpdates();
 		app.on('activate', () => {
 			// On macOS it's common to re-create a window in the app when the

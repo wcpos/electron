@@ -1,8 +1,11 @@
 import fs from 'fs';
-import { app, ipcMain } from 'electron';
-import sqlite from 'sqlite3';
 import path from 'path';
+
+import { app, ipcMain } from 'electron';
+
 import logger from './log';
+
+import sqlite from 'sqlite3';
 
 const sqlite3 = sqlite.verbose();
 
