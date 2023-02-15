@@ -2,7 +2,7 @@
 	"name": "@wcpos/app-electron",
 	"productName": "WooCommerce POS",
 	"description": "Electron app for WooCommerce POS",
-	"version": "1.0.0-alpha.83",
+	"version": "1.0.0-alpha.84",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
 	"contributors": [
@@ -108,7 +108,7 @@
 		"@types/jest": "^29.4.0",
 		"@types/node": "18.13.0",
 		"@types/react": "^18.0.28",
-		"@types/react-dom": "^18.0.10",
+		"@types/react-dom": "^18.0.11",
 		"@types/react-test-renderer": "^18.0.0",
 		"@types/sqlite3": "^3.1.8",
 		"@types/terser-webpack-plugin": "^5.2.0",
@@ -201,7 +201,6 @@
 			]
 		},
 		"win": {
-			"publisherName": "Developer ID Installer: Paul Kilmurray (G7L8G4KJ7A)",
 			"target": [
 				{
 					"target": "nsis",
