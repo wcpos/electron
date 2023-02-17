@@ -105,7 +105,7 @@ const createWindow = async () => {
 	});
 
 	// If page not found, go to index page
-	// @TODO - hack fix for reload when on a react-navigation route
+	// TODO - hack fix for reload when on a react-navigation route
 	mainWindow.webContents.on('did-fail-load', async (err) => {
 		console.log(err);
 		mainWindow.loadURL(resolveHtmlPath('index.html'));

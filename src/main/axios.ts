@@ -29,7 +29,7 @@ ipcMain.handle('axios', (event, obj) => {
 				.then((res) => {
 					/**
 					 * config and request contain objects that can't be structuredCloned
-					 * @TODO - do I need anything from config or request?
+					 * TODO - do I need anything from config or request?
 					 */
 					// const cloned = structuredClone({ ...res, config: null, request: null });
 					const cloned = { ...res, config: obj.config, request: null };

@@ -17,7 +17,7 @@ logger.catchErrors({
 			})
 			.then((result) => {
 				if (result.response === 1) {
-					// @TODO: automaticcaly post issue to sentry
+					// TODO: automaticcaly post issue to sentry
 
 					// submitIssue("https://github.com/arvindr21/priority/issues/new", {
 					//     title: `Error report for ${versions.app}`,

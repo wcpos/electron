@@ -2,7 +2,7 @@
 	"name": "@wcpos/app-electron",
 	"productName": "WooCommerce POS",
 	"description": "Electron app for WooCommerce POS",
-	"version": "1.0.0-alpha.85",
+	"version": "1.0.0-alpha.86",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
 	"contributors": [
@@ -117,7 +117,7 @@
 		"@wcpos/eslint-config": "*",
 		"@wcpos/tsconfig": "*",
 		"babel-loader": "9.1.2",
-		"babel-preset-expo": "9.2.2",
+		"babel-preset-expo": "9.3.0",
 		"browserslist-config-erb": "^0.0.3",
 		"chalk": "^4.1.2",
 		"concurrently": "^7.6.0",
