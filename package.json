@@ -2,7 +2,7 @@
 	"name": "@wcpos/app-electron",
 	"productName": "WooCommerce POS",
 	"description": "Electron app for WooCommerce POS",
-	"version": "1.0.0-alpha.92",
+	"version": "1.0.0-alpha.93",
 	"private": true,
 	"author": "kilbot <paul@kilbot.com>",
 	"contributors": [
@@ -96,7 +96,8 @@
 		"react": "18.2.0",
 		"react-dom": "18.2.0",
 		"react-native-reanimated": "2.14.4",
-		"react-native-web": "~0.18.12"
+		"react-native-web": "~0.18.12",
+		"rxdb": "^14.1.2"
 	},
 	"devDependencies": {
 		"@babel/core": "^7.21.0",

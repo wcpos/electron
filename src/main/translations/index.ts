@@ -2,14 +2,14 @@ import { tx, t } from '@transifex/native';
 import { app } from 'electron';
 import Store from 'electron-store';
 
-import log from '../log';
 import CustomCache from './cache';
 import locales from './locales';
+import log from '../log';
 
 const store = new Store();
 
 tx.init({
-	token: '1/53ff5ea9a168aa4e7b8a72157b83537886a51938',
+	token: '1/09853773ef9cda3be96c8c451857172f26927c0f',
 	filterTags: 'electron',
 	cache: new CustomCache(store),
 });

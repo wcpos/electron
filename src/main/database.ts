@@ -113,7 +113,8 @@ ipcMain.handle('sqlite', (event, obj) => {
 					if (err) {
 						reject(err);
 					} else {
-						resolve();
+						// NOTE: not sure if I should return db or null here?
+						resolve({ name: obj.name });
 					}
 				});
 			});
