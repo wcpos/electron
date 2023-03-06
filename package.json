@@ -95,7 +95,7 @@
 		"fs-extra": "^11.1.0",
 		"react": "18.2.0",
 		"react-dom": "18.2.0",
-		"react-native-reanimated": "2.14.4",
+		"react-native-reanimated": "3.0.1",
 		"react-native-web": "~0.18.12",
 		"rxdb": "^14.1.9"
 	},
