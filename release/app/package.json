@@ -1,28 +1,28 @@
 {
-	"name": "woocommerce-pos",
-	"productName": "WooCommerce POS",
-	"version": "1.0.0-alpha.101",
-	"description": "A simple front-end for taking WooCommerce orders at the Point of Sale.",
-	"license": "MIT",
-	"author": {
-		"name": "WooCommerce POS",
-		"email": "support@wcpos.com",
-		"url": "https://wcpos.com"
-	},
-	"contributors": [
-		{
-			"name": "Electron React Boilerplate Maintainers",
-			"email": "electronreactboilerplate@gmail.com",
-			"url": "https://electron-react-boilerplate.js.org"
-		}
-	],
-	"main": "./dist/main/main.js",
-	"scripts": {
-		"electron-rebuild": "node -r ts-node/register ../../.erb/scripts/electron-rebuild.js",
-		"postinstall": "npm run electron-rebuild && npm run link-modules",
-		"link-modules": "node -r ts-node/register ../../.erb/scripts/link-modules.ts"
-	},
-	"dependencies": {
-		"sqlite3": "^5.0.2"
-	}
+  "name": "woocommerce-pos",
+  "productName": "WooCommerce POS",
+  "version": "1.0.0-beta.1",
+  "description": "A simple front-end for taking WooCommerce orders at the Point of Sale.",
+  "license": "MIT",
+  "author": {
+    "name": "WooCommerce POS",
+    "email": "support@wcpos.com",
+    "url": "https://wcpos.com"
+  },
+  "contributors": [
+    {
+      "name": "Electron React Boilerplate Maintainers",
+      "email": "electronreactboilerplate@gmail.com",
+      "url": "https://electron-react-boilerplate.js.org"
+    }
+  ],
+  "main": "./dist/main/main.js",
+  "scripts": {
+    "electron-rebuild": "node -r ts-node/register ../../.erb/scripts/electron-rebuild.js",
+    "postinstall": "npm run electron-rebuild && npm run link-modules",
+    "link-modules": "node -r ts-node/register ../../.erb/scripts/link-modules.ts"
+  },
+  "dependencies": {
+    "sqlite3": "^5.0.2"
+  }
 }
