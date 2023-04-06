@@ -1,7 +1,7 @@
 {
   "name": "woocommerce-pos",
   "productName": "WooCommerce POS",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.4",
   "description": "A simple front-end for taking WooCommerce orders at the Point of Sale.",
   "license": "MIT",
   "author": {
@@ -23,6 +23,6 @@
     "link-modules": "node -r ts-node/register ../../.erb/scripts/link-modules.ts"
   },
   "dependencies": {
-    "sqlite3": "^5.0.2"
+    "sqlite3": "^5.1.6"
   }
 }
