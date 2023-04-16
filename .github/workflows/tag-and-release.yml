@@ -11,7 +11,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - name: Check out Git repository
@@ -34,7 +34,7 @@ jobs:
           APPLE_ID_PASS: ${{ secrets.APPLE_ID_PASS }}
           CSC_LINK: ${{ secrets.MAC_CERTS }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
-          # This is used for uploading release assets to github
+          # This is used for uploading release assets to GitHub
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm exec electron-builder -- --publish always --win --mac --linux
