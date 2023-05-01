@@ -31,30 +31,30 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npm exec electron-builder -- --publish always --mac
+          npm exec electron-builder -- --publish always --mac --win
 
-  publish-windows:
-    runs-on: windows-latest
+  # publish-windows:
+  #   runs-on: windows-latest
 
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
+  #   steps:
+  #     - name: Check out Git repository
+  #       uses: actions/checkout@v3
 
-      - name: Install Node.js, NPM and Yarn
-        uses: actions/setup-node@v3
-        with:
-          node-version: 16
+  #     - name: Install Node.js, NPM and Yarn
+  #       uses: actions/setup-node@v3
+  #       with:
+  #         node-version: 16
 
-      - name: Install and build
-        run: |
-          yarn install
-          yarn build
+  #     - name: Install and build
+  #       run: |
+  #         yarn install
+  #         yarn build
 
-      - name: Publish Windows release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm exec electron-builder -- --publish always --win
+  #     - name: Publish Windows release
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         npm exec electron-builder -- --publish always --win
 
   publish-linux:
     runs-on: ubuntu-latest
