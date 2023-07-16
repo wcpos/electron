@@ -1,0 +1,53 @@
+{
+  "name": "@wcpos/app-electron",
+  "license": "MIT",
+  "productName": "WooCommerce POS",
+  "version": "0.0.1",
+  "description": "Electron app for WooCommerce POS",
+  "main": ".webpack/main",
+  "scripts": {
+    "build": "cd ../managed && yarn build:electron-web && cd -",
+    "start": "concurrently \"yarn start:expo\" \"yarn start:electron\"",
+    "start:expo": "ELECTRON=true yarn workspace @wcpos/managed-expo start --port 8088 --https",
+    "start:electron": "yarn && NODE_ENV=\"development\" electron-forge start",
+    "package": "DEBUG=electron-osx-sign* electron-forge package",
+    "make": "electron-forge make",
+    "publish-app": "electron-forge publish",
+    "lint": "eslint --ext .tsx --ext .ts ./",
+    "test": "echo 'Nothing to test'",
+    "ts:check": "yarn tsc --noEmit"
+  },
+  "dependencies": {
+    "@wcpos/managed-expo": "*",
+    "electron-squirrel-startup": "^1.0.0",
+    "sqlite3": "^5.1.6"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^6.2.1",
+    "@electron-forge/maker-deb": "^6.2.1",
+    "@electron-forge/maker-rpm": "^6.2.1",
+    "@electron-forge/maker-squirrel": "^6.2.1",
+    "@electron-forge/maker-zip": "^6.2.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^6.2.1",
+    "@electron-forge/plugin-webpack": "^6.2.1",
+    "@electron-forge/shared-types": "^6.2.1",
+    "@sentry/electron": "^4.8.0",
+    "@vercel/webpack-asset-relocator-loader": "^1.7.3",
+    "@wcpos/eslint-config": "*",
+    "concurrently": "^8.2.0",
+    "electron": "^25.3.0",
+    "electron-debug": "^3.2.0",
+    "electron-devtools-installer": "^3.2.0",
+    "electron-log": "^4.4.8",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.1.1",
+    "node-loader": "^2.0.0",
+    "ts-loader": "^9.4.4",
+    "ts-node": "^10.9.1",
+    "typescript": "~5.1.6"
+  },
+  "packageManager": "yarn@3.3.1",
+  "eslintConfig": {
+    "extends": "@wcpos/eslint-config"
+  }
+}
