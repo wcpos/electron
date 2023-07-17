@@ -11,8 +11,10 @@ import logger from './log';
  * Allow self-signed certicates in development only
  */
 if (process.env.NODE_ENV === 'development') {
+	process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 	const httpsAgent = new https.Agent({
 		rejectUnauthorized: false,
+		family: 4,
 	});
 	axios.defaults.httpsAgent = httpsAgent;
 	// eslint-disable-next-line no-console

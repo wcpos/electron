@@ -12,7 +12,7 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 
 export const createWindow = (): void => {
 	// Create the browser window.
-	const mainWindow = new BrowserWindow({
+	let mainWindow = new BrowserWindow({
 		show: false,
 		width: 1024,
 		height: 728,
