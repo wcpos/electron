@@ -69,7 +69,7 @@ jobs:
       - name: Install Expo dependencies
         run: |
           cd expo
-          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+          $env:YARN_ENABLE_IMMUTABLE_INSTALLS="false"; yarn install
 
       - name: Run Expo export
         run: |
