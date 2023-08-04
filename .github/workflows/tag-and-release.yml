@@ -39,7 +39,7 @@ jobs:
       - name: Install and build
         run: |
           yarn install
-          yarn build
+          yarn make
 
       - name: Publish macOS release
         env:
@@ -82,7 +82,7 @@ jobs:
       - name: Install and build
         run: |
           yarn install
-          yarn build
+          yarn make
 
       - name: Publish Windows release
         run: |
@@ -121,7 +121,7 @@ jobs:
       - name: Install and build
         run: |
           yarn install
-          yarn build
+          yarn make
 
       - name: Publish Linux release
         run: |

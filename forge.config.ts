@@ -42,6 +42,18 @@ const config: ForgeConfig = {
 		},
 	},
 	makers: [new MakerSquirrel({}), new MakerZIP({}, ['darwin']), new MakerRpm({}), new MakerDeb({})],
+	publishers: [
+		{
+			name: '@wcpos/app-electron',
+			config: {
+				repository: {
+					owner: 'wcpos',
+					name: 'electron',
+				},
+				draft: true,
+			},
+		},
+	],
 	plugins: [
 		new AutoUnpackNativesPlugin({}),
 		new WebpackPlugin({
