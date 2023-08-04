@@ -2,6 +2,9 @@ import * as path from 'path';
 
 import { app } from 'electron';
 
+/**
+ *
+ */
 export function initProtocolHandling() {
 	app.removeAsDefaultProtocolClient('wcpos');
 	if (process.defaultApp) {

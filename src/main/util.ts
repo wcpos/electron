@@ -2,11 +2,13 @@
 import path from 'path';
 import { URL } from 'url';
 
+import { SCHEME, ROOT } from './constants';
+
 export const isDevelopment = process.env.NODE_ENV === 'development';
 
-const scheme = 'wcpos';
-const root = 'app';
-
+/**
+ *
+ */
 export function resolveHtmlPath(htmlFileName: string) {
 	if (isDevelopment) {
 		// const port = process.env.PORT || 8088;
@@ -15,7 +17,7 @@ export function resolveHtmlPath(htmlFileName: string) {
 		// return url.href;
 		return 'http://localhost:8088';
 	}
-	return `${scheme}://${root}`;
+	return `${SCHEME}://${ROOT}`;
 }
 
 export const isMac = process.platform === 'darwin';

@@ -94,3 +94,5 @@ out/
 # Test databases
 databases/
 *.sqlite3
+
+dist/

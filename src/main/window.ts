@@ -1,4 +1,6 @@
-import { BrowserWindow, shell } from 'electron';
+import * as path from 'path';
+
+import { BrowserWindow, shell, protocol, net } from 'electron';
 
 import { resolveHtmlPath } from './util';
 
@@ -27,6 +29,13 @@ export const createWindow = (): void => {
 	if (isDevelopment) {
 		mainWindow.webContents.openDevTools();
 	}
+
+	// Handle internal
+	protocol.handle('wcpos', (request) => {
+		const url = request.url.substr('wcpos://'.length);
+		const expoBuildPath = path.resolve(__dirname, '../../dist', url);
+		return net.fetch(`file://${expoBuildPath}`);
+	});
 
 	mainWindow.loadURL(resolveHtmlPath('index.html'));
 

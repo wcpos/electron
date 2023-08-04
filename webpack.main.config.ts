@@ -1,8 +1,10 @@
+import nodeExternals from 'webpack-node-externals';
+
 import { rules } from './webpack.rules';
 
-import type { Configuration } from 'webpack';
+import type { WebpackConfiguration } from '@electron-forge/plugin-webpack/dist/Config';
 
-export const mainConfig: Configuration = {
+export const mainConfig: WebpackConfiguration = {
 	stats: 'errors-only',
 	/**
 	 * This is the main entry point for your application, it's the first file
@@ -16,4 +18,6 @@ export const mainConfig: Configuration = {
 	resolve: {
 		extensions: ['.js', '.ts', '.jsx', '.tsx', '.css', '.json'],
 	},
+	target: 'electron-main',
+	externals: [nodeExternals(), 'aws-sdk', 'mock-aws-s3', 'nock'],
 };

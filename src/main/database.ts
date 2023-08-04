@@ -53,7 +53,7 @@ const openDatabase = (name: string) => {
 		}
 	);
 
-	console.log('Opening SQLite database', db);
+	logger.info('Opening SQLite database', db);
 	registry.set(name, db);
 	return { name };
 };
@@ -79,7 +79,7 @@ export const closeAll = () => {
  *
  */
 ipcMain.handle('sqlite', (event, obj) => {
-	console.log(obj);
+	logger.debug('sql request', JSON.stringify(obj, null, 2));
 	switch (obj.type) {
 		case 'open':
 			return openDatabase(obj.name);
@@ -87,12 +87,12 @@ ipcMain.handle('sqlite', (event, obj) => {
 			return new Promise((resolve, reject) => {
 				const db = registry.get(obj.name);
 				db.all(obj.sql.query, obj.sql.params, (err, res) => {
-					console.log('sql response: ', res);
-
+					logger.debug('sql response: ', JSON.stringify(err, null, 2));
 					if (err) {
 						return reject(err);
 					}
 
+					logger.debug('sql response: ', JSON.stringify(res, null, 2));
 					if (Array.isArray(res)) {
 						return resolve(res);
 						// const queryResult = res[0]; // there is only one query
@@ -109,6 +109,7 @@ ipcMain.handle('sqlite', (event, obj) => {
 			return new Promise((resolve, reject) => {
 				const db = registry.get(obj.name);
 				db.run(obj.sql.query, obj.sql.params, (err) => {
+					logger.debug('sql response: ', JSON.stringify(err, null, 2));
 					if (err) {
 						reject(err);
 					} else {

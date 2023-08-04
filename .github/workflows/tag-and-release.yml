@@ -1,0 +1,122 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Check out Expo repository
+        run: git clone https://github.com/wcpos/managed-expo.git expo
+
+      - name: Install Node.js, NPM and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install Expo dependencies
+        run: |
+          cd expo
+          yarn install
+
+      - name: Run Expo export
+        run: |
+          cd expo
+          yarn export:electron
+
+      - name: Move Expo 'dist' directory
+        run: mv expo/dist/* .
+
+      - name: Install and build
+        run: |
+          yarn install
+          yarn build
+
+      - name: Publish macOS release
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          yarn publish-app
+
+  publish-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Check out Expo repository
+        run: git clone https://github.com/wcpos/managed-expo.git expo
+
+      - name: Install Node.js, NPM and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install Expo dependencies
+        run: |
+          cd expo
+          yarn install
+
+      - name: Run Expo export
+        run: |
+          cd expo
+          yarn export:electron
+
+      - name: Move Expo 'dist' directory
+        run: mv expo/dist/* .
+
+      - name: Install and build
+        run: |
+          yarn install
+          yarn build
+
+      - name: Publish Windows release
+        run: |
+          yarn publish-app
+
+  publish-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Check out Expo repository
+        run: git clone https://github.com/wcpos/managed-expo.git expo
+
+      - name: Install Node.js, NPM and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install Expo dependencies
+        run: |
+          cd expo
+          yarn install
+
+      - name: Run Expo export
+        run: |
+          cd expo
+          yarn export:electron
+
+      - name: Move Expo 'dist' directory
+        run: mv expo/dist/* .
+
+      - name: Install and build
+        run: |
+          yarn install
+          yarn build
+
+      - name: Publish Linux release
+        run: |
+          yarn publish-app
