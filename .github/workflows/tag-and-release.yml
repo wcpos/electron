@@ -26,7 +26,7 @@ jobs:
       - name: Install Expo dependencies
         run: |
           cd expo
-          yarn install --immutable false
+          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
 
       - name: Run Expo export
         run: |
@@ -69,7 +69,7 @@ jobs:
       - name: Install Expo dependencies
         run: |
           cd expo
-          yarn install --immutable false
+          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
 
       - name: Run Expo export
         run: |
@@ -108,7 +108,7 @@ jobs:
       - name: Install Expo dependencies
         run: |
           cd expo
-          yarn install --immutable false
+          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
 
       - name: Run Expo export
         run: |
