@@ -22,10 +22,7 @@ const config: ForgeConfig = {
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		osxSign: {
-			hardenedRuntime: true,
 			identity: 'Developer ID Application: Paul Kilmurray (G7L8G4KJ7A)',
-			entitlements: 'entitlements.plist',
-			entitlementsInherit: 'entitlements.plist',
 		},
 		osxNotarize: {
 			tool: 'notarytool',
