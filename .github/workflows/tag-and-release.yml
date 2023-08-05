@@ -37,6 +37,10 @@ jobs:
         run: mv expo/dist/* .
 
       - name: Install and build
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           yarn install
           yarn make
