@@ -8,6 +8,7 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 
+import pkg from './package.json';
 import { mainConfig } from './webpack.main.config';
 import { rendererConfig } from './webpack.renderer.config';
 
@@ -17,9 +18,11 @@ const config: ForgeConfig = {
 	packagerConfig: {
 		asar: true,
 		name: 'WooCommerce POS',
-		executableName: 'woocommerce-pos',
+		executableName: 'WooCommercePOS',
+		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		osxSign: {
+			identity: 'Developer ID Application: Paul Kilmurray (G7L8G4KJ7A)',
 			// "hardened-runtime": true,
 			// "gatekeeper-assess": false,
 		},
@@ -29,6 +32,12 @@ const config: ForgeConfig = {
 			appleIdPassword: process.env.APPLE_ID_PASSWORD,
 			teamId: process.env.APPLE_TEAM_ID,
 		},
+		protocols: [
+			{
+				name: 'WooCommerce POS',
+				schemes: ['wcpos'],
+			},
+		],
 	},
 	rebuildConfig: {},
 	hooks: {
@@ -43,7 +52,7 @@ const config: ForgeConfig = {
 		},
 	},
 	makers: [
-		new MakerSquirrel({ name: 'WooCommerce POS' }),
+		new MakerSquirrel({ name: 'WooCommercePOS' }),
 		new MakerZIP({}, ['darwin']),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html

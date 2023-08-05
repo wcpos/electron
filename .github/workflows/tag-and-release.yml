@@ -50,6 +50,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           yarn publish-app
 
@@ -89,6 +90,8 @@ jobs:
           yarn make
 
       - name: Publish Windows release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           yarn publish-app
 
@@ -128,5 +131,7 @@ jobs:
           yarn make
 
       - name: Publish Linux release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           yarn publish-app
