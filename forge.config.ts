@@ -54,11 +54,11 @@ const config: ForgeConfig = {
 		new MakerZIP({}, ['darwin']),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
-			// options: { bin: 'woocommerce-pos' },
+			options: { bin: 'WooCommercePOS' },
 		}),
 		new MakerDeb({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
-			// options: { bin: 'woocommerce-pos' },
+			options: { bin: 'WooCommercePOS' },
 		}),
 	],
 	publishers: [

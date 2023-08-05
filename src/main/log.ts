@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/electron/main';
+import * as Sentry from '@sentry/electron';
 import { dialog, app } from 'electron';
 import logger from 'electron-log';
 
