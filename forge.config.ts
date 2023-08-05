@@ -22,9 +22,10 @@ const config: ForgeConfig = {
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		osxSign: {
+			hardenedRuntime: true,
 			identity: 'Developer ID Application: Paul Kilmurray (G7L8G4KJ7A)',
-			// "hardened-runtime": true,
-			// "gatekeeper-assess": false,
+			entitlements: 'entitlements.plist',
+			entitlementsInherit: 'entitlements.plist',
 		},
 		osxNotarize: {
 			tool: 'notarytool',
@@ -56,11 +57,11 @@ const config: ForgeConfig = {
 		new MakerZIP({}, ['darwin']),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
-			options: { bin: 'woocommerce-pos' },
+			// options: { bin: 'woocommerce-pos' },
 		}),
 		new MakerDeb({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
-			options: { bin: 'woocommerce-pos' },
+			// options: { bin: 'woocommerce-pos' },
 		}),
 	],
 	publishers: [
