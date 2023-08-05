@@ -36,6 +36,16 @@ jobs:
       - name: Move Expo 'dist' directory
         run: mv expo/dist/* .
 
+      - name: Install Certificates
+        run: |
+          mkdir -p /tmp/certs
+          echo "${{ secrets.MAC_CERTS }}" | base64 -d > /tmp/certs/certs.p12
+          echo "${{ secrets.MAC_CERTS_PASSWORD }}" > /tmp/certs/certs-password.txt
+          security create-keychain -p actions /tmp/certs/keychain-db
+          security default-keychain -s /tmp/certs/keychain-db
+          security import /tmp/certs/certs.p12 -k /tmp/certs/keychain-db -P $(cat /tmp/certs/certs-password.txt) -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions /tmp/certs/keychain-db
+
       - name: Install and build
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
