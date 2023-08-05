@@ -16,6 +16,7 @@ import type { ForgeConfig } from '@electron-forge/shared-types';
 const config: ForgeConfig = {
 	packagerConfig: {
 		asar: true,
+		name: 'WooCommerce POS',
 		executableName: 'woocommerce-pos',
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		osxSign: {
@@ -41,10 +42,21 @@ const config: ForgeConfig = {
 			});
 		},
 	},
-	makers: [new MakerSquirrel({}), new MakerZIP({}, ['darwin']), new MakerRpm({}), new MakerDeb({})],
+	makers: [
+		new MakerSquirrel({ name: 'WooCommerce POS' }),
+		new MakerZIP({}, ['darwin']),
+		new MakerRpm({
+			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
+			options: { bin: 'woocommerce-pos' },
+		}),
+		new MakerDeb({
+			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
+			options: { bin: 'woocommerce-pos' },
+		}),
+	],
 	publishers: [
 		{
-			name: '@wcpos/app-electron',
+			name: '@electron-forge/publisher-github',
 			config: {
 				repository: {
 					owner: 'wcpos',
@@ -58,7 +70,7 @@ const config: ForgeConfig = {
 		new AutoUnpackNativesPlugin({}),
 		new WebpackPlugin({
 			mainConfig,
-			devContentSecurityPolicy: "connect-src 'self' * 'unsafe-eval'",
+			// devContentSecurityPolicy: "connect-src 'self' * 'unsafe-eval'",
 			renderer: {
 				config: rendererConfig,
 				entryPoints: [
