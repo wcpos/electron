@@ -96,7 +96,8 @@ jobs:
       - name: Move Expo 'dist' directory
         run: |
           mv expo/dist .
-          rm -rf expo
+          Remove-Item -Recurse -Force expo
+          run scripts/fix-expo-bundle.js
 
       - name: Install and build
         run: |
