@@ -34,7 +34,7 @@ jobs:
           yarn export:electron
 
       - name: Move Expo 'dist' directory
-        run: mv expo/dist/* .
+        run: mv expo/dist .
 
       - name: Install Certificates
         run: |
@@ -92,7 +92,7 @@ jobs:
           yarn export:electron
 
       - name: Move Expo 'dist' directory
-        run: mv expo/dist/* .
+        run: mv expo/dist .
 
       - name: Install and build
         run: |
@@ -133,7 +133,7 @@ jobs:
           yarn export:electron
 
       - name: Move Expo 'dist' directory
-        run: mv expo/dist/* .
+        run: mv expo/dist .
 
       - name: Install and build
         run: |
