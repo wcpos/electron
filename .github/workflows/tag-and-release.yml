@@ -50,6 +50,7 @@ jobs:
           security default-keychain -s /tmp/certs/keychain-db
           security import /tmp/certs/certs.p12 -k /tmp/certs/keychain-db -P $(cat /tmp/certs/certs-password.txt) -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k actions /tmp/certs/keychain-db
+          security find-identity -p codesigning -v
 
       - name: Install and build
         env:

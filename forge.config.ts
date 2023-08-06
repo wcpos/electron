@@ -25,6 +25,7 @@ const config: ForgeConfig = {
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
+		osxSign: {},
 		osxNotarize: isOnGithubActions
 			? {
 					tool: 'notarytool',
