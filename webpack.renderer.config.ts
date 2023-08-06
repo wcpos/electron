@@ -1,5 +1,3 @@
-import nodeExternals from 'webpack-node-externals';
-
 import { rules } from './webpack.rules';
 
 import type { WebpackConfiguration } from '@electron-forge/plugin-webpack/dist/Config';

@@ -1,5 +1,3 @@
-import nodeExternals from 'webpack-node-externals';
-
 import { rules } from './webpack.rules';
 
 import type { WebpackConfiguration } from '@electron-forge/plugin-webpack/dist/Config';
@@ -19,9 +17,5 @@ export const mainConfig: WebpackConfiguration = {
 		extensions: ['.js', '.ts', '.jsx', '.tsx', '.css', '.json'],
 	},
 	target: 'electron-main',
-	externals: [
-		nodeExternals({
-			allowlist: ['aws-sdk', 'mock-aws-s3', 'nock'],
-		}),
-	],
+	externals: ['aws-sdk', 'mock-aws-s3', 'nock'],
 };
