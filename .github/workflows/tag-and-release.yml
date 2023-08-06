@@ -60,7 +60,74 @@ jobs:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
+          yarn rebuild:all
           yarn make
+
+      - name: Publish macOS release
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          yarn publish-app
+
+  publish-macos-arm64:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Check out Expo repository
+        run: |
+          git clone https://github.com/wcpos/managed-expo.git expo
+          touch expo/yarn.lock
+
+      - name: Install Node.js, NPM and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install Expo dependencies
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+        run: |
+          cd expo
+          yarn install
+
+      - name: Run Expo export
+        run: |
+          cd expo
+          yarn export:electron
+
+      - name: Move Expo 'dist' directory
+        run: |
+          mv expo/dist .
+          rm -rf expo
+          node scripts/fix-expo-bundle.js
+
+      - name: Install Certificates
+        run: |
+          mkdir -p /tmp/certs
+          echo "${{ secrets.MAC_CERTS }}" | base64 -d > /tmp/certs/certs.p12
+          echo "${{ secrets.MAC_CERTS_PASSWORD }}" > /tmp/certs/certs-password.txt
+          security create-keychain -p actions /tmp/certs/keychain-db
+          security default-keychain -s /tmp/certs/keychain-db
+          security import /tmp/certs/certs.p12 -k /tmp/certs/keychain-db -P $(cat /tmp/certs/certs-password.txt) -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions /tmp/certs/keychain-db
+          security find-identity -p codesigning -v
+
+      - name: Install and build
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+        run: |
+          yarn install
+          yarn rebuild:all
+          yarn make-macos-arm64
 
       - name: Publish macOS release
         env:
@@ -111,6 +178,7 @@ jobs:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
+          yarn rebuild:all
           yarn make
 
       - name: Publish Windows release
@@ -159,6 +227,7 @@ jobs:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
+          yarn rebuild:all
           yarn make
 
       - name: Publish Linux release

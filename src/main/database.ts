@@ -1,13 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 
+import Database from 'better-sqlite3';
 import { app, ipcMain } from 'electron';
-import sqlite3 from 'sqlite3';
 
 import logger from './log';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
-const sqlite = isDevelopment ? sqlite3.verbose() : sqlite3;
+// const sqlite = isDevelopment ? sqlite3.verbose() : sqlite3;
 const registry = new Map();
 
 /**
@@ -41,16 +41,16 @@ const openDatabase = (name: string) => {
 	/**
 	 *
 	 */
-	const db = new sqlite.Database(
-		path.resolve(dbFolder, `${name}.sqlite3`),
+	const db = new Database(
+		path.resolve(dbFolder, `${name}.sqlite3`)
 		// sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE,
-		(err) => {
-			if (err) {
-				logger.error('Could not connect to database', err);
-			} else {
-				logger.info('Connected to database!');
-			}
-		}
+		// (err) => {
+		// 	if (err) {
+		// 		logger.error('Could not connect to database', err);
+		// 	} else {
+		// 		logger.info('Connected to database!');
+		// 	}
+		// }
 	);
 
 	logger.info('Opening SQLite database', db);
@@ -58,80 +58,38 @@ const openDatabase = (name: string) => {
 	return { name };
 };
 
-/**
- *
- */
 export const closeAll = () => {
-	return new Promise((resolve, reject) => {
-		registry.forEach((db) => {
-			db.close((err) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
-				}
-			});
-		});
+	registry.forEach((db) => {
+		db.close();
 	});
 };
 
-/**
- *
- */
 ipcMain.handle('sqlite', (event, obj) => {
 	logger.debug('sql request', JSON.stringify(obj, null, 2));
-	switch (obj.type) {
-		case 'open':
-			return openDatabase(obj.name);
-		case 'all':
-			return new Promise((resolve, reject) => {
-				const db = registry.get(obj.name);
-				db.all(obj.sql.query, obj.sql.params, (err, res) => {
-					logger.debug('sql response: ', JSON.stringify(err, null, 2));
-					if (err) {
-						return reject(err);
-					}
-
-					logger.debug('sql response: ', JSON.stringify(res, null, 2));
-					if (Array.isArray(res)) {
-						return resolve(res);
-						// const queryResult = res[0]; // there is only one query
-						// if (Object.prototype.hasOwnProperty.call(queryResult, 'rows')) {
-						// 	return resolve(queryResult.rows);
-						// }
-						// return reject(queryResult.error);
-					}
-
-					return reject(new Error(`Unexpected response from SQLite: ${res}`));
-				});
-			});
-		case 'run':
-			return new Promise((resolve, reject) => {
-				const db = registry.get(obj.name);
-				db.run(obj.sql.query, obj.sql.params, (err) => {
-					logger.debug('sql response: ', JSON.stringify(err, null, 2));
-					if (err) {
-						reject(err);
-					} else {
-						// NOTE: not sure if I should return db or null here?
-						resolve({ name: obj.name });
-					}
-				});
-			});
-		case 'close':
-			return new Promise((resolve, reject) => {
-				const db = registry.get(obj.name);
-				db.close((err) => {
-					if (err) {
-						reject(err);
-					} else {
-						resolve();
-					}
-				});
-			});
-		case 'quit':
-			return closeAll();
-		default:
-			return new Error('Unknown type');
+	try {
+		switch (obj.type) {
+			case 'open':
+				return openDatabase(obj.name);
+			case 'all':
+				const dbForAll = registry.get(obj.name);
+				const results = dbForAll.prepare(obj.sql.query).all(obj.sql.params);
+				return results;
+			case 'run':
+				const dbForRun = registry.get(obj.name);
+				dbForRun.prepare(obj.sql.query).run(obj.sql.params);
+				return { name: obj.name }; // or whatever you need to return
+			case 'close':
+				const dbForClose = registry.get(obj.name);
+				dbForClose.close();
+				return;
+			case 'quit':
+				closeAll();
+				return;
+			default:
+				throw new Error('Unknown type');
+		}
+	} catch (err) {
+		logger.error('SQLite error', err);
+		throw err;
 	}
 });
