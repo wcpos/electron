@@ -25,9 +25,6 @@ const config: ForgeConfig = {
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
-		osxSign: {
-			identity: 'Developer ID Application: Paul Kilmurray (G7L8G4KJ7A)',
-		},
 		osxNotarize: isOnGithubActions
 			? {
 					tool: 'notarytool',

@@ -24,9 +24,11 @@ jobs:
           node-version: 16
 
       - name: Install Expo dependencies
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           cd expo
-          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+          yarn install
 
       - name: Run Expo export
         run: |
@@ -54,8 +56,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+          yarn install
           yarn make
 
       - name: Publish macOS release
@@ -85,9 +88,11 @@ jobs:
           node-version: 16
 
       - name: Install Expo dependencies
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           cd expo
-          $env:YARN_ENABLE_IMMUTABLE_INSTALLS="false"; yarn install
+          yarn install
 
       - name: Run Expo export
         run: |
@@ -101,8 +106,10 @@ jobs:
           node scripts/fix-expo-bundle.js
 
       - name: Install and build
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+          yarn install
           yarn make
 
       - name: Publish Windows release
@@ -129,9 +136,11 @@ jobs:
           node-version: 16
 
       - name: Install Expo dependencies
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           cd expo
-          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+          yarn install
 
       - name: Run Expo export
         run: |
@@ -145,8 +154,10 @@ jobs:
           node scripts/fix-expo-bundle.js
 
       - name: Install and build
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
+          yarn install
           yarn make
 
       - name: Publish Linux release
