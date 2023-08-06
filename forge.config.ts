@@ -8,6 +8,7 @@ import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
+import MakerAppImage from 'electron-forge-maker-appimage';
 
 import pkg from './package.json';
 import { mainConfig } from './webpack.main.config';
@@ -19,7 +20,6 @@ const isOnGithubActions = process.env.CI === 'true';
 
 const config: ForgeConfig = {
 	packagerConfig: {
-		asar: true,
 		name: 'WooCommerce POS',
 		executableName: 'WooCommercePOS',
 		buildVersion: `${pkg.version}`,
@@ -44,7 +44,7 @@ const config: ForgeConfig = {
 	rebuildConfig: {},
 	hooks: {
 		packageAfterPrune: async (forgeConfig, buildPath) => {
-			const sqliteBuildPath = path.join(buildPath, 'node_modules', 'sqlite3', 'build');
+			const sqliteBuildPath = path.join(buildPath, 'node_modules', 'better-sqlite3', 'build');
 			// console.log("Sqlite BuildPath: ", sqliteBuildPath);
 			// needs to be deleted otherwise macos codesign will fail
 			fs.rmSync(sqliteBuildPath, {
@@ -57,9 +57,10 @@ const config: ForgeConfig = {
 		new MakerSquirrel({
 			name: 'WooCommercePOS',
 			setupIcon: path.resolve(__dirname, 'icons/icon.ico'),
+			loadingGif: path.resolve(__dirname, 'icons/installing.gif'),
 		}),
-		new MakerZIP({}, ['darwin']),
-		new MakerDMG({}, ['darwin']),
+		new MakerZIP({}, ['darwin', 'linux']),
+		new MakerDMG({ format: 'ULFO' }, ['darwin']),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
 			options: { bin: 'WooCommercePOS' },
@@ -68,6 +69,7 @@ const config: ForgeConfig = {
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
 			options: { bin: 'WooCommercePOS' },
 		}),
+		new MakerAppImage({}, ['linux']),
 	],
 	publishers: [
 		{
