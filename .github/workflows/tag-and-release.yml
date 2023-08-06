@@ -37,6 +37,7 @@ jobs:
         run: |
           mv expo/dist .
           rm -rf expo
+          node scripts/fix-expo-bundle.js
 
       - name: Install Certificates
         run: |
@@ -97,7 +98,7 @@ jobs:
         run: |
           mv expo/dist .
           Remove-Item -Recurse -Force expo
-          run scripts/fix-expo-bundle.js
+          node scripts/fix-expo-bundle.js
 
       - name: Install and build
         run: |
@@ -141,6 +142,7 @@ jobs:
         run: |
           mv expo/dist .
           rm -rf expo
+          node scripts/fix-expo-bundle.js
 
       - name: Install and build
         run: |
