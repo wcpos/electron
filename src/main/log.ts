@@ -1,10 +1,10 @@
-import * as Sentry from '@sentry/electron/main';
+// import * as Sentry from '@sentry/electron/main';
 import { dialog, app } from 'electron';
 import logger from 'electron-log';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 
-Sentry.init({ dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733' });
+// Sentry.init({ dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733' });
 
 logger.transports.file.level = isDevelopment ? 'debug' : 'error';
 logger.transports.console.level = isDevelopment ? 'debug' : 'error';
