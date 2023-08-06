@@ -17,7 +17,8 @@ export function resolveHtmlPath(htmlFileName: string) {
 		// return url.href;
 		return 'http://localhost:8088';
 	}
-	return `${SCHEME}://${ROOT}`;
+	// In a packaged app, the resources will be relative to the app's root
+	return `file://${path.join(process.resourcesPath, 'dist', htmlFileName)}`;
 }
 
 export const isMac = process.platform === 'darwin';

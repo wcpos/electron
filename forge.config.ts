@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { MakerDeb } from '@electron-forge/maker-deb';
+import { MakerDMG } from '@electron-forge/maker-dmg';
 import { MakerRpm } from '@electron-forge/maker-rpm';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
@@ -14,6 +15,8 @@ import { rendererConfig } from './webpack.renderer.config';
 
 import type { ForgeConfig } from '@electron-forge/shared-types';
 
+const isOnGithubActions = process.env.CI === 'true';
+
 const config: ForgeConfig = {
 	packagerConfig: {
 		asar: true,
@@ -21,15 +24,18 @@ const config: ForgeConfig = {
 		executableName: 'WooCommercePOS',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
+		extraResource: [path.resolve(__dirname, 'dist')],
 		osxSign: {
 			identity: 'Developer ID Application: Paul Kilmurray (G7L8G4KJ7A)',
 		},
-		osxNotarize: {
-			tool: 'notarytool',
-			appleId: process.env.APPLE_ID,
-			appleIdPassword: process.env.APPLE_ID_PASSWORD,
-			teamId: process.env.APPLE_TEAM_ID,
-		},
+		osxNotarize: isOnGithubActions
+			? {
+					tool: 'notarytool',
+					appleId: process.env.APPLE_ID,
+					appleIdPassword: process.env.APPLE_ID_PASSWORD,
+					teamId: process.env.APPLE_TEAM_ID,
+			  }
+			: undefined,
 		protocols: [
 			{
 				name: 'WooCommerce POS',
@@ -52,6 +58,7 @@ const config: ForgeConfig = {
 	makers: [
 		new MakerSquirrel({ name: 'WooCommercePOS' }),
 		new MakerZIP({}, ['darwin']),
+		new MakerDMG({}, ['darwin']),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
 			options: { bin: 'WooCommercePOS' },
