@@ -18,7 +18,7 @@ export const createWindow = (): void => {
 		show: false,
 		width: 1024,
 		height: 728,
-		icon: path.join(__dirname, '../icons/icon.ico'),
+		// icon: path.join(__dirname, '../../icons/icon.ico'),
 		webPreferences: {
 			preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
 			sandbox: false, // required for preload script to work

@@ -12,5 +12,9 @@ export const rendererConfig: WebpackConfiguration = {
 		extensions: ['.js', '.ts', '.jsx', '.tsx', '.css'],
 	},
 	target: 'electron-renderer',
-	externals: [nodeExternals(), 'aws-sdk', 'mock-aws-s3', 'nock'],
+	externals: [
+		nodeExternals({
+			allowlist: ['@sentry/electron', 'aws-sdk', 'mock-aws-s3', 'nock'],
+		}),
+	],
 };

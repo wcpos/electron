@@ -58,8 +58,8 @@ const config: ForgeConfig = {
 	makers: [
 		new MakerSquirrel({
 			name: 'WooCommercePOS',
-			setupIcon: path.join(__dirname, '../icons/icon.ico'),
-			iconUrl: path.join(__dirname, '../icons/icon.ico'),
+			setupIcon: path.resolve(__dirname, 'icons', 'icon'),
+			iconUrl: path.resolve(__dirname, 'icons', 'icon'),
 		}),
 		new MakerZIP({}, ['darwin']),
 		new MakerDMG({}, ['darwin']),
