@@ -19,9 +19,9 @@ export const mainConfig: WebpackConfiguration = {
 		extensions: ['.js', '.ts', '.jsx', '.tsx', '.css', '.json'],
 	},
 	target: 'electron-main',
-	// externals: [
-	// 	nodeExternals({
-	// 		allowlist: ['@sentry/electron', 'aws-sdk', 'mock-aws-s3', 'nock'],
-	// 	}),
-	// ],
+	externals: [
+		nodeExternals({
+			allowlist: ['aws-sdk', 'mock-aws-s3', 'nock'],
+		}),
+	],
 };
