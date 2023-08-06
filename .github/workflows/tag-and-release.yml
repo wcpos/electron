@@ -34,7 +34,9 @@ jobs:
           yarn export:electron
 
       - name: Move Expo 'dist' directory
-        run: mv expo/dist .
+        run: |
+          mv expo/dist .
+          rm -rf expo
 
       - name: Install Certificates
         run: |
@@ -52,7 +54,7 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          yarn install
+          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
           yarn make
 
       - name: Publish macOS release
@@ -92,11 +94,13 @@ jobs:
           yarn export:electron
 
       - name: Move Expo 'dist' directory
-        run: mv expo/dist .
+        run: |
+          mv expo/dist .
+          rm -rf expo
 
       - name: Install and build
         run: |
-          yarn install
+          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
           yarn make
 
       - name: Publish Windows release
@@ -133,11 +137,13 @@ jobs:
           yarn export:electron
 
       - name: Move Expo 'dist' directory
-        run: mv expo/dist .
+        run: |
+          mv expo/dist .
+          rm -rf expo
 
       - name: Install and build
         run: |
-          yarn install
+          YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install
           yarn make
 
       - name: Publish Linux release
