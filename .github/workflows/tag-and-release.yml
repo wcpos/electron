@@ -47,7 +47,7 @@ jobs:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
-      - name: Install and build
+      - name: Install, build and publish
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
@@ -57,19 +57,6 @@ jobs:
           yarn install
           yarn rebuild:all
           yarn make
-
-      - name: Verify Mac Signing & Entitlements
-        run: |
-          codesign --verify --deep --strict --verbose=2 ./out/WooCommerce\ POS-darwin-x64/WooCommerce\ POS.app
-          codesign -d --entitlements :- ./out/WooCommerce\ POS-darwin-x64/WooCommerce\ POS.app
-
-      - name: Publish macOS release
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
           yarn publish-app
 
   publish-macos-arm64:
@@ -113,25 +100,17 @@ jobs:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
-      - name: Install and build
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
-        run: |
-          yarn install
-          yarn rebuild:all
-          yarn make --arch=arm64 --platform=darwin
-
-      - name: Publish macOS release
+      - name: Install, build and publish
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ARCH: arm64
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
+          yarn install
+          yarn rebuild:all
+          yarn make --arch=arm64 --platform=darwin
           yarn publish-app
 
   publish-windows:

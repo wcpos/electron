@@ -8,6 +8,7 @@ import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 // import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
+import { PublisherGithub } from '@electron-forge/publisher-github';
 import MakerAppImage from 'electron-forge-maker-appimage';
 
 import pkg from './package.json';
@@ -78,16 +79,14 @@ const config: ForgeConfig = {
 		new MakerAppImage({}, ['linux']),
 	],
 	publishers: [
-		{
-			name: '@electron-forge/publisher-github',
-			config: {
-				repository: {
-					owner: 'wcpos',
-					name: 'electron',
-				},
-				draft: true,
+		new PublisherGithub({
+			// https://js.electronforge.io/modules/_electron_forge_publisher_github.html
+			repository: {
+				owner: 'wcpos',
+				name: 'electron',
 			},
-		},
+			draft: true,
+		}),
 	],
 	plugins: [
 		// new AutoUnpackNativesPlugin({}),
