@@ -6,7 +6,7 @@ import { MakerDMG } from '@electron-forge/maker-dmg';
 import { MakerRpm } from '@electron-forge/maker-rpm';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
-import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
+// import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import MakerAppImage from 'electron-forge-maker-appimage';
 
@@ -20,7 +20,6 @@ const isOnGithubActions = process.env.CI === 'true';
 
 const config: ForgeConfig = {
 	packagerConfig: {
-		asar: true,
 		name: 'WooCommerce POS',
 		executableName: 'WooCommercePOS',
 		buildVersion: `${pkg.version}`,
@@ -91,7 +90,7 @@ const config: ForgeConfig = {
 		},
 	],
 	plugins: [
-		new AutoUnpackNativesPlugin({}),
+		// new AutoUnpackNativesPlugin({}),
 		new WebpackPlugin({
 			mainConfig,
 			// devContentSecurityPolicy: "connect-src 'self' * 'unsafe-eval'",
