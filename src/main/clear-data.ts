@@ -29,17 +29,16 @@ export const clearAppDataDialog = () => {
 		.then(({ response }) => {
 			if (response === 0) {
 				// Close the db connection, delete the db file, and restart the app
-				closeAll()
-					.then(() => {
-						return fs.remove(dbFolder).then(() => {
-							// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
-							app.relaunch();
-							app.quit();
-						});
-					})
-					.catch((err) => {
-						logger.error(t('Could not clear app data', { _tags: 'electron' }), err);
+				try {
+					closeAll();
+					return fs.remove(dbFolder).then(() => {
+						// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
+						app.relaunch();
+						app.quit();
 					});
+				} catch (err) {
+					logger.error(t('Could not clear app data', { _tags: 'electron' }), err);
+				}
 			}
 		});
 };

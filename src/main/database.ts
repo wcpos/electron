@@ -64,6 +64,13 @@ export const closeAll = () => {
 	});
 };
 
+/**
+ * RxDB sends query params as booleans, but SQLite doesn't support booleans.
+ */
+function convertBooleansToNumbers(params: (string | number | boolean)[]): (string | number)[] {
+	return params.map((param) => (typeof param === 'boolean' ? (param ? 1 : 0) : param));
+}
+
 ipcMain.handle('sqlite', (event, obj) => {
 	logger.debug('sql request', JSON.stringify(obj, null, 2));
 	try {
@@ -72,11 +79,13 @@ ipcMain.handle('sqlite', (event, obj) => {
 				return openDatabase(obj.name);
 			case 'all':
 				const dbForAll = registry.get(obj.name);
-				const results = dbForAll.prepare(obj.sql.query).all(obj.sql.params);
+				const results = dbForAll
+					.prepare(obj.sql.query)
+					.all(convertBooleansToNumbers(obj.sql.params));
 				return results;
 			case 'run':
 				const dbForRun = registry.get(obj.name);
-				dbForRun.prepare(obj.sql.query).run(obj.sql.params);
+				dbForRun.prepare(obj.sql.query).run(convertBooleansToNumbers(obj.sql.params));
 				return { name: obj.name }; // or whatever you need to return
 			case 'close':
 				const dbForClose = registry.get(obj.name);

@@ -10,24 +10,19 @@
     "start": "concurrently \"yarn start:expo\" \"yarn start:electron\"",
     "start:expo": "ELECTRON=true yarn workspace @wcpos/managed-expo start --port 8088 --https",
     "start:electron": "yarn && NODE_ENV=\"development\" electron-forge start",
-    "rebuild:all": "electron-rebuild -v 24.6.3 -f",
+    "rebuild:all": "electron-rebuild -v 24.7.0 -f",
     "package": "DEBUG=electron-osx-sign* electron-forge package",
     "make": "electron-forge make",
-    "make-macos-arm64": "electron-forge make --platform=darwin --arch=arm64",
     "publish-app": "electron-forge publish",
     "lint": "eslint --ext .tsx --ext .ts ./",
     "test": "echo 'Nothing to test'",
     "ts:check": "yarn tsc --noEmit"
   },
-  "resolutions": {
-    "**/electron": "24.6.3",
-    "**/node-gyp": "9.0.0"
-  },
   "dependencies": {
     "@sentry/electron": "^4.9.0",
     "@transifex/native": "^5.4.0",
     "axios": "^1.4.0",
-    "better-sqlite3": "8.0.1",
+    "better-sqlite3": "8.5.0",
     "electron-log": "5.0.0-beta.25"
   },
   "devDependencies": {
@@ -41,12 +36,12 @@
     "@electron-forge/plugin-webpack": "^6.2.1",
     "@electron-forge/publisher-github": "^6.2.1",
     "@electron-forge/shared-types": "^6.2.1",
-    "@electron/rebuild": "3.2.10",
+    "@electron/rebuild": "3.2.13",
     "@types/webpack-node-externals": "^3.0.0",
     "@vercel/webpack-asset-relocator-loader": "^1.7.3",
     "@wcpos/eslint-config": "*",
     "concurrently": "^8.2.0",
-    "electron": "24.6.3",
+    "electron": "24.7.0",
     "electron-debug": "^3.2.0",
     "electron-devtools-installer": "^3.2.0",
     "electron-forge-maker-appimage": "https://github.com/logseq/electron-forge-maker-appimage.git",
