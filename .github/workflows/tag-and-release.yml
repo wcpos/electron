@@ -58,6 +58,11 @@ jobs:
           yarn rebuild:all
           yarn make
 
+      - name: Verify Mac Signing & Entitlements
+        run: |
+          codesign --verify --deep --strict --verbose=2 ./out/WooCommerce\ POS-darwin-x64/WooCommerce\ POS.app
+          codesign -d --entitlements :- ./out/WooCommerce\ POS-darwin-x64/WooCommerce\ POS.app
+
       - name: Publish macOS release
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}

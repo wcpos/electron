@@ -25,7 +25,7 @@ const config: ForgeConfig = {
 		executableName: 'WooCommercePOS',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
-		extraResource: [path.resolve(__dirname, 'dist'), path.resolve(__dirname, 'icons')],
+		extraResource: [path.resolve(__dirname, 'dist')],
 		osxSign: {},
 		osxNotarize: isOnGithubActions
 			? {
