@@ -19,6 +19,10 @@
     "test": "echo 'Nothing to test'",
     "ts:check": "yarn tsc --noEmit"
   },
+  "resolutions": {
+    "**/electron": "24.6.3",
+    "**/node-gyp": "9.0.0"
+  },
   "dependencies": {
     "@sentry/electron": "^4.9.0",
     "@transifex/native": "^5.4.0",

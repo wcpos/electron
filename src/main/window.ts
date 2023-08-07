@@ -19,7 +19,7 @@ export const createWindow = (): void => {
 		show: false,
 		width: 1024,
 		height: 728,
-		// icon: path.join(__dirname, '../../icons/icon.ico'),
+		icon: path.join(__dirname, '../../icons/icon.ico'),
 		webPreferences: {
 			preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
 			sandbox: false, // required for preload script to work
@@ -58,20 +58,20 @@ export const createWindow = (): void => {
 	// If page not found, go to index page
 	// TODO - hack fix for reload when on a react-navigation route
 	mainWindow.webContents.on('did-fail-load', async (err) => {
+		log.error('did-fail-load');
 		log.error(err);
 		mainWindow.loadURL(resolveHtmlPath('index.html'));
 	});
 
-	//
 	// Prevent all navigation events that would lead away from index.html
-	mainWindow.webContents.on('will-navigate', (event, url) => {
-		// Parse the path from the URL
-		const path = new URL(url).pathname;
+	// mainWindow.webContents.on('will-navigate', (event, url) => {
+	// 	// Parse the path from the URL
+	// 	const path = new URL(url).pathname;
 
-		event.preventDefault(); // Prevent the actual navigation
+	// 	event.preventDefault(); // Prevent the actual navigation
 
-		// Now you can handle the path within your SPA
-		// For example, send it to your renderer process:
-		win?.webContents.send('navigate', path);
-	});
+	// 	// Now you can handle the path within your SPA
+	// 	// For example, send it to your renderer process:
+	// 	mainWindow?.webContents.send('navigate', path);
+	// });
 };

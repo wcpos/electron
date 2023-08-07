@@ -25,7 +25,7 @@ const config: ForgeConfig = {
 		executableName: 'WooCommercePOS',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
-		extraResource: [path.resolve(__dirname, 'dist')],
+		extraResource: [path.resolve(__dirname, 'dist'), path.resolve(__dirname, 'icons')],
 		osxSign: {},
 		osxNotarize: isOnGithubActions
 			? {
@@ -61,7 +61,13 @@ const config: ForgeConfig = {
 			loadingGif: path.resolve(__dirname, 'icons/installing.gif'),
 		}),
 		new MakerZIP({}, ['darwin', 'linux']),
-		new MakerDMG({ format: 'ULFO' }, ['darwin']),
+		new MakerDMG(
+			{
+				format: 'ULFO',
+				icon: path.resolve(__dirname, 'icons/icon.icns'),
+			},
+			['darwin']
+		),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
 			options: { bin: 'WooCommercePOS' },
