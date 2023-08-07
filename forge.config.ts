@@ -20,6 +20,7 @@ const isOnGithubActions = process.env.CI === 'true';
 
 const config: ForgeConfig = {
 	packagerConfig: {
+		asar: true,
 		name: 'WooCommerce POS',
 		executableName: 'WooCommercePOS',
 		buildVersion: `${pkg.version}`,

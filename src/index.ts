@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from 'electron';
 
-import { installExtensions } from './main/extensions';
+// import { installExtensions } from './main/extensions';
 import logger from './main/log';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
@@ -23,12 +23,16 @@ app
 	.then(loadTranslations)
 	// .then(installExtensions)
 	.then(() => {
+		logger.error('Create window');
 		createWindow();
 		initProtocolHandling();
 		registerMenu();
 		setupAutoUpdates();
 	})
-	.catch(logger.error);
+	.catch((err) => {
+		logger.error('Error starting app');
+		logger.error(err);
+	});
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

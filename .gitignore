@@ -96,3 +96,6 @@ databases/
 *.sqlite3
 
 dist/
+.yarn/cache
+*.lock
+.yarn/install-state.gz
