@@ -122,7 +122,7 @@ jobs:
         run: |
           yarn install
           yarn rebuild:all
-          yarn make --arch=arm64
+          yarn make --arch=arm64 --platform=darwin
 
       - name: Publish macOS release
         env:
