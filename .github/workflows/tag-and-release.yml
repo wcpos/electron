@@ -62,9 +62,6 @@ jobs:
 
       - name: Install, build and publish
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
@@ -73,6 +70,9 @@ jobs:
 
       - name: Publish MacOS x64 release
         env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           yarn publish-app
@@ -99,9 +99,6 @@ jobs:
 
       - name: Install and build
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
@@ -110,6 +107,9 @@ jobs:
 
       - name: Publish MacOS arm64 release
         env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCH: arm64
         run: |
