@@ -6,163 +6,7 @@ on:
       - main
 
 jobs:
-  publish-macos:
-    runs-on: macos-latest
-
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
-
-      - name: Check out Expo repository
-        run: |
-          git clone https://github.com/wcpos/managed-expo.git expo
-          touch expo/yarn.lock
-
-      - name: Install Node.js, NPM and Yarn
-        uses: actions/setup-node@v3
-        with:
-          node-version: 16
-
-      - name: Install Expo dependencies
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
-        run: |
-          cd expo
-          yarn install
-
-      - name: Run Expo export
-        run: |
-          cd expo
-          yarn export:electron
-
-      - name: Move Expo 'dist' directory
-        run: |
-          mv expo/dist .
-          rm -rf expo
-          node scripts/fix-expo-bundle.js
-
-      - name: Signing By Apple Developer ID
-        uses: apple-actions/import-codesign-certs@v1
-        with:
-          p12-file-base64: ${{ secrets.MAC_CERTS }}
-          p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
-
-      - name: Install, build and publish
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
-        run: |
-          yarn install
-          yarn rebuild:all
-          yarn make
-          yarn publish-app
-
-  publish-macos-arm64:
-    runs-on: macos-latest
-
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
-
-      - name: Check out Expo repository
-        run: |
-          git clone https://github.com/wcpos/managed-expo.git expo
-          touch expo/yarn.lock
-
-      - name: Install Node.js, NPM and Yarn
-        uses: actions/setup-node@v3
-        with:
-          node-version: 16
-
-      - name: Install Expo dependencies
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
-        run: |
-          cd expo
-          yarn install
-
-      - name: Run Expo export
-        run: |
-          cd expo
-          yarn export:electron
-
-      - name: Move Expo 'dist' directory
-        run: |
-          mv expo/dist .
-          rm -rf expo
-          node scripts/fix-expo-bundle.js
-
-      - name: Signing By Apple Developer ID
-        uses: apple-actions/import-codesign-certs@v1
-        with:
-          p12-file-base64: ${{ secrets.MAC_CERTS }}
-          p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
-
-      - name: Install, build and publish
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
-        run: |
-          yarn install
-          yarn rebuild:all
-          yarn make --arch=arm64 --platform=darwin
-          yarn publish-app
-
-  publish-windows:
-    runs-on: windows-latest
-
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
-
-      - name: Check out Expo repository
-        run: |
-          git clone https://github.com/wcpos/managed-expo.git expo
-          touch expo/yarn.lock
-
-      - name: Install Node.js, NPM and Yarn
-        uses: actions/setup-node@v3
-        with:
-          node-version: 16
-
-      - name: Install Expo dependencies
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
-        run: |
-          cd expo
-          yarn install
-
-      - name: Run Expo export
-        run: |
-          cd expo
-          yarn export:electron
-
-      - name: Move Expo 'dist' directory
-        run: |
-          mv expo/dist .
-          Remove-Item -Recurse -Force expo
-          node scripts/fix-expo-bundle.js
-
-      - name: Install and build
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
-        run: |
-          yarn install
-          yarn rebuild:all
-          yarn make
-
-      - name: Publish Windows release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          yarn publish-app
-
-  publish-linux:
+  build-expo:
     runs-on: ubuntu-latest
 
     steps:
@@ -190,12 +34,120 @@ jobs:
         run: |
           cd expo
           yarn export:electron
-
-      - name: Move Expo 'dist' directory
-        run: |
-          mv expo/dist .
-          rm -rf expo
           node scripts/fix-expo-bundle.js
+
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: expo-dist
+          path: expo/dist
+
+  publish-macos:
+    needs: build-expo
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Download expo-dist artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: expo-dist
+          path: dist
+
+      - name: Signing By Apple Developer ID
+        uses: apple-actions/import-codesign-certs@v1
+        with:
+          p12-file-base64: ${{ secrets.MAC_CERTS }}
+          p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
+
+      - name: Install, build and publish
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+        run: |
+          yarn install
+          yarn rebuild:all
+          yarn make
+          yarn publish-app
+
+  publish-macos-arm64:
+    needs: build-expo
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Download expo-dist artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: expo-dist
+          path: dist
+
+      - name: Signing By Apple Developer ID
+        uses: apple-actions/import-codesign-certs@v1
+        with:
+          p12-file-base64: ${{ secrets.MAC_CERTS }}
+          p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
+
+      - name: Install, build and publish
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+        run: |
+          yarn install
+          yarn rebuild:all
+          node scripts/apple-silicon.js
+          yarn publish-app
+
+  publish-windows:
+    needs: build-expo
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Download expo-dist artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: expo-dist
+          path: dist
+
+      - name: Install and build
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+        run: |
+          yarn install
+          yarn rebuild:all
+          yarn make
+
+      - name: Publish Windows release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          yarn publish-app
+
+  publish-linux:
+    needs: build-expo
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Download expo-dist artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: expo-dist
+          path: dist
 
       - name: Install and build
         env:
