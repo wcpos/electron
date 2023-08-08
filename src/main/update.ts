@@ -1,6 +1,6 @@
 import fs from 'fs';
 
-import { dialog, MenuItem } from 'electron';
+import { dialog, MenuItem, app } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 import log from './log';
@@ -9,6 +9,11 @@ import { t } from './translations';
 let updater: MenuItem | undefined;
 let isSilentCheck = true;
 autoUpdater.autoDownload = false;
+
+const server = 'https://update.electronjs.org';
+const feed = `${server}/wcpos/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
+
+autoUpdater.setFeedURL(feed);
 
 autoUpdater.on('error', (error) => {
 	dialog.showErrorBox('Error: ', error == null ? 'unknown' : (error.stack || error).toString());
