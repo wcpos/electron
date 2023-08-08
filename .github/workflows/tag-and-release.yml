@@ -10,9 +10,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
-
       - name: Check out Expo repository
         run: |
           git clone https://github.com/wcpos/managed-expo.git expo
@@ -30,11 +27,18 @@ jobs:
           cd expo
           yarn install
 
-      - name: Run Expo export
+      - name: Run Expo export and fix bundle
         run: |
           cd expo
           yarn export:electron
-          node scripts/fix-expo-bundle.js
+          # Begin fix '/bundles' path
+          const fs = require('fs');
+          const path = require('path');
+          const indexPath = path.join(__dirname, 'dist', 'index.html');
+          let htmlContent = fs.readFileSync(indexPath, 'utf8');
+          htmlContent = htmlContent.replace('src="/bundles', 'src="bundles');
+          fs.writeFileSync(indexPath, htmlContent);
+          # End fix '/bundles' path
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v2
