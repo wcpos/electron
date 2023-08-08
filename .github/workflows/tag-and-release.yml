@@ -70,6 +70,11 @@ jobs:
           yarn install
           yarn rebuild:all
           yarn make
+
+      - name: Publish MacOS x64 release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           yarn publish-app
 
   publish-macos-arm64:
@@ -92,18 +97,23 @@ jobs:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
-      - name: Install, build and publish
+      - name: Install and build
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
           yarn rebuild:all
-          node scripts/apple-silicon.js
-          yarn publish-app
+          yarn make --arch=arm64 --platform=darwin
+
+      - name: Publish MacOS arm64 release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCH: arm64
+        run: |
+          yarn publish-app --arch=arm64 --platform=darwin
 
   publish-windows:
     needs: build-expo

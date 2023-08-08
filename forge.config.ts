@@ -53,6 +53,7 @@ const config: ForgeConfig = {
 				force: true,
 			});
 		},
+		// prePackage: async (forgeConfig, platform, arch) => {},
 	},
 	makers: [
 		new MakerSquirrel({
