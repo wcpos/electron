@@ -35,7 +35,7 @@ jobs:
           sed -i 's/src="\/bundles/src="bundles/g' dist/index.html
 
       - name: Archive production artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: expo-dist
           path: expo/dist
