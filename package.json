@@ -41,7 +41,7 @@
     "@vercel/webpack-asset-relocator-loader": "^1.7.3",
     "@wcpos/eslint-config": "*",
     "concurrently": "^8.2.0",
-    "electron": "24.7.0",
+    "electron": "25.5.0",
     "electron-debug": "^3.2.0",
     "electron-devtools-installer": "^3.2.0",
     "electron-forge-maker-appimage": "https://github.com/logseq/electron-forge-maker-appimage.git",
