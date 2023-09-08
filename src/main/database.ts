@@ -74,22 +74,28 @@ function convertBooleansToNumbers(params: (string | number | boolean)[]): (strin
 ipcMain.handle('sqlite', (event, obj) => {
 	logger.debug('sql request', JSON.stringify(obj, null, 2));
 	try {
+		let db;
 		switch (obj.type) {
 			case 'open':
 				return openDatabase(obj.name);
 			case 'all':
-				const dbForAll = registry.get(obj.name);
-				const results = dbForAll
-					.prepare(obj.sql.query)
-					.all(convertBooleansToNumbers(obj.sql.params));
+				db = registry.get(obj.name);
+				if (!db) throw new Error(`Database connection "${obj.name}" not found`);
+
+				const results = db.prepare(obj.sql.query).all(convertBooleansToNumbers(obj.sql.params));
 				return results;
 			case 'run':
-				const dbForRun = registry.get(obj.name);
-				dbForRun.prepare(obj.sql.query).run(convertBooleansToNumbers(obj.sql.params));
+				db = registry.get(obj.name);
+				if (!db) throw new Error(`Database connection "${obj.name}" not found`);
+
+				db.prepare(obj.sql.query).run(convertBooleansToNumbers(obj.sql.params));
 				return { name: obj.name }; // or whatever you need to return
 			case 'close':
-				const dbForClose = registry.get(obj.name);
-				dbForClose.close();
+				db = registry.get(obj.name);
+				if (!db) throw new Error(`Database connection "${obj.name}" not found`);
+
+				db.close();
+				registry.delete(obj.name); // Remove the db from the registry after closing it
 				return;
 			case 'quit':
 				closeAll();

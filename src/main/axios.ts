@@ -30,13 +30,13 @@ ipcMain.handle('axios', (event, obj) => {
 		return new Promise((resolve, reject) => {
 			axios
 				.request(obj.config || {})
-				.then((res) => {
+				.then((response) => {
 					/**
 					 * config and request contain objects that can't be structuredCloned
 					 * TODO - do I need anything from config or request?
 					 */
 					// const cloned = structuredClone({ ...res, config: null, request: null });
-					const cloned = { ...res, config: obj.config, request: null };
+					const cloned = { ...response, config: obj.config, request: null };
 					logger.silly('success', cloned);
 					resolve(cloned);
 				})
