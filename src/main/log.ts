@@ -36,4 +36,8 @@ logger.errorHandler.startCatching({
 	},
 });
 
+process.on('uncaughtException', (error) => {
+	logger.error('Uncaught exception:', error);
+});
+
 export default logger;

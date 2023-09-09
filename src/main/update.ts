@@ -79,9 +79,9 @@ const canUpdate = () => {
 };
 
 export const setupAutoUpdates = () => {
-	if (!canUpdate()) {
-		return;
-	}
+	// if (!canUpdate()) {
+	// 	return;
+	// }
 
 	log.transports.file.level = 'info';
 	autoUpdater.logger = log;
@@ -91,9 +91,9 @@ export const setupAutoUpdates = () => {
 
 // export this to MenuItem click callback
 export function checkForUpdates(menuItem, focusedWindow, event) {
-	if (!canUpdate()) {
-		return;
-	}
+	// if (!canUpdate()) {
+	// 	return;
+	// }
 
 	if (menuItem) {
 		updater = menuItem;

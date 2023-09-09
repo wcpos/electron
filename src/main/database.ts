@@ -25,37 +25,35 @@ const openDatabase = (name: string) => {
 		return { name };
 	}
 
-	/**
-	 *
-	 */
-	const dbFolder =
-		process.env.NODE_ENV === 'development'
+	try {
+		/**
+		 * Determine database folder
+		 */
+		const dbFolder = isDevelopment
 			? path.resolve('databases')
 			: path.resolve(app.getPath('userData'), 'databases');
 
-	if (!fs.existsSync(dbFolder)) {
-		fs.mkdirSync(dbFolder);
-		logger.info(`Folder '${dbFolder}' created`);
+		/**
+		 * Create folder if it doesn't exist
+		 */
+		if (!fs.existsSync(dbFolder)) {
+			fs.mkdirSync(dbFolder);
+			logger.info(`Folder '${dbFolder}' created`);
+		}
+
+		/**
+		 * Open database
+		 */
+		logger.info('Opening SQLite database', name);
+		const db = new Database(path.resolve(dbFolder, `${name}.sqlite3`), { verbose: logger.debug });
+		logger.info('Opened SQLite database', db);
+
+		registry.set(name, db);
+		return { name };
+	} catch (error) {
+		logger.error('Failed to open database', error);
+		throw error; // Re-throw the error after logging it to allow further handling upstream
 	}
-
-	/**
-	 *
-	 */
-	const db = new Database(
-		path.resolve(dbFolder, `${name}.sqlite3`)
-		// sqlite.OPEN_READWRITE | sqlite.OPEN_CREATE,
-		// (err) => {
-		// 	if (err) {
-		// 		logger.error('Could not connect to database', err);
-		// 	} else {
-		// 		logger.info('Connected to database!');
-		// 	}
-		// }
-	);
-
-	logger.info('Opening SQLite database', db);
-	registry.set(name, db);
-	return { name };
 };
 
 export const closeAll = () => {
