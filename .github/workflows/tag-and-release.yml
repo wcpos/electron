@@ -46,7 +46,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download expo-dist artifact
         uses: actions/download-artifact@v2
@@ -86,7 +86,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download expo-dist artifact
         uses: actions/download-artifact@v2
@@ -127,7 +127,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download expo-dist artifact
         uses: actions/download-artifact@v2
@@ -155,7 +155,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download expo-dist artifact
         uses: actions/download-artifact@v2
