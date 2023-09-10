@@ -50,6 +50,7 @@
     "electron-store": "^8.1.0",
     "electron-updater": "^6.1.4",
     "node-loader": "^2.0.0",
+    "publisher-github-latest-yml": "https://github.com/kilbot/publisher-github-latest-yml#main",
     "ts-loader": "^9.4.4",
     "ts-node": "^10.9.1",
     "typescript": "~5.2.2"

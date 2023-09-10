@@ -1,4 +1,6 @@
-import fs from 'fs';
+import crypto from 'crypto';
+import { rmSync } from 'fs';
+import { readFile, writeFile } from 'fs/promises';
 import path from 'path';
 
 import { MakerDeb } from '@electron-forge/maker-deb';
@@ -10,12 +12,13 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import MakerAppImage from 'electron-forge-maker-appimage';
+import PublisherGithubLatestYml from 'publisher-github-latest-yml';
 
 import pkg from './package.json';
 import { mainConfig } from './webpack.main.config';
 import { rendererConfig } from './webpack.renderer.config';
 
-import type { ForgeConfig } from '@electron-forge/shared-types';
+import type { ForgeConfig, ForgeMakeResult } from '@electron-forge/shared-types';
 
 const isOnGithubActions = process.env.CI === 'true';
 
@@ -48,12 +51,11 @@ const config: ForgeConfig = {
 			const sqliteBuildPath = path.join(buildPath, 'node_modules', 'better-sqlite3', 'build');
 			// console.log("Sqlite BuildPath: ", sqliteBuildPath);
 			// needs to be deleted otherwise macos codesign will fail
-			fs.rmSync(sqliteBuildPath, {
+			rmSync(sqliteBuildPath, {
 				recursive: true,
 				force: true,
 			});
 		},
-		// prePackage: async (forgeConfig, platform, arch) => {},
 	},
 	makers: [
 		new MakerSquirrel({
@@ -87,6 +89,12 @@ const config: ForgeConfig = {
 				name: 'electron',
 			},
 			draft: true,
+		}),
+		new PublisherGithubLatestYml({
+			repository: {
+				owner: 'wcpos',
+				name: 'electron',
+			},
 		}),
 	],
 	plugins: [
