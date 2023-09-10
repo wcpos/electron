@@ -72,11 +72,11 @@ const config: ForgeConfig = {
 		),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
-			options: { bin: 'WooCommercePOS' },
+			options: { bin: 'WooCommerce-POS' },
 		}),
 		new MakerDeb({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
-			options: { bin: 'WooCommercePOS' },
+			options: { bin: 'WooCommerce-POS' },
 		}),
 		new MakerAppImage({}, ['linux']),
 	],
