@@ -1,6 +1,4 @@
-import crypto from 'crypto';
 import { rmSync } from 'fs';
-import { readFile, writeFile } from 'fs/promises';
 import path from 'path';
 
 import { MakerDeb } from '@electron-forge/maker-deb';
@@ -18,14 +16,14 @@ import pkg from './package.json';
 import { mainConfig } from './webpack.main.config';
 import { rendererConfig } from './webpack.renderer.config';
 
-import type { ForgeConfig, ForgeMakeResult } from '@electron-forge/shared-types';
+import type { ForgeConfig } from '@electron-forge/shared-types';
 
 const isOnGithubActions = process.env.CI === 'true';
 
 const config: ForgeConfig = {
 	packagerConfig: {
-		name: 'WooCommerce POS',
-		executableName: 'WooCommercePOS',
+		name: 'WooCommerce-POS',
+		executableName: 'WooCommerce-POS',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
@@ -40,7 +38,7 @@ const config: ForgeConfig = {
 			: undefined,
 		protocols: [
 			{
-				name: 'WooCommerce POS',
+				name: 'WooCommerce-POS',
 				schemes: ['wcpos'],
 			},
 		],
@@ -59,7 +57,7 @@ const config: ForgeConfig = {
 	},
 	makers: [
 		new MakerSquirrel({
-			name: 'WooCommercePOS',
+			name: 'WooCommerce-POS',
 			setupIcon: path.resolve(__dirname, 'icons/icon.ico'),
 			loadingGif: path.resolve(__dirname, 'icons/installing.gif'),
 		}),
@@ -73,11 +71,11 @@ const config: ForgeConfig = {
 		),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
-			options: { bin: 'WooCommercePOS' },
+			options: { bin: 'WooCommerce-POS' },
 		}),
 		new MakerDeb({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
-			options: { bin: 'WooCommercePOS' },
+			options: { bin: 'WooCommerce-POS' },
 		}),
 		new MakerAppImage({}, ['linux']),
 	],
