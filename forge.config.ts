@@ -88,7 +88,6 @@ const config: ForgeConfig = {
 				owner: 'wcpos',
 				name: 'electron',
 			},
-			draft: true,
 		}),
 		new PublisherGithubLatestYml({
 			repository: {
