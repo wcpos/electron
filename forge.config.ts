@@ -22,8 +22,7 @@ const isOnGithubActions = process.env.CI === 'true';
 
 const config: ForgeConfig = {
 	packagerConfig: {
-		name: 'WooCommerce POS',
-		executableName: 'WooCommerce-POS',
+		name: 'WooCommerce-POS',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
@@ -57,14 +56,12 @@ const config: ForgeConfig = {
 	},
 	makers: [
 		new MakerSquirrel({
-			name: 'WooCommerce-POS',
 			setupIcon: path.resolve(__dirname, 'icons/icon.ico'),
 			loadingGif: path.resolve(__dirname, 'icons/installing.gif'),
 		}),
 		new MakerZIP({}, ['darwin', 'linux']),
 		new MakerDMG(
 			{
-				name: 'WooCommerce-POS',
 				format: 'ULFO',
 				icon: path.resolve(__dirname, 'icons/icon.icns'),
 			},
@@ -72,11 +69,11 @@ const config: ForgeConfig = {
 		),
 		new MakerRpm({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
-			options: { bin: 'WooCommerce-POS' },
+			// options: { bin: 'WooCommerce-POS' },
 		}),
 		new MakerDeb({
 			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
-			options: { bin: 'WooCommerce-POS' },
+			// options: { bin: 'WooCommerce-POS' },
 		}),
 		new MakerAppImage({}, ['linux']),
 	],
