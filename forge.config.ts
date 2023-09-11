@@ -10,6 +10,7 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import MakerAppImage from 'electron-forge-maker-appimage';
+import { move } from 'fs-extra';
 import PublisherGithubLatestYml from 'publisher-github-latest-yml';
 
 import pkg from './package.json';
@@ -53,6 +54,27 @@ const config: ForgeConfig = {
 				recursive: true,
 				force: true,
 			});
+		},
+		postMake: async (forgeConfig, makeResults) => {
+			// Having a space in the name is not allowed on GitHub releases
+			for (const result of makeResults) {
+				for (const artifactPath of result.artifacts) {
+					const parsedPath = path.parse(artifactPath);
+					const newBaseName = parsedPath.base.replace(/ /g, '-');
+					const newArtifactPath = path.join(parsedPath.dir, newBaseName);
+
+					if (artifactPath !== newArtifactPath) {
+						await move(artifactPath, newArtifactPath);
+					}
+
+					// Update the artifact path in the result object
+					result.artifacts = result.artifacts.map((artifact) =>
+						artifact === artifactPath ? newArtifactPath : artifact
+					);
+				}
+			}
+
+			return makeResults;
 		},
 	},
 	makers: [
