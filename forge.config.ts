@@ -23,7 +23,7 @@ const isOnGithubActions = process.env.CI === 'true';
 const config: ForgeConfig = {
 	packagerConfig: {
 		name: 'WooCommerce POS',
-		executableName: 'WooCommerce-POS',
+		executableName: 'WooCommercePOS',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
@@ -38,7 +38,7 @@ const config: ForgeConfig = {
 			: undefined,
 		protocols: [
 			{
-				name: 'WooCommerce-POS',
+				name: 'WooCommerce POS',
 				schemes: ['wcpos'],
 			},
 		],
@@ -57,7 +57,7 @@ const config: ForgeConfig = {
 	},
 	makers: [
 		new MakerSquirrel({
-			name: 'WooCommerce POS',
+			name: 'WooCommercePOS',
 			setupIcon: path.resolve(__dirname, 'icons/icon.ico'),
 			loadingGif: path.resolve(__dirname, 'icons/installing.gif'),
 		}),
