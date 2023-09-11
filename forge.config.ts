@@ -10,7 +10,7 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import MakerAppImage from 'electron-forge-maker-appimage';
-import { move } from 'fs-extra';
+import { move, pathExists, remove } from 'fs-extra';
 import PublisherGithubLatestYml from 'publisher-github-latest-yml';
 
 import pkg from './package.json';
@@ -64,6 +64,10 @@ const config: ForgeConfig = {
 					const newArtifactPath = path.join(parsedPath.dir, newBaseName);
 
 					if (artifactPath !== newArtifactPath) {
+						if (await pathExists(newArtifactPath)) {
+							console.log(`File already exists at ${newArtifactPath}, removing...`);
+							await remove(newArtifactPath);
+						}
 						await move(artifactPath, newArtifactPath);
 					}
 
