@@ -22,7 +22,8 @@ const isOnGithubActions = process.env.CI === 'true';
 
 const config: ForgeConfig = {
 	packagerConfig: {
-		name: 'WooCommerce-POS',
+		name: 'WooCommerce POS',
+		executableName: 'WooCommerce-POS',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
