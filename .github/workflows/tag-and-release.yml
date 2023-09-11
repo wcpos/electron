@@ -81,7 +81,9 @@ jobs:
           yarn publish-app
 
   publish-macos-arm64:
-    needs: build-expo
+    needs:
+      - build-expo
+      - publish-macos
     runs-on: macos-latest
 
     steps:
