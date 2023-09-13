@@ -1,49 +1,54 @@
 import fs from 'fs';
 
-import { dialog, MenuItem, app } from 'electron';
-import { autoUpdater } from 'electron-updater';
+/**
+ * The default autoUpdater downloads the update automatically
+ * For the moment I will use electron-updater, but could be replaced with the default
+ * with a custom checkForUpdates function
+ */
+import { dialog, MenuItem, app, autoUpdater } from 'electron';
+// import { autoUpdater } from 'electron-updater';
 
 import log from './log';
 import { t } from './translations';
 
 let updater: MenuItem | undefined;
 let isSilentCheck = true;
-autoUpdater.autoDownload = false;
+// autoUpdater.autoDownload = false;
 
-const server = 'https://update.electronjs.org';
-const feed = `${server}/wcpos/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
+const server = 'https://updates.wcpos.com';
+const url = `${server}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
 
-autoUpdater.setFeedURL(feed);
+autoUpdater.setFeedURL({ url });
 
 autoUpdater.on('error', (error) => {
 	dialog.showErrorBox('Error: ', error == null ? 'unknown' : (error.stack || error).toString());
 });
 
-autoUpdater.on('update-available', () => {
-	dialog
-		.showMessageBox({
-			type: 'info',
-			title: t('Found Updates', { _tags: 'electron' }),
-			message: t('Found updates, do you want update now?', { _tags: 'electron' }),
-			buttons: [t('Yes'), t('No')],
-		})
-		.then(({ response }) => {
-			if (response === 0) {
-				autoUpdater.downloadUpdate().catch((err) => {
-					log.error('Error downloading update', err);
-					if (err.message && err.message.includes('file already exists') && err.path) {
-						// If the file already exists, then it's probably a partial download
-						// so we'll just delete it and try again
-						// fs.unlinkSync(err.path);
-						// autoUpdater.downloadUpdate();
-					}
-				});
-			} else if (updater) {
-				updater.enabled = true;
-				updater = undefined;
-			}
-		});
-});
+// autoUpdater.on('update-available', () => {
+// 	dialog
+// 		.showMessageBox({
+// 			type: 'info',
+// 			title: t('Found Updates', { _tags: 'electron' }),
+// 			message: t('Found updates, do you want update now?', { _tags: 'electron' }),
+// 			buttons: [t('Yes'), t('No')],
+// 		})
+// 		.then(({ response }) => {
+// 			if (response === 0) {
+// 				autoUpdater.downloadUpdate().catch((err) => {
+// 					log.error('Error downloading update', err);
+// 					if (err.message && err.message.includes('file already exists') && err.path) {
+// 						// If the file already exists, then it's probably a partial download
+// 						// so we'll just delete it and try again
+// 						// fs.unlinkSync(err.path);
+// 						// autoUpdater.downloadUpdate();
+// 					}
+// 				});
+// 			} else if (updater) {
+// 				updater.enabled = true;
+// 				updater = undefined;
+// 			}
+// 		});
+// });
 
 autoUpdater.on('update-not-available', () => {
 	if (!isSilentCheck) {
@@ -83,8 +88,8 @@ export const setupAutoUpdates = () => {
 	// 	return;
 	// }
 
-	log.transports.file.level = 'info';
-	autoUpdater.logger = log;
+	// log.transports.file.level = 'info';
+	// autoUpdater.logger = log;
 	// autoUpdater.checkForUpdatesAndNotify();
 	autoUpdater.checkForUpdates();
 };

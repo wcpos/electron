@@ -1,9 +1,7 @@
 import { rmSync } from 'fs';
 import path from 'path';
 
-import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerDMG } from '@electron-forge/maker-dmg';
-import { MakerRpm } from '@electron-forge/maker-rpm';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 // import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
@@ -11,7 +9,7 @@ import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import MakerAppImage from 'electron-forge-maker-appimage';
 import { move, pathExists, remove } from 'fs-extra';
-import PublisherGithubLatestYml from 'publisher-github-latest-yml';
+// import PublisherGithubLatestYml from 'publisher-github-latest-yml';
 
 import pkg from './package.json';
 import { mainConfig } from './webpack.main.config';
@@ -95,14 +93,14 @@ const config: ForgeConfig = {
 			},
 			['darwin']
 		),
-		new MakerRpm({
-			// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
-			options: { bin: 'WooCommercePOS' },
-		}),
-		new MakerDeb({
-			// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
-			options: { bin: 'WooCommercePOS' },
-		}),
+		// new MakerRpm({
+		// 	// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
+		// 	options: { bin: 'WooCommercePOS' },
+		// }),
+		// new MakerDeb({
+		// 	// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
+		// 	options: { bin: 'WooCommercePOS' },
+		// }),
 		new MakerAppImage({}, ['linux']),
 	],
 	publishers: [
@@ -113,12 +111,12 @@ const config: ForgeConfig = {
 				name: 'electron',
 			},
 		}),
-		new PublisherGithubLatestYml({
-			repository: {
-				owner: 'wcpos',
-				name: 'electron',
-			},
-		}),
+		// new PublisherGithubLatestYml({
+		// 	repository: {
+		// 		owner: 'wcpos',
+		// 		name: 'electron',
+		// 	},
+		// }),
 	],
 	plugins: [
 		// new AutoUnpackNativesPlugin({}),
