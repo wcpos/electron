@@ -5,7 +5,7 @@ import logger from './main/log';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
 import { loadTranslations } from './main/translations';
-import { setupAutoUpdates } from './main/update';
+import { updater } from './main/update';
 import { createWindow } from './main/window';
 import './main/database';
 import './main/axios';
@@ -27,7 +27,7 @@ app
 		createWindow();
 		initProtocolHandling();
 		registerMenu();
-		setupAutoUpdates();
+		updater.init(); // must be after createWindow
 	})
 	.catch((err) => {
 		logger.error('Error starting app');

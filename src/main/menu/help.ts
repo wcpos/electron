@@ -2,19 +2,13 @@
 import { MenuItemConstructorOptions } from 'electron';
 
 import { t } from '../translations';
-import { manualCheckForUpdates } from '../update';
+import { updater } from '../update';
+import { isMac } from '../util';
 
 export const baseHelpMenu: MenuItemConstructorOptions = {
 	role: 'help',
 	submenu: [
-		// {
-		// 	label: isMac ? 'Stencila Help' : 'Help Center',
-		// 	click: async (): Promise<void> => {
-		// 		const { shell } = await import('electron');
-		// 		await shell.openExternal('http://help.stenci.la');
-		// 	},
-		// },
-		// { type: 'separator' },
+		...(!isMac ? [{ role: 'about' }, { type: 'separator' }] : []),
 		{
 			label: t('Report an Issue', { _tags: 'electron' }) + '…',
 			click: async () => {
@@ -32,7 +26,7 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 		{ type: 'separator' },
 		{
 			label: t('Check for Updates', { _tags: 'electron' }) + '…',
-			click: manualCheckForUpdates,
+			click: updater.manualCheckForUpdates,
 		},
 		// {
 		// 	label: 'Setup…',
