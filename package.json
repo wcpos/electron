@@ -9,7 +9,7 @@
   "scripts": {
     "start": "concurrently \"yarn start:expo\" \"yarn start:electron\"",
     "start:expo": "ELECTRON=true yarn workspace @wcpos/managed-expo start --port 8088 --https",
-    "start:electron": "yarn && NODE_ENV=\"development\" electron-forge start",
+    "start:electron": "yarn && NODE_ENV=\"development\" electron-forge start --enable-logging",
     "rebuild:all": "electron-rebuild -v 25.8.1 -f",
     "package": "DEBUG=electron-osx-sign* electron-forge package",
     "make": "electron-forge make",
@@ -23,7 +23,8 @@
     "@transifex/native": "^5.4.0",
     "axios": "^1.5.0",
     "better-sqlite3": "8.6.0",
-    "electron-log": "5.0.0-beta.29"
+    "electron-log": "5.0.0-beta.29",
+    "semver": "^7.5.4"
   },
   "devDependencies": {
     "@electron-forge/cli": "^6.4.2",

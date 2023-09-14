@@ -62,14 +62,10 @@ jobs:
 
       - name: Install and build
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
           yarn rebuild:all
-          yarn make
 
       - name: Publish MacOS x64 release
         env:
@@ -104,14 +100,10 @@ jobs:
 
       - name: Install and build
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
           yarn rebuild:all
-          yarn make --arch=arm64 --platform=darwin
 
       - name: Publish MacOS arm64 release
         env:
@@ -143,7 +135,6 @@ jobs:
         run: |
           yarn install
           yarn rebuild:all
-          yarn make
 
       - name: Publish Windows release
         env:
@@ -171,7 +162,6 @@ jobs:
         run: |
           yarn install
           yarn rebuild:all
-          yarn make
 
       - name: Publish Linux release
         env:

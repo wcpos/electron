@@ -2,7 +2,7 @@
 import { MenuItemConstructorOptions } from 'electron';
 
 import { t } from '../translations';
-import { checkForUpdates } from '../update';
+import { manualCheckForUpdates } from '../update';
 import { isMac, isWindows } from '../util';
 
 export const baseHelpMenu: MenuItemConstructorOptions = {
@@ -35,7 +35,7 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 			? [
 					{
 						label: t('Check for Updates', { _tags: 'electron' }) + '…',
-						click: checkForUpdates,
+						click: manualCheckForUpdates,
 					},
 			  ]
 			: []),

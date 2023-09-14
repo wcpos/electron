@@ -2,7 +2,7 @@
 import { MenuItemConstructorOptions } from 'electron';
 
 import { t } from '../translations';
-import { checkForUpdates } from '../update';
+import { manualCheckForUpdates } from '../update';
 import { isMac } from '../util';
 
 export const baseAppMenu: MenuItemConstructorOptions[] = isMac
@@ -13,7 +13,7 @@ export const baseAppMenu: MenuItemConstructorOptions[] = isMac
 					{ role: 'about' },
 					{
 						label: t('Check for Updates', { _tags: 'electron' }) + '…',
-						click: checkForUpdates,
+						click: manualCheckForUpdates,
 					},
 					// { type: 'separator' },
 					// {

@@ -13,9 +13,11 @@ declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 
+let mainWindow: BrowserWindow | null;
+
 export const createWindow = (): void => {
 	// Create the browser window.
-	let mainWindow = new BrowserWindow({
+	mainWindow = new BrowserWindow({
 		show: false,
 		width: 1024,
 		height: 728,
@@ -73,4 +75,8 @@ export const createWindow = (): void => {
 	// 	// For example, send it to your renderer process:
 	// 	mainWindow?.webContents.send('navigate', path);
 	// });
+};
+
+export const getMainWindow = (): BrowserWindow | null => {
+	return mainWindow;
 };

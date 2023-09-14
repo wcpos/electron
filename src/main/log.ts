@@ -16,9 +16,9 @@ logger.errorHandler.startCatching({
 			.showMessageBox({
 				title: 'An error occurred',
 				message: error.message,
-				detail: error.stack,
+				// detail: error.stack, // there is too much info here
 				type: 'error',
-				buttons: ['Ignore', 'Report', 'Exit'],
+				buttons: ['Quit', 'Report', 'Ignore'],
 			})
 			.then((result) => {
 				if (result.response === 1) {
@@ -29,7 +29,7 @@ logger.errorHandler.startCatching({
 					return;
 				}
 
-				if (result.response === 2) {
+				if (result.response === 0) {
 					app.quit();
 				}
 			});
