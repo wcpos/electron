@@ -121,7 +121,7 @@ async function installUpdates() {
 async function downloadAndInstallUpdates(assets: Asset[]) {
 	try {
 		await Promise.all(assets.map((asset) => download(asset.name, asset.url)));
-		// await installUpdates();
+		await installUpdates();
 	} catch (error) {
 		logger.error('Error applying the updates', error);
 	}
