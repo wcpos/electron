@@ -1,5 +1,5 @@
 // import { showSettings } from '../config/window';
-import { MenuItemConstructorOptions } from 'electron';
+import { MenuItemConstructorOptions, MenuItem } from 'electron';
 
 import { t } from '../translations';
 import { updater } from '../update';
@@ -13,7 +13,7 @@ export const baseAppMenu: MenuItemConstructorOptions[] = isMac
 					{ role: 'about' },
 					{
 						label: t('Check for Updates', { _tags: 'electron' }) + '…',
-						click: updater.manualCheckForUpdates,
+						click: (menuItem: MenuItem) => updater.manualCheckForUpdates(menuItem),
 					},
 					// { type: 'separator' },
 					// {

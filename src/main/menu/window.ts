@@ -36,7 +36,7 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 			{ role: 'toggleDevTools' },
 			{
 				label: t('Clear App Data', { _tags: 'electron' }),
-				click: clearAppDataDialog,
+				click: () => clearAppDataDialog(),
 			},
 		],
 	},

@@ -1,5 +1,5 @@
 // import { openOnboardingWindow } from '../onboarding/window';
-import { MenuItemConstructorOptions } from 'electron';
+import { MenuItemConstructorOptions, MenuItem } from 'electron';
 
 import { t } from '../translations';
 import { updater } from '../update';
@@ -26,7 +26,7 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 		{ type: 'separator' },
 		{
 			label: t('Check for Updates', { _tags: 'electron' }) + '…',
-			click: updater.manualCheckForUpdates,
+			click: (menuItem: MenuItem) => updater.manualCheckForUpdates(menuItem),
 		},
 		// {
 		// 	label: 'Setup…',
