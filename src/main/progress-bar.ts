@@ -24,6 +24,10 @@ export default class ProgressBar {
 			// frame: false,
 			// titleBarStyle: 'hidden',
 		});
+
+		// Remove the menu from the progress window
+		win.setMenu(null);
+
 		this.progressWindow = win;
 
 		win.loadURL('data:text/html;charset=UTF8,' + encodeURIComponent(htmlContent));

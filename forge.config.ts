@@ -85,7 +85,7 @@ const config: ForgeConfig = {
 			setupIcon: path.resolve(__dirname, 'icons/icon.ico'),
 			loadingGif: path.resolve(__dirname, 'icons/installing.gif'),
 		}),
-		new MakerZIP({}, ['darwin', 'linux']),
+		new MakerZIP({}, ['darwin']),
 		new MakerDMG(
 			{
 				format: 'ULFO',
@@ -101,7 +101,15 @@ const config: ForgeConfig = {
 		// 	// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
 		// 	options: { bin: 'WooCommercePOS' },
 		// }),
-		new MakerAppImage({}, ['linux']),
+		new MakerAppImage(
+			{
+				options: {
+					icon: path.resolve(__dirname, 'icons/icon.png'),
+					categories: ['Office'],
+				},
+			},
+			['linux']
+		),
 	],
 	publishers: [
 		new PublisherGithub({

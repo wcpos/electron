@@ -61,7 +61,9 @@ export const createWindow = (): void => {
 	// TODO - hack fix for reload when on a react-navigation route
 	mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription) => {
 		log.error(`did fail load with code ${errorCode}: ${errorDescription}`);
-		mainWindow.loadURL(resolveHtmlPath('index.html'));
+		if (errorDescription !== 'ERR_CONNECTION_REFUSED') {
+			mainWindow.loadURL(resolveHtmlPath('index.html'));
+		}
 	});
 
 	// Prevent all navigation events that would lead away from index.html

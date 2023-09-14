@@ -1,10 +1,11 @@
-import fs from 'fs';
+import { createWriteStream, createReadStream, stat } from 'fs';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
 
 import axios from 'axios';
-import { dialog, MenuItem, app, autoUpdater } from 'electron';
+import { dialog, MenuItem, app, autoUpdater, shell } from 'electron';
 import semver from 'semver';
 
 import logger from './log';
@@ -64,11 +65,54 @@ function getTmpDirectory() {
 /**
  *
  */
+function getProxyUrl(tempDirPath: string): Promise<string> {
+	const server = createServer();
+
+	server.on('request', async (request: IncomingMessage, response: ServerResponse) => {
+		const requestUrl = request.url!;
+		if (requestUrl.endsWith('.zip')) {
+			try {
+				const downloadedFile = path.join(tempDirPath, path.basename(requestUrl));
+				const fileStat = await promisify(stat)(downloadedFile);
+				const updateFileSize = fileStat.size;
+
+				const readStream = createReadStream(downloadedFile);
+				response.writeHead(200, {
+					'Content-Type': 'application/zip',
+					'Content-Length': updateFileSize,
+				});
+				readStream.pipe(response);
+			} catch (error) {
+				response.writeHead(500);
+				response.end(`Internal Server Error: ${error.message}`);
+			}
+		} else {
+			response.writeHead(404);
+			response.end('Not Found');
+		}
+	});
+
+	return new Promise((resolve, reject) => {
+		server.listen(0, '127.0.0.1', () => {
+			const address = server.address();
+			if (address && typeof address === 'object') {
+				const serverUrl = `http://127.0.0.1:${address.port}`;
+				resolve(serverUrl);
+			} else {
+				reject(new Error('Failed to obtain server address'));
+			}
+		});
+	});
+}
+
+/**
+ *
+ */
 async function download(name: string, url: string, showProgress = true): Promise<void> {
 	const finished = promisify(stream.finished);
 	const tempDirPath = getTmpDirectory();
 	const filePath = `${tempDirPath}/${name}`;
-	const writer = fs.createWriteStream(filePath, { flags: 'w+' });
+	const writer = createWriteStream(filePath, { flags: 'w+' });
 	const { data, headers } = await axios.get(url, { responseType: 'stream' });
 
 	if (showProgress || name !== 'RELEASES') {
@@ -94,6 +138,20 @@ async function download(name: string, url: string, showProgress = true): Promise
  *
  */
 async function installUpdates() {
+	const tempDirPath = getTmpDirectory();
+	let url = tempDirPath; // just a path works fine for windows
+
+	if (process.platform === 'linux') {
+		// I'm not sure what to do here, just open the temp direct and let the user install it?
+		shell.showItemInFolder(tempDirPath);
+		return; // don't continue
+	}
+
+	if (process.platform === 'darwin') {
+		// mac needs a server :/ electron-updater uses a similar method to get around this
+		url = await getProxyUrl(tempDirPath);
+	}
+
 	return new Promise((_resolve, reject) => {
 		autoUpdater.on('error', (error: Error) => reject(error));
 		autoUpdater.on('update-downloaded', () => {
@@ -109,8 +167,7 @@ async function installUpdates() {
 				});
 		});
 
-		const tempDirPath = getTmpDirectory();
-		autoUpdater.setFeedURL({ url: tempDirPath });
+		autoUpdater.setFeedURL({ url });
 		autoUpdater.checkForUpdates();
 	});
 }
@@ -152,7 +209,7 @@ export async function checkForUpdates() {
 	try {
 		const { data } = await axios.get(getUpdatesAPI());
 		const { version, name, assets, releaseDate, notes } = data;
-		const hasUpdate = semver.gt(version, app.getVersion());
+		const hasUpdate = semver.gt(semver.coerce(version), semver.coerce(app.getVersion()));
 
 		// early exit if no updates
 		if (!hasUpdate) {
