@@ -79,7 +79,7 @@ jobs:
   publish-macos-arm64:
     needs:
       - build-expo
-      - publish-macos
+      # - publish-macos
     runs-on: macos-latest
 
     steps:

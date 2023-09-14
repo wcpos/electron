@@ -23,7 +23,7 @@ app
 	.then(loadTranslations)
 	// .then(installExtensions)
 	.then(() => {
-		logger.error('Create window');
+		logger.error('Starting app');
 		createWindow();
 		initProtocolHandling();
 		registerMenu();

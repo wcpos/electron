@@ -3,7 +3,6 @@ import { MenuItemConstructorOptions } from 'electron';
 
 import { t } from '../translations';
 import { manualCheckForUpdates } from '../update';
-import { isMac, isWindows } from '../util';
 
 export const baseHelpMenu: MenuItemConstructorOptions = {
 	role: 'help',
@@ -31,14 +30,10 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 			},
 		},
 		{ type: 'separator' },
-		...(isMac || isWindows
-			? [
-					{
-						label: t('Check for Updates', { _tags: 'electron' }) + '…',
-						click: manualCheckForUpdates,
-					},
-			  ]
-			: []),
+		{
+			label: t('Check for Updates', { _tags: 'electron' }) + '…',
+			click: manualCheckForUpdates,
+		},
 		// {
 		// 	label: 'Setup…',
 		// 	click: openOnboardingWindow,

@@ -30,7 +30,19 @@ interface LatestRelease {
 
 const server = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 
-export const setupAutoUpdates = () => {};
+export const setupAutoUpdates = () => {
+	// Check for updates immediately on startup
+	checkForUpdates().catch((error) => {
+		logger.error('Error checking for updates on startup', error);
+	});
+
+	// Check for updates every hour
+	setInterval(() => {
+		checkForUpdates().catch((error) => {
+			logger.error('Error checking for updates in interval', error);
+		});
+	}, 3600 * 1000); // 3600 * 1000 ms equals 1 hour
+};
 
 /**
  *
