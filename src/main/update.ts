@@ -70,6 +70,9 @@ export class AutoUpdater {
 		}, 3600 * 1000); // 3600 * 1000 ms equals 1 hour
 	}
 
+	/**
+	 * Following MacUpdater from electron-updater
+	 */
 	private async createProxyServer(): Promise<string> {
 		const server = createServer();
 
@@ -87,6 +90,8 @@ export class AutoUpdater {
 				try {
 					const fileStat = await promisify(stat)(this.targetPath);
 					const updateFileSize = fileStat.size;
+					logger.info(`Serving update file: ${this.targetPath}`);
+					logger.info(`Update file size: ${updateFileSize}`);
 
 					const readStream = createReadStream(this.targetPath);
 					response.writeHead(200, {
@@ -95,6 +100,7 @@ export class AutoUpdater {
 					});
 					readStream.pipe(response);
 				} catch (error) {
+					logger.error('Error handling .zip file request', error);
 					response.writeHead(500);
 					response.end(`Internal Server Error: ${error.message}`);
 				}
@@ -201,7 +207,13 @@ export class AutoUpdater {
 			await Promise.all(assets.map((asset) => this.download(asset.name, asset.url)));
 			await this.installUpdates();
 		} catch (error) {
-			logger.error('Error applying the updates', error);
+			logger.error('Error applying the updates', error, error.stack);
+			/**
+			 * At the very least, we should open the temp directory
+			 */
+			if (this.targetPath) {
+				shell.showItemInFolder(this.targetPath);
+			}
 		}
 	}
 
