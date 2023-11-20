@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 
 // import { installExtensions } from './main/extensions';
+import { toggleHardwareAcceleration } from './main/config';
 import logger from './main/log';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
@@ -53,3 +54,4 @@ app.on('activate', () => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and import them here.
+toggleHardwareAcceleration();

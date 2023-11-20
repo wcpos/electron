@@ -23,6 +23,11 @@ export default class ProgressBar {
 			title: t('Downloading update...'),
 			// frame: false,
 			// titleBarStyle: 'hidden',
+			/**
+			 * Fix for pixelation on some Windows machines
+			 * https://www.electronjs.org/docs/latest/faq#the-font-looks-blurry-what-is-this-and-what-can-i-do
+			 */
+			backgroundColor: '#fff',
 		});
 
 		// Remove the menu from the progress window

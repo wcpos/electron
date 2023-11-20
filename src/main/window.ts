@@ -28,6 +28,11 @@ export const createWindow = (): void => {
 			nodeIntegration: false, // prevent node integration for security reasons
 			contextIsolation: true, // protect against prototype pollution
 		},
+		/**
+		 * Fix for pixelation on some Windows machines
+		 * https://www.electronjs.org/docs/latest/faq#the-font-looks-blurry-what-is-this-and-what-can-i-do
+		 */
+		backgroundColor: '#fff',
 	});
 
 	if (isDevelopment) {

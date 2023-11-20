@@ -3,6 +3,7 @@
 import { MenuItemConstructorOptions } from 'electron';
 
 import { clearAppDataDialog } from '../clear-data';
+import { config, setHardwareAcceleration } from '../config';
 import { t } from '../translations';
 import { isMac } from '../util';
 
@@ -34,6 +35,19 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 			{ role: 'reload' },
 			{ role: 'forceReload' },
 			{ role: 'toggleDevTools' },
+			{
+				label: t('Performance', { _tags: 'electron' }),
+				submenu: [
+					{
+						label: t('Enable Hardware Acceleration', { _tags: 'electron' }),
+						type: 'checkbox',
+						checked: config.hardwareAcceleration,
+						click: (menuItem) => {
+							setHardwareAcceleration(!config.hardwareAcceleration);
+						},
+					},
+				],
+			},
 			{
 				label: t('Clear App Data', { _tags: 'electron' }),
 				click: () => clearAppDataDialog(),
