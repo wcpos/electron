@@ -37,7 +37,7 @@
     "@electron-forge/plugin-webpack": "^7.1.0",
     "@electron-forge/publisher-github": "^7.1.0",
     "@electron-forge/shared-types": "^7.1.0",
-    "@electron/rebuild": "3.3.1",
+    "@electron/rebuild": "3.4.0",
     "@types/better-sqlite3": "^7.6.8",
     "@types/fs-extra": "^11.0.4",
     "@types/webpack-node-externals": "^3.0.4",
