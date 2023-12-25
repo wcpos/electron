@@ -1,5 +1,4 @@
-import { createWriteStream, createReadStream, stat } from 'fs';
-import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { createWriteStream, writeFileSync } from 'fs';
 import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
@@ -71,67 +70,12 @@ export class AutoUpdater {
 	}
 
 	/**
-	 * Following MacUpdater from electron-updater
+	 *
+	 * @param name
+	 * @param url
+	 * @param showProgress
+	 * @returns
 	 */
-	private async createProxyServer(): Promise<string> {
-		const server = createServer();
-
-		server.on('request', async (request: IncomingMessage, response: ServerResponse) => {
-			if (!request.url) {
-				response.writeHead(400);
-				response.end('Bad Request: URL is required');
-				return;
-			}
-
-			const requestUrl = new URL(request.url, `http://${request.headers.host}`);
-			const fileParam = requestUrl.searchParams.get('file');
-
-			if (fileParam === this.targetPath) {
-				try {
-					const fileStat = await promisify(stat)(this.targetPath);
-					const updateFileSize = fileStat.size;
-					logger.info(`Serving update file: ${this.targetPath}`);
-					logger.info(`Update file size: ${updateFileSize}`);
-
-					const readStream = createReadStream(this.targetPath);
-					response.writeHead(200, {
-						'Content-Type': 'application/zip',
-						'Content-Length': updateFileSize,
-					});
-					readStream.pipe(response);
-				} catch (error) {
-					logger.error('Error handling .zip file request', error);
-					response.writeHead(500);
-					response.end(`Internal Server Error: ${error.message}`);
-				}
-			} else {
-				const address = server.address();
-				if (address && typeof address === 'object') {
-					const serverUrl = `http://127.0.0.1:${address.port}/?file=${path.basename(
-						this.targetPath
-					)}`;
-					response.writeHead(200, { 'Content-Type': 'application/json' });
-					response.end(JSON.stringify({ url: serverUrl }));
-				} else {
-					response.writeHead(500);
-					response.end('Internal Server Error: Failed to obtain server address');
-				}
-			}
-		});
-
-		return new Promise((resolve, reject) => {
-			server.listen(0, '127.0.0.1', () => {
-				const address = server.address();
-				if (address && typeof address === 'object') {
-					const serverUrl = `http://127.0.0.1:${address.port}`;
-					resolve(serverUrl);
-				} else {
-					reject(new Error('Failed to obtain server address'));
-				}
-			});
-		});
-	}
-
 	private async download(name: string, url: string, showProgress = true): Promise<void> {
 		const finished = promisify(stream.finished);
 		const filePath = `${this.tempDirPath}/${name}`;
@@ -162,23 +106,32 @@ export class AutoUpdater {
 		return finished(writer);
 	}
 
+	/**
+	 *
+	 * @returns
+	 */
 	private async installUpdates() {
-		let url = this.tempDirPath; // just a path works fine for windows
+		let feedURL = this.tempDirPath; // just a path works fine for windows
 
 		// we should have a downloaded target path now
 		if (!this.targetPath) {
 			throw new Error('No update file downloaded');
 		}
 
-		if (process.platform === 'linux') {
-			// I'm not sure what to do here, just open the temp direct and let the user install it?
-			shell.showItemInFolder(this.targetPath);
-			return; // don't continue
+		if (process.platform === 'darwin') {
+			// https://github.com/electron/electron/issues/5020#issuecomment-477636990
+			const json = { url: `file://${this.tempDirPath}/${this.targetPath}` };
+			writeFileSync(this.tempDirPath + '/feed.json', JSON.stringify(json));
+			feedURL = `file://${this.tempDirPath}/feed.json`;
 		}
 
-		if (process.platform === 'darwin') {
-			// mac needs a server :/ electron-updater uses a similar method to get around this
-			url = await this.createProxyServer();
+		/**
+		 * I don't know what to do for linux?
+		 * just open the temp direct and let the user install it?
+		 */
+		if (process.platform === 'linux') {
+			shell.showItemInFolder(this.targetPath);
+			return; // don't continue
 		}
 
 		// run the default autoUpdater to finish the job
@@ -197,7 +150,7 @@ export class AutoUpdater {
 					});
 			});
 
-			autoUpdater.setFeedURL({ url });
+			autoUpdater.setFeedURL({ url: feedURL });
 			autoUpdater.checkForUpdates();
 		});
 	}
@@ -239,7 +192,9 @@ export class AutoUpdater {
 		this.targetPath = '';
 
 		try {
-			const { data } = await axios.get(this.updateUrl);
+			const response = await axios.get(this.updateUrl);
+			// Backwards compatibility with old update server
+			const data = response.data?.data || response.data;
 			const { version, name, assets, releaseDate, notes } = data;
 			const hasUpdate = semver.gt(semver.coerce(version), semver.coerce(app.getVersion()));
 
