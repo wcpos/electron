@@ -120,7 +120,7 @@ export class AutoUpdater {
 
 		if (process.platform === 'darwin') {
 			// https://github.com/electron/electron/issues/5020#issuecomment-477636990
-			const json = { url: `file://${this.tempDirPath}/${this.targetPath}` };
+			const json = { url: `file://${this.targetPath}` };
 			writeFileSync(this.tempDirPath + '/feed.json', JSON.stringify(json));
 			feedURL = `file://${this.tempDirPath}/feed.json`;
 		}
