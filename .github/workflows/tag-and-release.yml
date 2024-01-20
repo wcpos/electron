@@ -32,7 +32,7 @@ jobs:
           cd expo
           yarn export:electron
           # Fix bundle path
-          sed -i 's/src="\/bundles/src="bundles/g' dist/index.html
+          sed -i 's/src="\/_expo/src="_expo/g' dist/index.html
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
