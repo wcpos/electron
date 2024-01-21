@@ -2,7 +2,7 @@
   "name": "@wcpos/app-electron",
   "license": "MIT",
   "productName": "WooCommerce POS",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "Electron app for WooCommerce POS",
   "author": "Paul Kilmurray <paul@wcpos.com>",
   "main": ".webpack/main",
@@ -52,7 +52,6 @@
     "electron-store": "^8.1.0",
     "fs-extra": "^11.2.0",
     "node-loader": "^2.0.0",
-    "publisher-github-latest-yml": "https://github.com/kilbot/publisher-github-latest-yml.git#commit=b8cb7d9ef2eaebe209001f285aab49aa96b69be6",
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
     "typescript": "~5.3.3"
