@@ -80,7 +80,7 @@ jobs:
     needs:
       - build-expo
       # - publish-macos
-    runs-on: macos-latest
+    runs-on: macos-latest-large
 
     steps:
       - name: Check out Git repository
