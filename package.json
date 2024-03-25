@@ -50,7 +50,6 @@
     "electron-forge-maker-appimage": "https://github.com/logseq/electron-forge-maker-appimage.git#commit=afb3129f0e787b4e5a68663e1032293e506a59ee",
     "electron-squirrel-startup": "^1.0.0",
     "electron-store": "^8.2.0",
-    "electron-store": "^8.2.0",
     "fs-extra": "^11.2.0",
     "node-loader": "^2.0.0",
     "ts-loader": "^9.5.1",
