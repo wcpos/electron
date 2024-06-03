@@ -37,6 +37,7 @@ jobs:
       - name: Install Expo dependencies
         env:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
+          RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           cd expo
           yarn install
