@@ -34,12 +34,15 @@ jobs:
         with:
           node-version: 18
 
+      - name: Install dotenv and fs-extra globally
+        run: |
+          npm install -g dotenv fs-extra
+
       - name: Run preinstall script
         env:
           RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           cd expo
-          npm install dotenv fs-extra
           chmod +x ./scripts/install-rxdb-license.js
           node ./scripts/install-rxdb-license.js
 
