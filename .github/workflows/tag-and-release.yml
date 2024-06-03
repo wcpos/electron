@@ -42,7 +42,7 @@ jobs:
 
   publish-macos:
     needs: build-expo
-    runs-on: macos-latest
+    runs-on: macos-13
 
     steps:
       - name: Check out Git repository
@@ -80,7 +80,7 @@ jobs:
     needs:
       - build-expo
       # - publish-macos
-    runs-on: macos-latest-large
+    runs-on: macos-latest
 
     steps:
       - name: Check out Git repository
