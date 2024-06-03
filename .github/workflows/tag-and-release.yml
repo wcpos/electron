@@ -39,6 +39,7 @@ jobs:
           RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           cd expo
+          npm install dotenv fs-extra
           chmod +x ./scripts/install-rxdb-license.js
           node ./scripts/install-rxdb-license.js
 
