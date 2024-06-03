@@ -1,6 +1,6 @@
 import path from 'path';
 
-import { app, ipcRenderer, dialog } from 'electron';
+import { app, ipcMain, dialog } from 'electron';
 import fs from 'fs-extra';
 
 import { closeAll } from './database';
@@ -42,3 +42,7 @@ export const clearAppDataDialog = () => {
 			}
 		});
 };
+
+ipcMain.on('clearData', (event, args) => {
+	clearAppDataDialog();
+});

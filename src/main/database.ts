@@ -57,8 +57,10 @@ const openDatabase = (name: string) => {
 };
 
 export const closeAll = () => {
-	registry.forEach((db) => {
+	registry.forEach((db, name) => {
 		db.close();
+		registry.delete(name);
+		logger.info(`Closed and removed ${name} from registry.`);
 	});
 };
 
@@ -69,40 +71,48 @@ function convertBooleansToNumbers(params: (string | number | boolean)[]): (strin
 	return params.map((param) => (typeof param === 'boolean' ? (param ? 1 : 0) : param));
 }
 
+/**
+ *
+ */
+function executeSql(db, sql, params) {
+	if (/^\s*(SELECT|PRAGMA)/i.test(sql)) {
+		return db.prepare(sql).all(params); // For SELECT or PRAGMA queries
+	} else {
+		return db.prepare(sql).run(params); // For INSERT, UPDATE, DELETE
+	}
+}
+
+/**
+ *
+ */
 ipcMain.handle('sqlite', (event, obj) => {
-	logger.debug('sql request', JSON.stringify(obj, null, 2));
+	logger.silly('SQL request', JSON.stringify(obj, null, 2));
 	try {
 		let db;
 		switch (obj.type) {
 			case 'open':
 				return openDatabase(obj.name);
-			case 'all':
-				db = registry.get(obj.name);
-				if (!db) throw new Error(`Database connection "${obj.name}" not found`);
-
-				const results = db.prepare(obj.sql.query).all(convertBooleansToNumbers(obj.sql.params));
-				return results;
-			case 'run':
-				db = registry.get(obj.name);
-				if (!db) throw new Error(`Database connection "${obj.name}" not found`);
-
-				db.prepare(obj.sql.query).run(convertBooleansToNumbers(obj.sql.params));
-				return { name: obj.name }; // or whatever you need to return
 			case 'close':
 				db = registry.get(obj.name);
 				if (!db) throw new Error(`Database connection "${obj.name}" not found`);
-
 				db.close();
-				registry.delete(obj.name); // Remove the db from the registry after closing it
+				registry.delete(obj.name);
+				logger.info(`Closed and removed ${obj.name} from registry.`);
 				return;
 			case 'quit':
 				closeAll();
 				return;
+			case 'all':
+			case 'run': // These cases are now dynamically handled together
+				db = registry.get(obj.name);
+				if (!db) throw new Error(`Database connection "${obj.name}" not found`);
+				const params = convertBooleansToNumbers(obj.sql.params);
+				return executeSql(db, obj.sql.query, params);
 			default:
 				throw new Error('Unknown type');
 		}
 	} catch (err) {
-		logger.error('SQLite error', err);
+		logger.error('SQLite error', err, obj);
 		throw err;
 	}
 });

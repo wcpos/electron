@@ -4,7 +4,7 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 const ipc = {
 	render: {
 		// From render to main.
-		send: ['ipc-example'] as string[],
+		send: ['clearData'] as string[],
 		// From main to render.
 		on: [] as string[],
 		// From render to main and back again.
@@ -15,13 +15,16 @@ const ipc = {
 };
 
 /**
- *
+ * @TODO - change general ipcRenderer apiKey to specific ones for sqlite and axios
+ * @TODO - use electron net instead of axios, this will enable localhost requests
  */
 contextBridge.exposeInMainWorld('ipcRenderer', {
 	send(channel: string, args: unknown[]) {
 		const validChannels = ipc.render.send;
 		if (validChannels.includes(channel)) {
 			ipcRenderer.send(channel, args);
+		} else {
+			throw Error('No channel found');
 		}
 	},
 	on(channel: string, func: (...args: unknown[]) => void) {
@@ -53,50 +56,16 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 	},
 });
 
-// /**
-//  *
-//  */
-// contextBridge.exposeInMainWorld(
-// 	// Allowed 'ipcRenderer' methods.
-// 	'ipcRenderer',
-// 	{
-// 		// From render to main.
-// 		send: (channel: 'string', args) => {
-// 			const validChannels = ipc.render.send;
-// 			if (validChannels.includes(channel)) {
-// 				ipcRenderer.send(channel, args);
-// 			}
-// 		},
-// 		// From main to render.
-// 		receive: (channel, listener) => {
-// 			const validChannels = ipc.render.receive;
-// 			if (validChannels.includes(channel)) {
-// 				// Deliberately strip event as it includes `sender`
-// 				ipcRenderer.on(channel, (event, ...args) => listener(...args));
-// 			}
-// 		},
-// 		// From render to main and back again - async
-// 		invoke: (channel, args) => {
-// 			const validChannels = ipc.render.sendReceive;
-// 			if (validChannels.includes(channel)) {
-// 				return ipcRenderer.invoke(channel, args);
-// 			}
-// 			return Promise.reject();
-// 		},
-// 	}
-// );
-
-// /**
-//  *
-//  */
-// contextBridge.exposeInMainWorld('sqlite', {
-// 	open: (name) => {
-// 		return ipcRenderer.invoke('sqlite', { type: 'open', name });
-// 	},
-// 	all: (name, sql) => {
-// 		return ipcRenderer.invoke('sqlite', { type: 'all', name, sql });
-// 	},
-// 	run: (name, sql) => {
-// 		return ipcRenderer.invoke('sqlite', { type: 'run', name, sql });
-// 	},
-// });
+/**
+ * For some reason, the Buffer object is not available in the renderer process.
+ * perhaps due to context isolation? This is a workaround to expose the Buffer object.
+ *
+ * https://github.com/electron/electron/blob/5b60698dea0830c8b82d154578afb5e29e83d7df/lib/renderer/init.ts#L120
+ * https://www.electronjs.org/docs/latest/tutorial/context-isolation
+ */
+contextBridge.exposeInMainWorld('Buffer', {
+	from: (data, encoding) => Buffer.from(data, encoding),
+	alloc: (size) => Buffer.alloc(size),
+	isBuffer: (obj) => Buffer.isBuffer(obj),
+	concat: (buffers, totalLength) => Buffer.concat(buffers, totalLength),
+});

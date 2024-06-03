@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 
 // import { installExtensions } from './main/extensions';
 import { toggleHardwareAcceleration } from './main/config';
