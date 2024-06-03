@@ -34,17 +34,15 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install dotenv and fs-extra globally
-        run: |
-          npm install -g dotenv fs-extra
+      - name: Install jq
+        run: sudo apt-get install -y jq
 
-      - name: Run preinstall script
+      - name: Add RXDB_LICENSE_KEY to package.json
         env:
           RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           cd expo
-          chmod +x ./scripts/install-rxdb-license.js
-          node ./scripts/install-rxdb-license.js
+          jq --arg license "$RXDB_LICENSE_KEY" '.accessTokens["rxdb-premium"] = $license' package.json > tmp.json && mv tmp.json package.json
 
       - name: Install Expo dependencies
         env:
