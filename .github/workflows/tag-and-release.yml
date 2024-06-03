@@ -34,10 +34,17 @@ jobs:
         with:
           node-version: 18
 
+      - name: Run preinstall script
+        env:
+          RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
+        run: |
+          cd expo
+          chmod +x ../scripts/install-rxdb-license.ts
+          npx ts-node ../scripts/install-rxdb-license.ts
+
       - name: Install Expo dependencies
         env:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
-          RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           cd expo
           yarn install
