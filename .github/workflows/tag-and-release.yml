@@ -39,8 +39,8 @@ jobs:
           RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           cd expo
-          chmod +x scripts/install-rxdb-license.ts
-          npx ts-node scripts/install-rxdb-license.ts
+          chmod +x ./scripts/install-rxdb-license.js
+          node ./scripts/install-rxdb-license.js
 
       - name: Install Expo dependencies
         env:
