@@ -4,10 +4,24 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Select the platform to build and publish"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - macos
+          - macos-arm64
+          - windows
+          - linux
 
 jobs:
   build-expo:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: Check out Expo repository
@@ -43,6 +57,7 @@ jobs:
   publish-macos:
     needs: build-expo
     runs-on: macos-13
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' }}
 
     steps:
       - name: Check out Git repository
@@ -58,6 +73,11 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 18
+
+      - name: Install Python and distutils
+        run: |
+          python3 -m ensurepip
+          python3 -m pip install setuptools
 
       - name: Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v2
@@ -86,6 +106,7 @@ jobs:
       - build-expo
       # - publish-macos
     runs-on: macos-latest
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos-arm64' }}
 
     steps:
       - name: Check out Git repository
@@ -128,6 +149,7 @@ jobs:
   publish-windows:
     needs: build-expo
     runs-on: windows-latest
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
 
     steps:
       - name: Check out Git repository
@@ -160,6 +182,7 @@ jobs:
   publish-linux:
     needs: build-expo
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: Check out Git repository
