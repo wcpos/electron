@@ -54,6 +54,11 @@ jobs:
           name: expo-dist
           path: dist
 
+      - name: Install Node.js, NPM, and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
       - name: Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v2
         with:
@@ -92,6 +97,11 @@ jobs:
           name: expo-dist
           path: dist
 
+      - name: Install Node.js, NPM, and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
       - name: Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v2
         with:
@@ -129,6 +139,11 @@ jobs:
           name: expo-dist
           path: dist
 
+      - name: Install Node.js, NPM, and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
       - name: Install and build
         env:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
@@ -155,6 +170,11 @@ jobs:
         with:
           name: expo-dist
           path: dist
+
+      - name: Install Node.js, NPM, and Yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
 
       - name: Install and build
         env:
