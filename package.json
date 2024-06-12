@@ -2,7 +2,7 @@
   "name": "@wcpos/app-electron",
   "license": "MIT",
   "productName": "WooCommerce POS",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "Electron app for WooCommerce POS",
   "author": "Paul Kilmurray <paul@wcpos.com>",
   "main": ".webpack/main",
