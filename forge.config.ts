@@ -33,7 +33,7 @@ const config: ForgeConfig = {
 					appleId: process.env.APPLE_ID || '',
 					appleIdPassword: process.env.APPLE_ID_PASSWORD || '',
 					teamId: process.env.APPLE_TEAM_ID || '',
-			  }
+				}
 			: undefined,
 		protocols: [
 			{
@@ -90,6 +90,7 @@ const config: ForgeConfig = {
 			{
 				format: 'ULFO',
 				icon: path.resolve(__dirname, 'icons/icon.icns'),
+				appPath: '', // https://github.com/electron/forge/issues/3712
 			},
 			['darwin']
 		),

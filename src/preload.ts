@@ -4,54 +4,62 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 const ipc = {
 	render: {
 		// From render to main.
-		send: ['clearData'] as string[],
+		send: ['clearData', 'print-external-url'] as string[],
 		// From main to render.
-		on: [] as string[],
+		on: [] as string[], // We'll handle dynamic channels separately
 		// From render to main and back again.
 		invoke: ['sqlite', 'axios'] as string[],
 		// From main to render, once
-		once: ['ipc-example'] as string[],
+		once: [] as string[], // We'll handle dynamic channels separately
 	},
 };
 
 /**
- * @TODO - change general ipcRenderer apiKey to specific ones for sqlite and axios
- * @TODO - use electron net instead of axios, this will enable localhost requests
+ * Expose ipcRenderer methods to the renderer process.
  */
 contextBridge.exposeInMainWorld('ipcRenderer', {
-	send(channel: string, args: unknown[]) {
+	send(channel: string, args: unknown) {
 		const validChannels = ipc.render.send;
 		if (validChannels.includes(channel)) {
 			ipcRenderer.send(channel, args);
 		} else {
-			throw Error('No channel found');
+			throw Error(`Channel ${channel} is not allowed`);
 		}
 	},
 	on(channel: string, func: (...args: unknown[]) => void) {
-		const validChannels = ipc.render.on;
-		if (validChannels.includes(channel)) {
+		// Allow dynamic channels for print callbacks
+		const validChannels = [/^onBeforePrint-/, /^onAfterPrint-/, /^onPrintError-/, ...ipc.render.on];
+		if (validChannels.some((regex) => regex.test(channel))) {
 			const subscription = (_event: IpcRendererEvent, ...args: unknown[]) => func(...args);
 			ipcRenderer.on(channel, subscription);
 
-			// returns unsubscribe function
+			// Return unsubscribe function
 			return function unsubscribe() {
 				return ipcRenderer.removeListener(channel, subscription);
 			};
 		}
 
-		throw Error('No channel found');
+		throw Error(`Channel ${channel} is not allowed`);
 	},
-	invoke(channel: string, args: unknown[]) {
+	invoke(channel: string, args: unknown) {
 		const validChannels = ipc.render.invoke;
 		if (validChannels.includes(channel)) {
 			return ipcRenderer.invoke(channel, args);
 		}
-		return Promise.reject();
+		return Promise.reject(new Error(`Channel ${channel} is not allowed`));
 	},
 	once(channel: string, func: (...args: unknown[]) => void) {
-		const validChannels = ipc.render.once;
-		if (validChannels.includes(channel)) {
+		// Allow dynamic channels for print callbacks
+		const validChannels = [
+			/^onBeforePrint-/,
+			/^onAfterPrint-/,
+			/^onPrintError-/,
+			...ipc.render.once,
+		];
+		if (validChannels.some((regex) => regex.test(channel))) {
 			ipcRenderer.once(channel, (_event: IpcRendererEvent, ...args: unknown[]) => func(...args));
+		} else {
+			throw Error(`Channel ${channel} is not allowed`);
 		}
 	},
 });

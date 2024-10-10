@@ -1,7 +1,6 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
 // import { installExtensions } from './main/extensions';
-import { toggleHardwareAcceleration } from './main/config';
 import logger from './main/log';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
@@ -10,6 +9,12 @@ import { updater } from './main/update';
 import { createWindow } from './main/window';
 import './main/database';
 import './main/axios';
+import './main/print-external-url';
+
+// Disable hardware acceleration
+// NOTE: I had a toggle setting for this but the config file was causing errors in Sentry
+// Disabling hardware acceleration seems to make the collapsable animations in the POS screen work better
+app.disableHardwareAcceleration();
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -54,4 +59,3 @@ app.on('activate', () => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and import them here.
-toggleHardwareAcceleration();
