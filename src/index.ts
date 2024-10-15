@@ -11,10 +11,17 @@ import './main/database';
 import './main/axios';
 import './main/print-external-url';
 
+// enabled logging when in development
+if (process.env.NODE_ENV === 'development') {
+	app.commandLine.appendSwitch('enable-logging');
+	app.commandLine.appendSwitch('v', '1');
+}
+
 // Disable hardware acceleration
 // NOTE: I had a toggle setting for this but the config file was causing errors in Sentry
 // Disabling hardware acceleration seems to make the collapsable animations in the POS screen work better
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-hid-blocklist');
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {

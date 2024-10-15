@@ -1,6 +1,6 @@
 import * as path from 'path';
 
-import { BrowserWindow, shell } from 'electron';
+import { BrowserWindow, shell, dialog } from 'electron';
 
 import log from './log';
 import { resolveHtmlPath } from './util';
@@ -82,6 +82,61 @@ export const createWindow = (): void => {
 	// 	// For example, send it to your renderer process:
 	// 	mainWindow?.webContents.send('navigate', path);
 	// });
+
+	// Handle HID device selection
+	mainWindow.webContents.session.on('select-hid-device', (event, details, callback) => {
+		console.log('devicelist', details.deviceList);
+
+		mainWindow?.webContents.session.on('hid-device-added', (event, device) => {
+			console.log('hid-device-added FIRED WITH', device);
+			// find device with 'Scanner' in product name
+			const scanner = details.deviceList.find((device) => device.name.includes('Scanner'));
+			if (scanner) {
+				callback(scanner.deviceId);
+			} else {
+				dialog.showErrorBox('Error', 'No scanner found');
+			}
+		});
+
+		mainWindow?.webContents.session.on('hid-device-removed', (event, device) => {
+			console.log('hid-device-removed FIRED WITH', device);
+			// Optionally update details.deviceList
+		});
+
+		event.preventDefault();
+
+		if (details.deviceList && details.deviceList.length > 0) {
+			// find device with 'Scanner' in product name
+			const scanner = details.deviceList.find((device) => device.name.includes('Scanner'));
+			if (scanner) {
+				callback(scanner.deviceId);
+			} else {
+				dialog.showErrorBox('Error', 'No scanner found');
+			}
+		} else {
+			console.log('No HID devices found.');
+		}
+	});
+
+	// Permission check handler for HID
+	mainWindow.webContents.session.setPermissionCheckHandler(
+		(webContents, permission, requestingOrigin, details) => {
+			console.log('permission check', permission, requestingOrigin, details);
+			if (permission === 'hid') {
+				return true;
+			}
+			return false;
+		}
+	);
+
+	// Device permission handler for HID
+	mainWindow.webContents.session.setDevicePermissionHandler((details) => {
+		console.log('device permission', details);
+		if (details.deviceType === 'hid') {
+			return true;
+		}
+		return false;
+	});
 };
 
 export const getMainWindow = (): BrowserWindow | null => {
