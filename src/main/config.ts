@@ -1,50 +1,35 @@
-import fs from 'fs';
-import path from 'path';
-
 import { dialog, app } from 'electron';
+import Store from 'electron-store';
 
 import logger, { Sentry } from './log';
 import { t } from './translations';
 
-const configPath = path.join(app.getPath('userData'), 'config.json');
-
-// Function to read the configuration with error handling
-function readConfig() {
-	try {
-		return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-	} catch (error) {
-		logger.error('Error reading config file:', error);
-		Sentry.captureException(error);
-		return {};
-	}
-}
-
-// Function to write the configuration with error handling
-function writeConfig(config) {
-	try {
-		fs.writeFileSync(configPath, JSON.stringify(config));
-	} catch (error) {
-		logger.error('Error writing config file:', error);
-		Sentry.captureException(error);
-	}
-}
+// Initialize electron-store
+const store = new Store({
+	defaults: {
+		hardwareAcceleration: true, // Default value for hardwareAcceleration
+	},
+});
 
 // Configuration object
 const config = {
-	settings: readConfig(),
-
 	get hardwareAcceleration() {
-		return this.settings.hardwareAcceleration || true;
+		return store.get('hardwareAcceleration', true);
 	},
 
 	set hardwareAcceleration(value) {
-		this.settings.hardwareAcceleration = value;
-		writeConfig(this.settings);
+		try {
+			store.set('hardwareAcceleration', value);
+		} catch (error) {
+			logger.error('Error setting hardware acceleration in store:', error);
+			Sentry.captureException(error);
+			throw new Error('Failed to update hardware acceleration setting.');
+		}
 	},
 };
 
 // Expose a method to change hardware acceleration setting with error handling
-const setHardwareAcceleration = (enabled) => {
+const setHardwareAcceleration = (enabled: boolean) => {
 	try {
 		config.hardwareAcceleration = enabled;
 	} catch (error) {
@@ -54,6 +39,7 @@ const setHardwareAcceleration = (enabled) => {
 			'Error',
 			'Failed to update hardware acceleration setting. Please try again.'
 		);
+		return;
 	}
 
 	// Notify the user that they need to restart the app for changes to take effect
@@ -72,7 +58,7 @@ const setHardwareAcceleration = (enabled) => {
 		})
 		.then(() => {
 			setImmediate(() => {
-				// quit and relaunch
+				// Quit and relaunch
 				app.relaunch();
 				app.exit(0);
 			});

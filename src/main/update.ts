@@ -5,6 +5,7 @@ import { promisify } from 'util';
 
 import axios from 'axios';
 import { dialog, MenuItem, app, autoUpdater, shell, BrowserWindow } from 'electron';
+import Store from 'electron-store';
 import semver from 'semver';
 
 import logger from './log';
@@ -28,28 +29,20 @@ interface LatestRelease {
 	assets: Asset[];
 }
 
-/**
- *
- */
+const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
+const store = new Store();
 
-/**
- *
- */
 export class AutoUpdater {
 	private mainWindow: BrowserWindow;
 	private targetPath: string;
 	private tempDirPath: string;
-	private readonly updateUrl = `${updateServer}/electron/${process.platform}-${
-		process.arch
-	}/${app.getVersion()}`;
+	private readonly updateUrl = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
 
 	constructor() {
 		this.targetPath = '';
 		this.mainWindow = getMainWindow();
 
-		// maybe create tmp directory
-		// NTWRK allows windows to access as web server
 		const tempDirPath = path.join(app.getPath('temp'), 'NTWRK');
 		createDir(tempDirPath);
 		this.tempDirPath = tempDirPath;
@@ -66,23 +59,15 @@ export class AutoUpdater {
 			this.checkForUpdates().catch((error) => {
 				logger.error('Error checking for updates in interval', error);
 			});
-		}, 3600 * 1000); // 3600 * 1000 ms equals 1 hour
+		}, 3600 * 1000); // 1 hour interval
 	}
 
-	/**
-	 *
-	 * @param name
-	 * @param url
-	 * @param showProgress
-	 * @returns
-	 */
 	private async download(name: string, url: string, showProgress = true): Promise<void> {
 		const finished = promisify(stream.finished);
 		const filePath = `${this.tempDirPath}/${name}`;
 		const writer = createWriteStream(filePath, { flags: 'w+' });
 		const { data, headers } = await axios.get(url, { responseType: 'stream' });
 
-		// if not RELEASES, set target path
 		if (name !== 'RELEASES') {
 			this.targetPath = filePath;
 		}
@@ -94,7 +79,6 @@ export class AutoUpdater {
 			data.on('data', (chunk: string) => {
 				loaded += Buffer.byteLength(chunk);
 				const percentCompleted = Math.floor((loaded / total) * 100);
-				// logger.info(`Downloaded ${percentCompleted}%`);
 				progressBar.updateProgress(percentCompleted);
 				if (percentCompleted === 100) {
 					progressBar.close();
@@ -106,35 +90,24 @@ export class AutoUpdater {
 		return finished(writer);
 	}
 
-	/**
-	 *
-	 * @returns
-	 */
 	private async installUpdates() {
-		let feedURL = this.tempDirPath; // just a path works fine for windows
+		let feedURL = this.tempDirPath;
 
-		// we should have a downloaded target path now
 		if (!this.targetPath) {
 			throw new Error('No update file downloaded');
 		}
 
 		if (process.platform === 'darwin') {
-			// https://github.com/electron/electron/issues/5020#issuecomment-477636990
 			const json = { url: `file://${this.targetPath}` };
 			writeFileSync(this.tempDirPath + '/feed.json', JSON.stringify(json));
 			feedURL = `file://${this.tempDirPath}/feed.json`;
 		}
 
-		/**
-		 * I don't know what to do for linux?
-		 * just open the temp direct and let the user install it?
-		 */
 		if (process.platform === 'linux') {
 			shell.showItemInFolder(this.targetPath);
-			return; // don't continue
+			return;
 		}
 
-		// run the default autoUpdater to finish the job
 		return new Promise((_resolve, reject) => {
 			autoUpdater.on('error', (error: Error) => reject(error));
 			autoUpdater.on('update-downloaded', () => {
@@ -161,9 +134,6 @@ export class AutoUpdater {
 			await this.installUpdates();
 		} catch (error) {
 			logger.error('Error applying the updates', error, error.stack);
-			/**
-			 * At the very least, we should open the temp directory
-			 */
 			if (this.targetPath) {
 				shell.showItemInFolder(this.targetPath);
 			}
@@ -176,37 +146,46 @@ export class AutoUpdater {
 		releaseDate: string,
 		notes: string
 	) {
-		return dialog
-			.showMessageBox(this.mainWindow, {
-				type: 'question',
-				title: t('Found Updates', { _tags: 'electron' }),
-				message: t('Found updates, do you want update now?', { _tags: 'electron' }),
-				detail: t('New version: {version}', { version }),
-				buttons: [t('Yes'), t('No')],
-			})
-			.then(({ response }) => response === 0);
+		const { response } = await dialog.showMessageBox(this.mainWindow, {
+			type: 'question',
+			title: t('Found Updates', { _tags: 'electron' }),
+			message: t('A new version ({version}) is available. Do you want to update now?', { version }),
+			buttons: [t('Yes'), t('Remind me later'), t('No')],
+			cancelId: 2, // Index of 'No' button
+		});
+
+		return response;
 	}
 
-	public async checkForUpdates() {
-		// reset target path, just in case
+	public async checkForUpdates(manual = false) {
+		const remindLaterTimestamp = store.get('remindLaterTimestamp', 0);
+		const now = Date.now();
+
+		if (!manual && remindLaterTimestamp && now - remindLaterTimestamp < REMIND_LATER_DURATION) {
+			logger.info('Update check skipped due to Remind me later selection.');
+			return false;
+		}
+
 		this.targetPath = '';
 
 		try {
 			const response = await axios.get(this.updateUrl);
-			// Backwards compatibility with old update server
 			const data = response.data?.data || response.data;
 			const { version, name, assets, releaseDate, notes } = data;
 			const hasUpdate = semver.gt(semver.coerce(version), semver.coerce(app.getVersion()));
 
-			// early exit if no updates
 			if (!hasUpdate) {
 				return false;
 			}
 
-			const confirmUpdate = await this.confirmUpdateDialog(version, name, releaseDate, notes);
+			const userChoice = await this.confirmUpdateDialog(version, name, releaseDate, notes);
 
-			if (confirmUpdate) {
+			if (userChoice === 0) {
 				this.downloadAndInstallUpdates(assets);
+			} else if (userChoice === 1) {
+				store.set('remindLaterTimestamp', Date.now());
+			} else {
+				logger.info('User chose not to update.');
 			}
 
 			return true;
@@ -216,23 +195,19 @@ export class AutoUpdater {
 	}
 
 	public async manualCheckForUpdates(menuItem: MenuItem) {
-		// if manual check, then disable the menu item until we're done
 		if (menuItem) {
 			menuItem.enabled = false;
 		}
 
-		// check updates.wcpos.com for the latest version
 		try {
-			const hasUpdate = await this.checkForUpdates();
+			const hasUpdate = await this.checkForUpdates(true);
 			if (hasUpdate === false) {
-				const mainWindow = getMainWindow();
-				dialog.showMessageBox(mainWindow, {
+				dialog.showMessageBox(this.mainWindow, {
 					title: t('No Updates', { _tags: 'electron' }),
 					message: t('Current version is up-to-date.', { _tags: 'electron' }),
 				});
 			}
 		} finally {
-			// if manual check, then re-enable the menu item
 			if (menuItem) {
 				menuItem.enabled = true;
 			}
