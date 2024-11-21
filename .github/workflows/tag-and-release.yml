@@ -24,38 +24,27 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
-      - name: Check out Expo repository
+      - name: Check out the Monorepo repository
         run: |
-          git clone https://github.com/wcpos/managed-expo.git expo
-          touch expo/yarn.lock
+          git clone https://github.com/wcpos/monorepo.git monorepo
+          touch monorepo/yarn.lock
 
       - name: Install Node.js, NPM and Yarn
         uses: actions/setup-node@v3
         with:
           node-version: 18
 
-      - name: Install jq
-        run: sudo apt-get install -y jq
-
-      - name: Add RXDB_LICENSE_KEY to package.json
-        env:
-          RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
-        run: |
-          cd expo
-          jq --arg license "$RXDB_LICENSE_KEY" '.accessTokens["rxdb-premium"] = $license' package.json > tmp.json && mv tmp.json package.json
-
-      - name: Install Expo dependencies
+      - name: Install dependencies
         env:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          cd expo
           yarn install
 
       - name: Run Expo export and fix bundle
         run: |
-          cd expo
-          yarn export:electron
+          yarn managed export:electron
           # Fix bundle path
+          cd managed
           sed -i 's/src="\/_expo/src="_expo/g' dist/index.html
 
       - name: Archive production artifacts
