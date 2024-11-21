@@ -18,9 +18,8 @@ if (isDevelopment) {
 	const pathToDist = path.join(process.resourcesPath, 'dist');
 	loadURL = serve({
 		directory: pathToDist,
-		scheme: 'http',
-		hostname: 'localhost',
-		file: 'index',
+		scheme: 'wcpos',
+		isCorsEnabled: false,
 	});
 }
 
