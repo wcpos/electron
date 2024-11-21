@@ -27,7 +27,8 @@ jobs:
       - name: Check out the Monorepo repository
         run: |
           git clone https://github.com/wcpos/monorepo.git monorepo
-          touch monorepo/yarn.lock
+          cd monorepo
+          touch yarn.lock
 
       - name: Install Node.js, NPM and Yarn
         uses: actions/setup-node@v3
@@ -35,23 +36,27 @@ jobs:
           node-version: 18
 
       - name: Install dependencies
+        working-directory: monorepo
         env:
           YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           yarn install
 
-      - name: Run Expo export and fix bundle
+      - name: Run Expo export
+        working-directory: monorepo
         run: |
           yarn managed export:electron
-          # Fix bundle path
-          cd managed
+
+      - name: Fix bundle path
+        working-directory: monorepo/apps/managed
+        run: |
           sed -i 's/src="\/_expo/src="_expo/g' dist/index.html
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
         with:
           name: expo-dist
-          path: expo/dist
+          path: monorepo/apps/managed/dist
 
   publish-macos:
     needs: build-expo
