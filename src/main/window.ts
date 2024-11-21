@@ -16,7 +16,12 @@ if (isDevelopment) {
 } else {
 	// In production mode, serve the 'dist' directory from resources
 	const pathToDist = path.join(process.resourcesPath, 'dist');
-	loadURL = serve({ directory: pathToDist });
+	loadURL = serve({
+		directory: pathToDist,
+		scheme: 'http',
+		hostname: 'localhost',
+		file: 'index',
+	});
 }
 
 let mainWindow: BrowserWindow | null;
