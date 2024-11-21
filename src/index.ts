@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
 // import { installExtensions } from './main/extensions';
 import logger from './main/log';
@@ -11,11 +11,6 @@ import './main/database';
 import './main/axios';
 import './main/print-external-url';
 import './main/basePath';
-
-// Register 'app://' protocol as privileged, for local file access
-protocol.registerSchemesAsPrivileged([
-	{ scheme: 'app', privileges: { standard: true, secure: true } },
-]);
 
 // enabled logging when in development
 if (process.env.NODE_ENV === 'development') {
