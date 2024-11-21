@@ -2,9 +2,12 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 /**
  * Expose the basePath to the renderer process.
+ *
+ * @NOTE - This is a synchronous call, it will block the thread, but it's a quick call.
+ * This is needed for the bundle splitting to work correctly.
  */
 contextBridge.exposeInMainWorld('electron', {
-	basePath: `file://${process.resourcesPath}/dist/`,
+	basePath: ipcRenderer.sendSync('getBasePathSync'),
 });
 
 // White-listed channels.

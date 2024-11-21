@@ -10,6 +10,7 @@ import { createWindow } from './main/window';
 import './main/database';
 import './main/axios';
 import './main/print-external-url';
+import './main/basePath';
 
 // enabled logging when in development
 if (process.env.NODE_ENV === 'development') {
