@@ -28,10 +28,13 @@ const openDatabase = (name: string) => {
 	try {
 		/**
 		 * Determine database folder
+		 *
+		 * @NOTE - there seems to be a weird conflict with electron-store if I use the name 'databases'
+		 * in the app's userData folder - it was deleting the directory every time the app started ??!!
 		 */
 		const dbFolder = isDevelopment
 			? path.resolve('databases')
-			: path.resolve(app.getPath('userData'), 'databases');
+			: path.resolve(app.getPath('userData'), 'wcpos_dbs');
 
 		/**
 		 * Create folder if it doesn't exist
@@ -44,15 +47,6 @@ const openDatabase = (name: string) => {
 				logger.error(`Failed to create database folder: ${dbFolder}`, err);
 			}
 		}
-
-		/**
-		 * Watch for folder deletion or renaming
-		 */
-		fs.watch(path.dirname(dbFolder), (eventType, filename) => {
-			if (filename === path.basename(dbFolder) && eventType === 'rename') {
-				logger.warn('Databases folder was removed or renamed.');
-			}
-		});
 
 		/**
 		 * Open database

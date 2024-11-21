@@ -17,7 +17,7 @@ export const clearAppDataDialog = () => {
 	const dbFolder =
 		process.env.NODE_ENV === 'development'
 			? path.resolve('databases')
-			: path.resolve(app.getPath('userData'), 'databases');
+			: path.resolve(app.getPath('userData'), 'wcpos_dbs');
 
 	dialog
 		.showMessageBox({
@@ -33,6 +33,7 @@ export const clearAppDataDialog = () => {
 					closeAll();
 					return fs.remove(dbFolder).then(() => {
 						// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
+						logger.info(t('Cleared app data', { _tags: 'electron' }));
 						app.relaunch();
 						app.quit();
 					});
