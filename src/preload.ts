@@ -1,12 +1,10 @@
-import path from 'path';
-
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 /**
  * Expose the basePath to the renderer process.
  */
 contextBridge.exposeInMainWorld('electron', {
-	basePath: `file://${path.join(process.resourcesPath, 'dist')}/`,
+	basePath: `file://${process.resourcesPath}/dist/`,
 });
 
 // White-listed channels.
