@@ -35,6 +35,16 @@ jobs:
         with:
           node-version: 18
 
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Add RXDB_LICENSE_KEY to package.json
+        working-directory: monorepo
+        env:
+          RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
+        run: |
+          jq --arg license "$RXDB_LICENSE_KEY" '.accessTokens["rxdb-premium"] = $license' package.json > tmp.json && mv tmp.json package.json
+
       - name: Install dependencies
         working-directory: monorepo
         env:
