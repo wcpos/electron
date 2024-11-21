@@ -62,7 +62,7 @@ jobs:
         run: |
           sed -i 's/src="\/_expo/src="_expo/g' dist/index.html
           sed -i 's/href="\/_expo/href="_expo/g' dist/index.html
-          find dist -type f -name '*.js' -exec sed -i 's|"/_expo/static/js/web/|window.electron.basePath + "_expo/static/js/web/|g' {} +
+          find dist -type f -name '*.js' -exec sed -i 's|"/_expo/static/js/web/|new URL("_expo/static/js/web/", window.electron.basePath).href|g' {} +
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
