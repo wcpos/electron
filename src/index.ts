@@ -36,7 +36,7 @@ app
 	.then(loadTranslations)
 	// .then(installExtensions)
 	.then(() => {
-		logger.error('Starting app');
+		logger.info('Starting app');
 		createWindow();
 		initProtocolHandling();
 		registerMenu();

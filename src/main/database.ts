@@ -37,9 +37,22 @@ const openDatabase = (name: string) => {
 		 * Create folder if it doesn't exist
 		 */
 		if (!fs.existsSync(dbFolder)) {
-			fs.mkdirSync(dbFolder);
-			logger.info(`Folder '${dbFolder}' created`);
+			try {
+				fs.mkdirSync(dbFolder, { recursive: true });
+				logger.info(`Created database folder: ${dbFolder}`);
+			} catch (err) {
+				logger.error(`Failed to create database folder: ${dbFolder}`, err);
+			}
 		}
+
+		/**
+		 * Watch for folder deletion or renaming
+		 */
+		fs.watch(path.dirname(dbFolder), (eventType, filename) => {
+			if (filename === path.basename(dbFolder) && eventType === 'rename') {
+				logger.warn('Databases folder was removed or renamed.');
+			}
+		});
 
 		/**
 		 * Open database
