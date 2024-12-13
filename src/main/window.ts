@@ -19,7 +19,6 @@ if (isDevelopment) {
 	loadURL = serve({
 		directory: pathToDist,
 		scheme: 'wcpos',
-		isCorsEnabled: false,
 	});
 }
 
