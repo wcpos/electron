@@ -90,7 +90,6 @@ const config: ForgeConfig = {
 			{
 				format: 'ULFO',
 				icon: path.resolve(__dirname, 'icons/icon.icns'),
-				appPath: '', // https://github.com/electron/forge/issues/3712
 			},
 			['darwin']
 		),
