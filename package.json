@@ -48,13 +48,11 @@
 		"electron": "33.3.0",
 		"electron-debug": "^4.1.0",
 		"electron-devtools-installer": "^3.2.1",
-		"electron-forge-maker-appimage": "https://github.com/logseq/electron-forge-maker-appimage.git#commit=afb3129f0e787b4e5a68663e1032293e506a59ee",
 		"electron-squirrel-startup": "^1.0.1",
 		"electron-store": "^10.0.0",
 		"fs-extra": "^11.2.0",
 		"node-loader": "^2.1.0",
 		"ts-loader": "^9.5.1",
-		"ts-node": "^10.9.2",
-		"typescript": "~5.4.5"
+		"ts-node": "^10.9.2"
 	}
 }
