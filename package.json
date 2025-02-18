@@ -43,7 +43,6 @@
 		"@types/fs-extra": "^11.0.4",
 		"@types/webpack-node-externals": "^3.0.4",
 		"@vercel/webpack-asset-relocator-loader": "1.7.3",
-		"@wcpos/eslint-config": "*",
 		"concurrently": "9.1.2",
 		"electron": "34.2.0",
 		"electron-debug": "^4.1.0",
