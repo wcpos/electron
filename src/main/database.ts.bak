@@ -1,0 +1,63 @@
+import { app, ipcMain } from 'electron';
+import path from 'path';
+import { getRxStorageFilesystemNode } from 'rxdb-premium/plugins/storage-filesystem-node';
+import logger from './log';
+import { isDevelopment } from './util';
+import fs from 'fs';
+import type { RxStorageAbstractFilesystem } from 'rxdb-premium/plugins/storage-abstract-filesystem';
+
+// Create the storage adapter when the app is ready.
+let storage: RxStorageAbstractFilesystem;
+app.on('ready', async () => {
+  try {
+    const dbFolder = isDevelopment
+      ? path.resolve('databases')
+      : path.resolve(app.getPath('userData'), 'wcpos_dbs');
+
+    // Create folder if it doesn't exist
+    if (!fs.existsSync(dbFolder)) {
+      try {
+        fs.mkdirSync(dbFolder, { recursive: true });
+        logger.info(`Created database folder: ${dbFolder}`);
+      } catch (err) {
+        logger.error(`Failed to create database folder: ${dbFolder}`, err);
+      }
+    }
+
+    logger.info('Initialising storage adapter');
+    storage = getRxStorageFilesystemNode({
+      basePath: dbFolder,
+      inWorker: false
+    });
+    logger.info('Storage adapter initialised');
+  } catch (error) {
+    logger.error('Error initialising storage adapter:', error);
+  }
+});
+
+// Generic IPC handler for storage calls.
+ipcMain.handle('rxStorage', async (event, { methodPath, args }) => {
+  try {
+    if (!storage) {
+      throw new Error('Storage not initialised');
+    }
+    // Resolve the methodPath (e.g. "createStorageInstance")
+    const parts = methodPath.split('.');
+    logger.info('Resolving method path:', parts);
+    let target = storage;
+    for (const part of parts) {
+      target = target[part];
+      if (target === undefined) {
+        throw new Error(`Method ${methodPath} not found on storage`);
+      }
+    }
+    if (typeof target !== 'function') {
+      throw new Error(`Target ${methodPath} is not a function`);
+    }
+    const result = await target(...args);
+    return result;
+  } catch (error) {
+    logger.error('Error in rxStorage remote call:', error);
+    throw error;
+  }
+});

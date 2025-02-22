@@ -7,7 +7,7 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 // import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { PublisherGithub } from '@electron-forge/publisher-github';
-import MakerAppImage from 'electron-forge-maker-appimage';
+// import MakerAppImage from 'electron-forge-maker-appimage';
 import { move, pathExists, remove } from 'fs-extra';
 // import PublisherGithubLatestYml from 'publisher-github-latest-yml';
 
@@ -101,15 +101,15 @@ const config: ForgeConfig = {
 		// 	// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
 		// 	options: { bin: 'WooCommercePOS' },
 		// }),
-		new MakerAppImage(
-			{
-				options: {
-					icon: path.resolve(__dirname, 'icons/icon.png'),
-					categories: ['Office'],
-				},
-			},
-			['linux']
-		),
+		// new MakerAppImage(
+		// 	{
+		// 		options: {
+		// 			icon: path.resolve(__dirname, 'icons/icon.png'),
+		// 			categories: ['Office'],
+		// 		},
+		// 	},
+		// 	['linux']
+		// ),
 	],
 	publishers: [
 		new PublisherGithub({

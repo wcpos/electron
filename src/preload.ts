@@ -18,7 +18,7 @@ const ipc = {
 		// From main to render.
 		on: [] as string[], // We'll handle dynamic channels separately
 		// From render to main and back again.
-		invoke: ['sqlite', 'axios'] as string[],
+		invoke: ['sqlite', 'axios', 'rxStorage'] as string[],
 		// From main to render, once
 		once: [] as string[], // We'll handle dynamic channels separately
 	},
