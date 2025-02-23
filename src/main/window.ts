@@ -4,8 +4,7 @@ import { BrowserWindow, shell } from 'electron';
 import serve from 'electron-serve';
 
 import log from './log';
-
-const isDevelopment = process.env.NODE_ENV === 'development';
+import { isDevelopment } from './util';
 
 // Set up electron-serve
 let loadURL: (window: BrowserWindow) => void;

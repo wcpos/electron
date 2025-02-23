@@ -8,7 +8,7 @@
 	"main": ".webpack/main",
 	"scripts": {
 		"dev": "concurrently \"pnpm run dev:expo\" \"pnpm run dev:electron\"",
-		"dev:expo": "ELECTRON=true EXPO_NO_METRO_LAZY=true BROWSER=none pnpm --filter @wcpos/main dev --web --port 8088",
+		"dev:expo": "ELECTRON=true EXPO_NO_METRO_LAZY=true BROWSER=none pnpm --filter @wcpos/main dev --web --port 8088 --clear",
 		"dev:electron": "NODE_ENV=\"development\" electron-forge start --enable-logging",
 		"rebuild:all": "electron-rebuild -v 34.1.1 -f",
 		"package": "DEBUG=electron-osx-sign* electron-forge package",
