@@ -1,9 +1,9 @@
-name: Publish
+name: Publish v1
 
 on:
   push:
     branches:
-      - main
+      - v1
   workflow_dispatch:
     inputs:
       platform:
@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Check out the Monorepo repository
         run: |
-          git clone https://github.com/wcpos/monorepo.git monorepo
+          git clone --branch v1 https://github.com/wcpos/monorepo.git monorepo
           cd monorepo
           touch yarn.lock
 
