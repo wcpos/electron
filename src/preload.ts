@@ -39,7 +39,11 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 	on(channel: string, func: (...args: unknown[]) => void) {
 		// Allow dynamic channels for print callbacks
 		const validChannels = [/^onBeforePrint-/, /^onAfterPrint-/, /^onPrintError-/, ...ipc.render.on];
-		if (validChannels.some((regex) => regex.test(channel))) {
+		if (
+			validChannels.some((regex) =>
+				typeof regex === 'string' ? regex === channel : regex.test(channel)
+			)
+		) {
 			const subscription = (_event: IpcRendererEvent, ...args: unknown[]) => func(...args);
 			ipcRenderer.on(channel, subscription);
 
@@ -66,7 +70,11 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 			/^onPrintError-/,
 			...ipc.render.once,
 		];
-		if (validChannels.some((regex) => regex.test(channel))) {
+		if (
+			validChannels.some((regex) =>
+				typeof regex === 'string' ? regex === channel : regex.test(channel)
+			)
+		) {
 			ipcRenderer.once(channel, (_event: IpcRendererEvent, ...args: unknown[]) => func(...args));
 		} else {
 			throw Error(`Channel ${channel} is not allowed`);
@@ -82,8 +90,8 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
  * https://www.electronjs.org/docs/latest/tutorial/context-isolation
  */
 contextBridge.exposeInMainWorld('Buffer', {
-	from: (data, encoding) => Buffer.from(data, encoding),
-	alloc: (size) => Buffer.alloc(size),
-	isBuffer: (obj) => Buffer.isBuffer(obj),
-	concat: (buffers, totalLength) => Buffer.concat(buffers, totalLength),
+	from: (data: any, encoding?: any) => Buffer.from(data, encoding),
+	alloc: (size: number) => Buffer.alloc(size),
+	isBuffer: (obj: any) => Buffer.isBuffer(obj),
+	concat: (buffers: any[], totalLength?: number) => Buffer.concat(buffers, totalLength),
 });

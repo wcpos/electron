@@ -2,6 +2,9 @@ import * as path from 'path';
 
 import { app } from 'electron';
 
+import log from './log';
+import { getMainWindow } from './window';
+
 /**
  *
  */
@@ -16,6 +19,16 @@ export function initProtocolHandling() {
 	}
 
 	app.on('open-url', (event, url) => {
-		console.log('Welcome Back', `You arrived from: ${url}`);
+		log.info(`Protocol handler received URL: ${url}`);
+
+		// Simulate browser navigation to the protocol URL so expo-auth-session can handle it
+		const mainWindow = getMainWindow();
+		if (mainWindow && !mainWindow.isDestroyed()) {
+			log.info(`Simulating navigation to protocol URL: ${url}`);
+
+			mainWindow.focus();
+		} else {
+			log.warn('Main window not available to handle protocol URL');
+		}
 	});
 }

@@ -33,7 +33,11 @@ app
 	.then(() => {
 		logger.info('Starting app');
 		createWindow();
-		initProtocolHandling();
+		if (process.env.NODE_ENV === 'development') {
+			// force protocol handling in development
+			// forge will handle this in production
+			initProtocolHandling();
+		}
 		registerMenu();
 		updater.init(); // must be after createWindow
 	})
