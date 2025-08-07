@@ -17,7 +17,7 @@ if (process.env.NODE_ENV === 'development') {
 		family: 4,
 	});
 	axios.defaults.httpsAgent = httpsAgent;
-	// eslint-disable-next-line no-console
+
 	console.log(process.env.NODE_ENV, `RejectUnauthorized is disabled.`);
 }
 
@@ -27,32 +27,65 @@ if (process.env.NODE_ENV === 'development') {
 ipcMain.handle('axios', (event, obj) => {
 	console.log(obj);
 	if (obj.type === 'request') {
-		return new Promise((resolve, reject) => {
+		return new Promise((resolve) => {
 			axios
 				.request(obj.config || {})
 				.then((response) => {
-					/**
-					 * config and request contain objects that can't be structuredCloned
-					 * TODO - do I need anything from config or request?
-					 */
-					// const cloned = structuredClone({ ...res, config: null, request: null });
-					const cloned = { ...response, config: obj.config, request: null };
-					logger.silly('success', cloned);
-					resolve(cloned);
+					// Create a serializable response object that matches Axios structure
+					const serializableResponse = {
+						success: true,
+						data: response.data,
+						status: response.status,
+						statusText: response.statusText,
+						headers: response.headers,
+						config: {
+							url: obj.config?.url,
+							method: obj.config?.method,
+							baseURL: obj.config?.baseURL,
+							headers: obj.config?.headers,
+						},
+						request: null as any, // Explicitly null for serialization
+					};
+					logger.silly('HTTP success', { status: response.status, url: obj.config?.url });
+					resolve(serializableResponse);
 				})
 				.catch((error) => {
-					const cloned = {
-						...error,
-						config: obj.config,
-						request: null,
-						response: {
-							...error.response,
-							config: obj.config,
-							request: null,
+					// Create a serializable error object that matches Axios error structure
+					const serializableError = {
+						success: false,
+						message: error.message,
+						name: error.name,
+						code: error.code,
+						config: {
+							url: obj.config?.url,
+							method: obj.config?.method,
+							baseURL: obj.config?.baseURL,
+							headers: obj.config?.headers,
 						},
+						request: null as any, // Explicitly null for serialization
+						response: error.response
+							? {
+									data: error.response.data,
+									status: error.response.status,
+									statusText: error.response.statusText,
+									headers: error.response.headers,
+									config: {
+										url: obj.config?.url,
+										method: obj.config?.method,
+										baseURL: obj.config?.baseURL,
+										headers: obj.config?.headers,
+									},
+									request: null as any, // Explicitly null for serialization
+								}
+							: undefined,
+						isAxiosError: true,
 					};
-					logger.error('request failed', cloned);
-					resolve(cloned);
+					logger.error('HTTP error', {
+						status: error.response?.status,
+						message: error.message,
+						url: obj.config?.url,
+					});
+					resolve(serializableError);
 				});
 		});
 	}
