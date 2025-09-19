@@ -1,7 +1,7 @@
 /* eslint import/prefer-default-export: off, import/no-mutable-exports: off */
 import fs from 'fs';
 
-import { SCHEME, ROOT } from './constants';
+import { ROOT, SCHEME } from './constants';
 
 export const isDevelopment = process.env.NODE_ENV === 'development';
 

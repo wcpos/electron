@@ -1,4 +1,4 @@
-import { dialog, app } from 'electron';
+import { app, dialog } from 'electron';
 import Store from 'electron-store';
 
 import logger, { Sentry } from './log';

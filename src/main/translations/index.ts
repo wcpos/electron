@@ -1,4 +1,4 @@
-import { tx, t } from '@transifex/native';
+import { t, tx } from '@transifex/native';
 import { app } from 'electron';
 import Store from 'electron-store';
 

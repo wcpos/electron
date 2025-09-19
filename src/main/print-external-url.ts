@@ -1,4 +1,4 @@
-import { BrowserWindow, IpcMainEvent, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain, IpcMainEvent } from 'electron';
 
 import logger from './log';
 

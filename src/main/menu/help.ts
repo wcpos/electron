@@ -1,5 +1,5 @@
 // import { openOnboardingWindow } from '../onboarding/window';
-import { MenuItemConstructorOptions, MenuItem } from 'electron';
+import { MenuItem, MenuItemConstructorOptions } from 'electron';
 
 import { t } from '../translations';
 import { updater } from '../update';

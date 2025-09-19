@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/electron/main';
-import { dialog, app } from 'electron';
+import { app, dialog } from 'electron';
 import logger from 'electron-log';
 
 const isDevelopment = process.env.NODE_ENV === 'development';

@@ -4,7 +4,7 @@ import * as stream from 'stream';
 import { promisify } from 'util';
 
 import axios from 'axios';
-import { dialog, MenuItem, app, autoUpdater, shell, BrowserWindow } from 'electron';
+import { app, autoUpdater, BrowserWindow, dialog, MenuItem, shell } from 'electron';
 import Store from 'electron-store';
 import semver from 'semver';
 

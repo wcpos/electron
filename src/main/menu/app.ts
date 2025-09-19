@@ -1,5 +1,5 @@
 // import { showSettings } from '../config/window';
-import { MenuItemConstructorOptions, MenuItem } from 'electron';
+import { MenuItem, MenuItemConstructorOptions } from 'electron';
 
 import { t } from '../translations';
 import { updater } from '../update';
@@ -33,5 +33,5 @@ export const baseAppMenu: MenuItemConstructorOptions[] = isMac
 					{ role: 'quit' },
 				],
 			},
-	  ]
+		]
 	: [];

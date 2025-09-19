@@ -1,6 +1,6 @@
 import path from 'path';
 
-import { app, ipcMain, dialog } from 'electron';
+import { app, dialog, ipcMain } from 'electron';
 import fs from 'fs-extra';
 
 import { closeAll } from './database';
