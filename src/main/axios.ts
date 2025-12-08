@@ -21,15 +21,41 @@ if (process.env.NODE_ENV === 'development') {
 	console.log(process.env.NODE_ENV, `RejectUnauthorized is disabled.`);
 }
 
+// Map to store AbortControllers for active requests
+const activeRequests = new Map<string, AbortController>();
+
 /**
  *
  */
 ipcMain.handle('axios', (event, obj) => {
-	console.log(obj);
+	// console.log(obj);
+	
+	// Handle request cancellation
+	if (obj.type === 'cancel') {
+		const { requestId } = obj;
+		if (requestId && activeRequests.has(requestId)) {
+			const controller = activeRequests.get(requestId);
+			controller.abort();
+			activeRequests.delete(requestId);
+			logger.debug(`Cancelled request ${requestId}`);
+		}
+		return Promise.resolve({ success: true });
+	}
+
 	if (obj.type === 'request') {
 		return new Promise((resolve) => {
+			const config = obj.config || {};
+			const requestId = obj.requestId;
+			
+			// If request ID is provided, attach an abort signal
+			if (requestId) {
+				const controller = new AbortController();
+				config.signal = controller.signal;
+				activeRequests.set(requestId, controller);
+			}
+
 			axios
-				.request(obj.config || {})
+				.request(config)
 				.then((response) => {
 					// Create a serializable response object that matches Axios structure
 					const serializableResponse = {
@@ -86,6 +112,12 @@ ipcMain.handle('axios', (event, obj) => {
 						url: obj.config?.url,
 					});
 					resolve(serializableError);
+				})
+				.finally(() => {
+					// Clean up the active request map
+					if (requestId && activeRequests.has(requestId)) {
+						activeRequests.delete(requestId);
+					}
 				});
 		});
 	}

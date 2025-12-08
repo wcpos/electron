@@ -85,10 +85,81 @@ function executeSql(db, sql, params) {
 }
 
 /**
+ * Safe JSON stringify that handles circular references and large objects
+ */
+function safeStringify(obj: any, maxLength = 5000): string {
+	const seen = new WeakSet();
+	try {
+		const result = JSON.stringify(obj, (key, value) => {
+			if (typeof value === 'object' && value !== null) {
+				if (seen.has(value)) {
+					return '[Circular]';
+				}
+				seen.add(value);
+			}
+			// Truncate very long strings (likely base64 or large text)
+			if (typeof value === 'string' && value.length > 500) {
+				return value.substring(0, 500) + `... [${value.length} chars total]`;
+			}
+			return value;
+		}, 2);
+		if (result && result.length > maxLength) {
+			return result.substring(0, maxLength) + `... [${result.length} chars total]`;
+		}
+		return result;
+	} catch (e) {
+		return '[Unable to stringify]';
+	}
+}
+
+/**
+ * Safely summarize the object for logging to avoid RangeError on large objects
+ */
+const summarizeObj = (obj: any) => {
+	try {
+		const paramsInfo = Array.isArray(obj.sql?.params)
+			? `[Array(${obj.sql.params.length})]`
+			: obj.sql?.params;
+		
+		// Calculate approximate size of params
+		let paramsSize = 0;
+		if (Array.isArray(obj.sql?.params)) {
+			for (const param of obj.sql.params) {
+				if (typeof param === 'string') {
+					paramsSize += param.length;
+				}
+			}
+		}
+
+		return {
+			type: obj.type,
+			name: obj.name,
+			sql: obj.sql
+				? {
+						query: obj.sql.query,
+						params: paramsInfo,
+						paramsSize: paramsSize > 0 ? `~${Math.round(paramsSize / 1024)}KB` : undefined,
+					}
+				: undefined,
+		};
+	} catch {
+		return 'Failed to summarize object';
+	}
+};
+
+/**
  * Handle SQLite IPC requests.
  */
 ipcMain.handle('sqlite', (event, obj) => {
-	logger.silly('SQL request', JSON.stringify(obj, null, 2));
+	// Always use safe stringify to avoid RangeError
+	const summary = summarizeObj(obj);
+	logger.silly('SQL request', safeStringify(summary));
+	
+	// Log warning if params are unusually large (potential issue indicator)
+	if (summary.sql?.paramsSize && parseInt(summary.sql.paramsSize) > 100) {
+		logger.warn('Large SQL params detected', summary.sql.paramsSize, summary.sql.query?.substring(0, 100));
+	}
+	
 	try {
 		let db;
 		switch (obj.type) {
@@ -115,7 +186,7 @@ ipcMain.handle('sqlite', (event, obj) => {
 				throw new Error('Unknown type');
 		}
 	} catch (err) {
-		logger.error('SQLite error', err, obj);
+		logger.error('SQLite error', err, summarizeObj(obj));
 		throw err;
 	}
 });

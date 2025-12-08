@@ -14,11 +14,11 @@ contextBridge.exposeInMainWorld('electron', {
 const ipc = {
 	render: {
 		// From render to main.
-		send: ['clearData', 'print-external-url'] as string[],
+		send: ['clearData', 'print-external-url', 'open-external-url'] as string[],
 		// From main to render.
-		on: [] as string[], // We'll handle dynamic channels separately
+		on: ['system-resume'] as string[], // System events from main process
 		// From render to main and back again.
-		invoke: ['sqlite', 'axios', 'rxStorage'] as string[],
+		invoke: ['sqlite', 'axios', 'rxStorage', 'auth:prompt'] as string[],
 		// From main to render, once
 		once: [] as string[], // We'll handle dynamic channels separately
 	},

@@ -61,74 +61,12 @@ export const createWindow = (): void => {
 		mainWindow = null;
 	});
 
-	// Open URLs in the user's browser
-	mainWindow.webContents.setWindowOpenHandler(({ url, disposition, referrer, postBody }) => {
-		// Log all popup attempts
-		log.info(`Popup requested: ${url}`);
-
-		// 1) If this is JWT‐auth popup, allow it in‐app:
-		if (url.match(/\/wcpos-auth(\?|$)/)) {
-			log.info(`Auth popup allowed: ${url}`);
-			return {
-				action: 'allow',
-				overrideBrowserWindowOptions: {
-					width: 500,
-					height: 550,
-					alwaysOnTop: true,
-					webPreferences: {
-						nodeIntegration: false,
-						contextIsolation: true,
-					},
-				},
-				outlivesOpener: false,
-			};
-		}
-
-		// 2) Otherwise, open in the user's external browser:
+	// Open external URLs in the user's default browser
+	// Auth is now handled via IPC in auth-handler.ts
+	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
 		log.info(`Opening in external browser: ${url}`);
 		shell.openExternal(url);
 		return { action: 'deny' };
-	});
-
-	// Listen for new windows (popups) being created
-	mainWindow.webContents.on('did-create-window', (window, details) => {
-		log.info(`Popup window created for: ${details.url}`);
-
-		// Listen to navigation events within the popup
-		window.webContents.on('will-navigate', (event, navigationUrl) => {
-			log.info(`Popup will navigate to: ${navigationUrl}`);
-
-			// If popup is navigating to wcpos:// protocol, handle it
-			if (navigationUrl.startsWith('wcpos://')) {
-				event.preventDefault();
-				log.info(`Auth popup redirecting to protocol URL: ${navigationUrl}`);
-
-				// Simulate browser navigation to the protocol URL so expo-auth-session can handle it
-				if (mainWindow && !mainWindow.isDestroyed()) {
-					log.info(`Simulating navigation to protocol URL: ${navigationUrl}`);
-
-					mainWindow.focus();
-				}
-
-				// Close the popup
-				if (!window.isDestroyed()) {
-					window.close();
-				}
-			}
-		});
-
-		window.webContents.on('did-navigate', (event, navigationUrl) => {
-			log.info(`Popup navigated to: ${navigationUrl}`);
-		});
-
-		window.webContents.on('did-navigate-in-page', (event, navigationUrl) => {
-			log.info(`Popup in-page navigation to: ${navigationUrl}`);
-		});
-
-		// Log when popup is closed
-		window.on('closed', () => {
-			log.info(`Popup window closed`);
-		});
 	});
 
 	// Handle failed loads

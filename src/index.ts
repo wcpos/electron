@@ -1,16 +1,18 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, powerMonitor } from 'electron';
 
+import { initAuthHandler } from './main/auth-handler';
 import { installExtensions } from './main/extensions';
 import logger from './main/log';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
 import { loadTranslations } from './main/translations';
 import { updater } from './main/update';
-import { createWindow } from './main/window';
+import { createWindow, getMainWindow } from './main/window';
 import './main/database';
 import './main/axios';
 import './main/print-external-url';
 import './main/basePath';
+import './main/open-external-url';
 
 // enabled logging when in development
 // if (process.env.NODE_ENV === 'development') {
@@ -33,6 +35,7 @@ app
 	.then(() => {
 		logger.info('Starting app');
 		createWindow();
+		initAuthHandler();
 		if (process.env.NODE_ENV === 'development') {
 			// force protocol handling in development
 			// forge will handle this in production
@@ -61,6 +64,30 @@ app.on('activate', () => {
 	if (BrowserWindow.getAllWindows().length === 0) {
 		createWindow();
 	}
+});
+
+// Power management - detect system suspend/resume to help diagnose
+// potential issues when the app is in the background
+powerMonitor.on('suspend', () => {
+	logger.info('System is suspending');
+});
+
+powerMonitor.on('resume', () => {
+	logger.info('System has resumed from suspend');
+	// Notify the renderer that the system has resumed
+	// This can help the app recover gracefully
+	const mainWindow = getMainWindow();
+	if (mainWindow && !mainWindow.isDestroyed()) {
+		mainWindow.webContents.send('system-resume');
+	}
+});
+
+powerMonitor.on('lock-screen', () => {
+	logger.info('Screen was locked');
+});
+
+powerMonitor.on('unlock-screen', () => {
+	logger.info('Screen was unlocked');
 });
 
 // In this file you can include the rest of your app's specific main process
