@@ -74,15 +74,15 @@ export function initAuthHandler(): void {
 		const mainWindow = getMainWindow();
 
 		return new Promise((resolve) => {
-			// Create modal auth window
+			// Create auth window (non-modal so user can cancel and return to app)
 			const authWindow = new BrowserWindow({
 				width: 500,
 				height: 600,
 				parent: mainWindow || undefined,
-				modal: true,
+				modal: false, // Non-modal so user can access main app
 				show: false,
 				autoHideMenuBar: true,
-				title: 'Login',
+				title: 'Login - Press Escape or close window to cancel',
 				webPreferences: {
 					nodeIntegration: false,
 					contextIsolation: true,
@@ -109,6 +109,16 @@ export function initAuthHandler(): void {
 			// Show window when ready
 			authWindow.once('ready-to-show', () => {
 				authWindow.show();
+				// Focus the auth window so user can interact with it
+				authWindow.focus();
+			});
+
+			// Handle Escape key to cancel auth
+			authWindow.webContents.on('before-input-event', (_event, input) => {
+				if (input.type === 'keyDown' && input.key === 'Escape') {
+					log.info('Auth cancelled via Escape key');
+					resolveOnce({ type: 'cancel' });
+				}
 			});
 
 			// Handle window closed by user
