@@ -1,13 +1,15 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 /**
- * Expose the basePath to the renderer process.
+ * Expose app info to the renderer process.
  *
- * @NOTE - This is a synchronous call, it will block the thread, but it's a quick call.
- * This is needed for the bundle splitting to work correctly.
+ * @NOTE - These are synchronous calls, they will block the thread, but they're quick calls.
+ * basePath is needed for the bundle splitting to work correctly.
+ * version is needed for app-info utility to report correct electron version.
  */
 contextBridge.exposeInMainWorld('electron', {
 	basePath: ipcRenderer.sendSync('getBasePathSync'),
+	version: ipcRenderer.sendSync('getAppVersionSync'),
 });
 
 // White-listed channels.

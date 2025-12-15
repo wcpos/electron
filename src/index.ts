@@ -12,6 +12,7 @@ import './main/database';
 import './main/axios';
 import './main/print-external-url';
 import './main/basePath';
+import './main/appVersion';
 import './main/open-external-url';
 
 // enabled logging when in development
