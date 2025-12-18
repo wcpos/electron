@@ -89,10 +89,9 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Python and distutils
+      - name: Install Python setuptools
         run: |
-          python3 -m ensurepip
-          python3 -m pip install setuptools
+          python3 -m pip install --break-system-packages setuptools
 
       - name: Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
