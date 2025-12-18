@@ -88,7 +88,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
 
       - name: Install Python and distutils
         run: |
@@ -139,7 +138,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
 
       - name: Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
@@ -184,7 +182,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
 
       - name: Install and build
         run: |
@@ -219,7 +216,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
 
       - name: Install and build
         run: |
