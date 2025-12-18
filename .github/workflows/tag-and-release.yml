@@ -81,9 +81,6 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -101,8 +98,8 @@ jobs:
 
       - name: Install and build
         run: |
-          pnpm install
-          pnpm rebuild:all
+          npm install
+          npm run rebuild:all
 
       - name: Publish MacOS x64 release
         env:
@@ -111,7 +108,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pnpm publish-app
+          npm run publish-app
 
   publish-macos-arm64:
     needs:
@@ -130,9 +127,6 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -146,8 +140,8 @@ jobs:
 
       - name: Install and build
         run: |
-          pnpm install
-          pnpm rebuild:all
+          npm install
+          npm run rebuild:all
 
       - name: Publish MacOS arm64 release
         env:
@@ -157,7 +151,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCH: arm64
         run: |
-          pnpm publish-app --arch=arm64 --platform=darwin
+          npm run publish-app -- --arch=arm64 --platform=darwin
 
   publish-windows:
     needs: build-expo
@@ -174,28 +168,21 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Add 7-Zip to PATH
-        run: |
-          echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
       - name: Install and build
         run: |
-          pnpm install
-          pnpm rebuild:all
+          npm install
+          npm run rebuild:all
 
       - name: Publish Windows release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pnpm publish-app
+          npm run publish-app
 
   publish-linux:
     needs: build-expo
@@ -212,9 +199,6 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -222,11 +206,11 @@ jobs:
 
       - name: Install and build
         run: |
-          pnpm install
-          pnpm rebuild:all
+          npm install
+          npm run rebuild:all
 
       - name: Publish Linux release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pnpm publish-app
+          npm run publish-app
