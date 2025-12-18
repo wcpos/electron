@@ -58,17 +58,17 @@ jobs:
       - name: Run Expo export
         working-directory: monorepo
         run: |
-          pnpm --filter @wcpos/main export:electron
+          pnpm --filter @wcpos/main build:electron
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v4
         with:
           name: expo-dist
-          path: monorepo/apps/main/dist
+          path: monorepo/apps/main/electron-build
 
   publish-macos:
     needs: build-expo
-    runs-on: macos-13
+    runs-on: macos-15-intel
     if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' }}
 
     steps:
@@ -81,10 +81,16 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install Node.js, NPM, and Yarn
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+          cache: 'pnpm'
 
       - name: Install Python and distutils
         run: |
@@ -98,11 +104,9 @@ jobs:
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
       - name: Install and build
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          yarn install
-          yarn rebuild:all
+          pnpm install
+          pnpm rebuild:all
 
       - name: Publish MacOS x64 release
         env:
@@ -111,7 +115,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          yarn publish-app
+          pnpm publish-app
 
   publish-macos-arm64:
     needs:
@@ -130,10 +134,16 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install Node.js, NPM, and Yarn
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+          cache: 'pnpm'
 
       - name: Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
@@ -142,11 +152,9 @@ jobs:
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
       - name: Install and build
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          yarn install
-          yarn rebuild:all
+          pnpm install
+          pnpm rebuild:all
 
       - name: Publish MacOS arm64 release
         env:
@@ -156,7 +164,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCH: arm64
         run: |
-          yarn publish-app --arch=arm64 --platform=darwin
+          pnpm publish-app --arch=arm64 --platform=darwin
 
   publish-windows:
     needs: build-expo
@@ -173,23 +181,27 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install Node.js, NPM, and Yarn
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+          cache: 'pnpm'
 
       - name: Install and build
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          yarn install
-          yarn rebuild:all
+          pnpm install
+          pnpm rebuild:all
 
       - name: Publish Windows release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          yarn publish-app
+          pnpm publish-app
 
   publish-linux:
     needs: build-expo
@@ -206,20 +218,24 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: Install Node.js, NPM, and Yarn
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+          cache: 'pnpm'
 
       - name: Install and build
-        env:
-          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
-          yarn install
-          yarn rebuild:all
+          pnpm install
+          pnpm rebuild:all
 
       - name: Publish Linux release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          yarn publish-app
+          pnpm publish-app
