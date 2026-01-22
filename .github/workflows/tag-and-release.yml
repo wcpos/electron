@@ -16,12 +16,11 @@ on:
           - macos
           - macos-arm64
           - windows
-          - linux
 
 jobs:
   build-expo:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' }}
 
     steps:
       - name: 📥 Check out the Monorepo repository
@@ -139,30 +138,6 @@ jobs:
           pnpm run rebuild:all
 
       - name: 🚀 Publish Windows release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm run publish-app
-
-  publish-linux:
-    needs: build-expo
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
-
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v4
-
-      - name: 🏗 Setup Electron
-        uses: ./.github/actions/setup-electron
-        with:
-          download-expo-artifact: "true"
-
-      - name: 📦 Install and rebuild native modules
-        run: |
-          pnpm install
-          pnpm run rebuild:all
-
-      - name: 🚀 Publish Linux release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm run publish-app
