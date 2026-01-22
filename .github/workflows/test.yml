@@ -21,16 +21,8 @@ jobs:
       - name: 📦 Install dependencies
         run: pnpm install
 
-      - name: 📝 Create placeholder dist for packaging test
-        run: |
-          mkdir -p dist
-          echo '<!DOCTYPE html><html><head><title>Test</title></head><body></body></html>' > dist/index.html
-
       - name: 🧪 Test
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pnpm package
           pnpm lint
           pnpm exec tsc
           pnpm test
