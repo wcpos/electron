@@ -2,23 +2,22 @@ import log from '../log';
 
 import type ElectronStore from 'electron-store';
 
-export default class CustomCache {
-	translationsByLocale: object;
-	store: ElectronStore;
+type TranslationRecord = Record<string, string>;
+type TranslationsByLocale = Record<string, TranslationRecord>;
 
-	constructor(store: ElectronStore) {
+export default class CustomCache {
+	translationsByLocale: TranslationsByLocale;
+	store: ElectronStore<Record<string, TranslationRecord>>;
+
+	constructor(store: ElectronStore<Record<string, TranslationRecord>>) {
 		this.store = store;
 		this.translationsByLocale = {};
 	}
 
 	/**
 	 * Store locale translations in cache
-	 *
-	 * @param {String} localeCode
-	 * @param {Object} translations - Object with translation key:value pairs
-	 * @param {String} translations[key] - Translation string
 	 */
-	update(localeCode, translations, fromLocalStorage) {
+	update(localeCode: string, translations: TranslationRecord, fromLocalStorage?: boolean): void {
 		if (!fromLocalStorage) {
 			log.debug(`Storing ${localeCode} translations in cache`);
 			this.store.set(localeCode, translations);
@@ -33,44 +32,30 @@ export default class CustomCache {
 
 	/**
 	 * Get translations by locale from cache
-	 *
-	 * @param {String} localeCode
-	 * @returns {Object} translations
-	 * @returns {String} translations[key]
 	 */
-	getTranslations(localeCode) {
+	getTranslations(localeCode: string): TranslationRecord {
 		return this.translationsByLocale[localeCode] || {};
 	}
 
 	/**
 	 * Check if locale has translations in cache
-	 *
-	 * @param {String} localeCode
-	 * @returns {Boolean}
 	 */
-	hasTranslations(localeCode) {
+	hasTranslations(localeCode: string): boolean {
 		return !!this.translationsByLocale[localeCode];
 	}
 
 	/**
 	 * Check if translations are stale and need refreshing
-	 *
-	 * @param {String} localeCode
-	 * @returns {Boolean}
 	 */
-	isStale(localeCode) {
+	isStale(localeCode: string): boolean {
 		return !this.hasTranslations(localeCode);
 	}
 
 	/**
 	 * Get translation by key. If key does not exist in cache,
 	 * return empty string
-	 *
-	 * @param {String} key
-	 * @param {String} localeCode
-	 * @returns {String} - translation or empty string
 	 */
-	get(key, localeCode) {
+	get(key: string, localeCode: string): string {
 		return this.getTranslations(localeCode)[key] || '';
 	}
 }

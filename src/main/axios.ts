@@ -29,7 +29,7 @@ const activeRequests = new Map<string, AbortController>();
  */
 ipcMain.handle('axios', (event, obj) => {
 	// console.log(obj);
-	
+
 	// Handle request cancellation
 	if (obj.type === 'cancel') {
 		const { requestId } = obj;
@@ -46,7 +46,7 @@ ipcMain.handle('axios', (event, obj) => {
 		return new Promise((resolve) => {
 			const config = obj.config || {};
 			const requestId = obj.requestId;
-			
+
 			// If request ID is provided, attach an abort signal
 			if (requestId) {
 				const controller = new AbortController();

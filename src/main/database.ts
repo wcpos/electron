@@ -70,7 +70,7 @@ function convertBooleansToNumbers(params: (string | number | boolean)[]): (strin
  * - Other PRAGMA queries: use .all()
  * - All others: use .run()
  */
-function executeSql(db, sql, params) {
+function executeSql(db: Database.Database, sql: string, params: (string | number)[]) {
 	if (/^\s*SELECT/i.test(sql)) {
 		return db.prepare(sql).all(params);
 	}
@@ -90,19 +90,23 @@ function executeSql(db, sql, params) {
 function safeStringify(obj: any, maxLength = 5000): string {
 	const seen = new WeakSet();
 	try {
-		const result = JSON.stringify(obj, (key, value) => {
-			if (typeof value === 'object' && value !== null) {
-				if (seen.has(value)) {
-					return '[Circular]';
+		const result = JSON.stringify(
+			obj,
+			(key, value) => {
+				if (typeof value === 'object' && value !== null) {
+					if (seen.has(value)) {
+						return '[Circular]';
+					}
+					seen.add(value);
 				}
-				seen.add(value);
-			}
-			// Truncate very long strings (likely base64 or large text)
-			if (typeof value === 'string' && value.length > 500) {
-				return value.substring(0, 500) + `... [${value.length} chars total]`;
-			}
-			return value;
-		}, 2);
+				// Truncate very long strings (likely base64 or large text)
+				if (typeof value === 'string' && value.length > 500) {
+					return value.substring(0, 500) + `... [${value.length} chars total]`;
+				}
+				return value;
+			},
+			2
+		);
 		if (result && result.length > maxLength) {
 			return result.substring(0, maxLength) + `... [${result.length} chars total]`;
 		}
@@ -120,7 +124,7 @@ const summarizeObj = (obj: any) => {
 		const paramsInfo = Array.isArray(obj.sql?.params)
 			? `[Array(${obj.sql.params.length})]`
 			: obj.sql?.params;
-		
+
 		// Calculate approximate size of params
 		let paramsSize = 0;
 		if (Array.isArray(obj.sql?.params)) {
@@ -154,12 +158,20 @@ ipcMain.handle('sqlite', (event, obj) => {
 	// Always use safe stringify to avoid RangeError
 	const summary = summarizeObj(obj);
 	logger.silly('SQL request', safeStringify(summary));
-	
+
 	// Log warning if params are unusually large (potential issue indicator)
-	if (summary.sql?.paramsSize && parseInt(summary.sql.paramsSize) > 100) {
-		logger.warn('Large SQL params detected', summary.sql.paramsSize, summary.sql.query?.substring(0, 100));
+	if (
+		typeof summary !== 'string' &&
+		summary.sql?.paramsSize &&
+		parseInt(summary.sql.paramsSize) > 100
+	) {
+		logger.warn(
+			'Large SQL params detected',
+			summary.sql.paramsSize,
+			summary.sql.query?.substring(0, 100)
+		);
 	}
-	
+
 	try {
 		let db;
 		switch (obj.type) {

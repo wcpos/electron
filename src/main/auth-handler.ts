@@ -176,4 +176,3 @@ export function initAuthHandler(): void {
 
 	log.info('Auth handler initialized');
 }
-

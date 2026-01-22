@@ -29,9 +29,13 @@ interface LatestRelease {
 	assets: Asset[];
 }
 
+interface UpdateStoreSchema extends Record<string, unknown> {
+	remindLaterTimestamp: number;
+}
+
 const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
-const store = new Store();
+const store = new Store<UpdateStoreSchema>();
 
 export class AutoUpdater {
 	private mainWindow: BrowserWindow;

@@ -8,7 +8,12 @@ import { isMac } from '../util';
 export const baseHelpMenu: MenuItemConstructorOptions = {
 	role: 'help',
 	submenu: [
-		...(!isMac ? [{ role: 'about' }, { type: 'separator' }] : []),
+		...(!isMac
+			? [
+					{ role: 'about' } as MenuItemConstructorOptions,
+					{ type: 'separator' } as MenuItemConstructorOptions,
+				]
+			: []),
 		{
 			label: t('Report an Issue', { _tags: 'electron' }) + '…',
 			click: async () => {

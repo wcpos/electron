@@ -4,8 +4,13 @@ import Store from 'electron-store';
 import logger, { Sentry } from './log';
 import { t } from './translations';
 
+// Define the store schema
+interface StoreSchema extends Record<string, unknown> {
+	hardwareAcceleration: boolean;
+}
+
 // Initialize electron-store
-const store = new Store({
+const store = new Store<StoreSchema>({
 	defaults: {
 		hardwareAcceleration: true, // Default value for hardwareAcceleration
 	},

@@ -24,49 +24,25 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
-      - name: Check out the Monorepo repository
-        run: |
-          git clone https://github.com/wcpos/monorepo.git monorepo
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: 📥 Check out the Monorepo repository
+        uses: actions/checkout@v4
         with:
-          package_json_file: monorepo/package.json
+          repository: wcpos/monorepo
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+      - name: 🏗 Setup Monorepo
+        uses: wcpos/monorepo/.github/actions/setup-monorepo@main
         with:
-          node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: monorepo/pnpm-lock.yaml
+          rxdb-license-key: ${{ secrets.RXDB_LICENSE_KEY }}
+          uniwind-auth-token: ${{ secrets.UNIWIND_AUTH_TOKEN }}
 
-      - name: Install jq
-        run: sudo apt-get install -y jq
+      - name: 🔨 Build Expo for Electron
+        run: pnpm --filter @wcpos/main build:electron
 
-      - name: Add RXDB_LICENSE_KEY to package.json
-        working-directory: monorepo
-        env:
-          RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
-        run: |
-          jq --arg license "$RXDB_LICENSE_KEY" '.accessTokens["rxdb-premium"] = $license' package.json > tmp.json && mv tmp.json package.json
-
-      - name: Install dependencies
-        working-directory: monorepo
-        env:
-          UNIWIND_AUTH_TOKEN: ${{ secrets.UNIWIND_AUTH_TOKEN }}
-        run: |
-          pnpm install
-
-      - name: Run Expo export
-        working-directory: monorepo
-        run: |
-          pnpm --filter @wcpos/main build:electron
-
-      - name: Archive production artifacts
+      - name: 📦 Archive production artifacts
         uses: actions/upload-artifact@v4
         with:
           name: expo-dist
-          path: monorepo/apps/main/electron-build
+          path: apps/main/electron-build
 
   publish-macos:
     needs: build-expo
@@ -77,40 +53,27 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: Download expo-dist artifact
-        uses: actions/download-artifact@v4
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
         with:
-          name: expo-dist
-          path: dist
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+          download-expo-artifact: "true"
 
       - name: Install Python setuptools
-        run: |
-          python3 -m pip install --break-system-packages setuptools
+        run: python3 -m pip install --break-system-packages setuptools
 
-      - name: Signing By Apple Developer ID
+      - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
-      - name: Install and build
-        run: |
-          npm install
-          npm run rebuild:all
-
-      - name: Publish MacOS x64 release
+      - name: 🚀 Publish MacOS x64 release
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm run publish-app
+        run: pnpm run publish-app
 
   publish-macos-arm64:
     needs:
@@ -123,37 +86,25 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: Download expo-dist artifact
-        uses: actions/download-artifact@v4
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
         with:
-          name: expo-dist
-          path: dist
+          download-expo-artifact: "true"
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Signing By Apple Developer ID
+      - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
-      - name: Install and build
-        run: |
-          npm install
-          npm run rebuild:all
-
-      - name: Publish MacOS arm64 release
+      - name: 🚀 Publish MacOS arm64 release
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCH: arm64
-        run: |
-          npm run publish-app -- --arch=arm64 --platform=darwin
+        run: pnpm run publish-app -- --arch=arm64 --platform=darwin
 
   publish-windows:
     needs: build-expo
@@ -164,27 +115,15 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: Download expo-dist artifact
-        uses: actions/download-artifact@v4
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
         with:
-          name: expo-dist
-          path: dist
+          download-expo-artifact: "true"
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install and build
-        run: |
-          npm install
-          npm run rebuild:all
-
-      - name: Publish Windows release
+      - name: 🚀 Publish Windows release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm run publish-app
+        run: pnpm run publish-app
 
   publish-linux:
     needs: build-expo
@@ -195,24 +134,12 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: Download expo-dist artifact
-        uses: actions/download-artifact@v4
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
         with:
-          name: expo-dist
-          path: dist
+          download-expo-artifact: "true"
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install and build
-        run: |
-          npm install
-          npm run rebuild:all
-
-      - name: Publish Linux release
+      - name: 🚀 Publish Linux release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm run publish-app
+        run: pnpm run publish-app

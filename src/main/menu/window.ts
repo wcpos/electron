@@ -19,9 +19,14 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 	//   },
 	// },
 	...(isMac
-		? [{ type: 'separator' }, { role: 'front' }, { type: 'separator' }, { role: 'window' }]
+		? ([
+				{ type: 'separator' },
+				{ role: 'front' },
+				{ type: 'separator' },
+				{ role: 'window' },
+			] as MenuItemConstructorOptions[])
 		: []),
-	{ type: 'separator' },
+	{ type: 'separator' } as MenuItemConstructorOptions,
 	{
 		label: t('Advanced', { _tags: 'electron' }),
 		submenu: [
