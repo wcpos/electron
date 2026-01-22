@@ -26,10 +26,3 @@ runs:
       with:
         name: expo-dist
         path: dist
-
-    - name: 📦 Install dependencies
-      if: inputs.download-expo-artifact == 'true'
-      shell: bash
-      run: |
-        pnpm install
-        pnpm run rebuild:all

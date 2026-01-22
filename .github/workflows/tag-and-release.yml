@@ -61,6 +61,11 @@ jobs:
       - name: Install Python setuptools
         run: python3 -m pip install --break-system-packages setuptools
 
+      - name: 📦 Install and rebuild native modules
+        run: |
+          pnpm install
+          pnpm run rebuild:all
+
       - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
         with:
@@ -91,6 +96,11 @@ jobs:
         with:
           download-expo-artifact: "true"
 
+      - name: 📦 Install and rebuild native modules
+        run: |
+          pnpm install
+          pnpm run rebuild:all
+
       - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
         with:
@@ -120,6 +130,11 @@ jobs:
         with:
           download-expo-artifact: "true"
 
+      - name: 📦 Install and rebuild native modules
+        run: |
+          pnpm install
+          pnpm run rebuild:all
+
       - name: 🚀 Publish Windows release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,6 +153,11 @@ jobs:
         uses: ./.github/actions/setup-electron
         with:
           download-expo-artifact: "true"
+
+      - name: 📦 Install and rebuild native modules
+        run: |
+          pnpm install
+          pnpm run rebuild:all
 
       - name: 🚀 Publish Linux release
         env:
