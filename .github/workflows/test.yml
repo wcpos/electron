@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [macos-15-intel, macos-latest, windows-latest, ubuntu-latest]
 
     steps:
       - name: Check out Git repository
@@ -20,6 +20,11 @@ jobs:
 
       - name: 📦 Install dependencies
         run: pnpm install
+
+      - name: 📝 Create placeholder dist for packaging test
+        run: |
+          mkdir -p dist
+          echo '<!DOCTYPE html><html><head><title>Test</title></head><body></body></html>' > dist/index.html
 
       - name: 🧪 Test
         env:
