@@ -52,18 +52,19 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: 🏗 Setup Electron
-        uses: ./.github/actions/setup-electron
+      - name: 📦 Download expo-dist artifact
+        uses: actions/download-artifact@v4
         with:
-          download-expo-artifact: "true"
+          name: expo-dist
+          path: dist
+
+      - name: 🏗 Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Install Python setuptools
         run: python3 -m pip install --break-system-packages setuptools
-
-      - name: 📦 Install and rebuild native modules
-        run: |
-          pnpm install
-          pnpm run rebuild:all
 
       - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
@@ -71,13 +72,18 @@ jobs:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
+      - name: 📦 Install and rebuild native modules
+        run: |
+          npm install
+          npm run rebuild:all
+
       - name: 🚀 Publish MacOS x64 release
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm run publish-app
+        run: npm run publish-app
 
   publish-macos-arm64:
     needs:
@@ -90,24 +96,27 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: 🏗 Setup Electron
-        uses: ./.github/actions/setup-electron
+      - name: 📦 Download expo-dist artifact
+        uses: actions/download-artifact@v4
         with:
-          download-expo-artifact: "true"
+          name: expo-dist
+          path: dist
 
-      - name: Install Python setuptools
-        run: python3 -m pip install --break-system-packages setuptools
-
-      - name: 📦 Install and rebuild native modules
-        run: |
-          pnpm install
-          pnpm run rebuild:all
+      - name: 🏗 Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
+
+      - name: 📦 Install and rebuild native modules
+        run: |
+          npm install
+          npm run rebuild:all
 
       - name: 🚀 Publish MacOS arm64 release
         env:
@@ -116,7 +125,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCH: arm64
-        run: pnpm run publish-app -- --arch=arm64 --platform=darwin
+        run: npm run publish-app -- --arch=arm64 --platform=darwin
 
   publish-windows:
     needs: build-expo
@@ -127,17 +136,23 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: 🏗 Setup Electron
-        uses: ./.github/actions/setup-electron
+      - name: 📦 Download expo-dist artifact
+        uses: actions/download-artifact@v4
         with:
-          download-expo-artifact: "true"
+          name: expo-dist
+          path: dist
+
+      - name: 🏗 Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: 📦 Install and rebuild native modules
         run: |
-          pnpm install
-          pnpm run rebuild:all
+          npm install
+          npm run rebuild:all
 
       - name: 🚀 Publish Windows release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm run publish-app
+        run: npm run publish-app
