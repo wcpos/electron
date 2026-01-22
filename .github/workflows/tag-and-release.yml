@@ -52,6 +52,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: monorepo
+        env:
+          UNIWIND_AUTH_TOKEN: ${{ secrets.UNIWIND_AUTH_TOKEN }}
         run: |
           pnpm install
 
