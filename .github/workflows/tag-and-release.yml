@@ -96,6 +96,9 @@ jobs:
         with:
           download-expo-artifact: "true"
 
+      - name: Install Python setuptools
+        run: python3 -m pip install --break-system-packages setuptools
+
       - name: 📦 Install and rebuild native modules
         run: |
           pnpm install
