@@ -61,7 +61,7 @@ jobs:
       - name: 🏗 Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Python setuptools
         run: python3 -m pip install --break-system-packages setuptools
@@ -105,7 +105,7 @@ jobs:
       - name: 🏗 Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@v3
@@ -145,7 +145,7 @@ jobs:
       - name: 🏗 Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: 📦 Install and rebuild native modules
         run: |

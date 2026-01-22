@@ -4,7 +4,7 @@ description: Common setup for Electron app workflows
 inputs:
   node-version:
     description: Version of Node.js to use
-    default: "20"
+    default: "22"
   download-expo-artifact:
     description: Whether to download the expo-dist artifact (for publish workflows)
     default: "false"
