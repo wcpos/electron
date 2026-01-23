@@ -1,2 +1,2 @@
-import rules from '../../packages/eslint/index.js';
+import rules from '@wcpos/eslint-config';
 export default rules;

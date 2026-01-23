@@ -53,6 +53,7 @@
 		"electron-devtools-installer": "4.0.0",
 		"electron-squirrel-startup": "^1.0.1",
 		"electron-store": "^11.0.0",
+		"@wcpos/eslint-config": "^2.0.0",
 		"eslint": "^9.39.2",
 		"fs-extra": "^11.2.0",
 		"node-loader": "^2.1.0",
