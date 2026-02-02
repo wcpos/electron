@@ -117,9 +117,8 @@ export class AutoUpdater {
 			autoUpdater.on('update-downloaded', () => {
 				dialog
 					.showMessageBox({
-						title: t('Install Updates', { _tags: 'electron' }),
+						title: t('Install Updates'),
 						message: t('Updates downloaded, application will restart for update to take effect.', {
-							_tags: 'electron',
 						}),
 					})
 					.then(() => {
@@ -152,7 +151,7 @@ export class AutoUpdater {
 	) {
 		const { response } = await dialog.showMessageBox(this.mainWindow, {
 			type: 'question',
-			title: t('Found Updates', { _tags: 'electron' }),
+			title: t('Found Updates'),
 			message: t('A new version ({version}) is available. Do you want to update now?', { version }),
 			buttons: [t('Yes'), t('Remind me later'), t('No')],
 			cancelId: 2, // Index of 'No' button
@@ -207,8 +206,8 @@ export class AutoUpdater {
 			const hasUpdate = await this.checkForUpdates(true);
 			if (hasUpdate === false) {
 				dialog.showMessageBox(this.mainWindow, {
-					title: t('No Updates', { _tags: 'electron' }),
-					message: t('Current version is up-to-date.', { _tags: 'electron' }),
+					title: t('No Updates'),
+					message: t('Current version is up-to-date.'),
 				});
 			}
 		} finally {

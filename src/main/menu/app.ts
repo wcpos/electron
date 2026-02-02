@@ -12,7 +12,7 @@ export const baseAppMenu: MenuItemConstructorOptions[] = isMac
 				submenu: [
 					{ role: 'about' },
 					{
-						label: t('Check for Updates', { _tags: 'electron' }) + '…',
+						label: t('Check for Updates') + '…',
 						click: (menuItem: MenuItem) => updater.manualCheckForUpdates(menuItem),
 					},
 					// { type: 'separator' },
