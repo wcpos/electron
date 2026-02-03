@@ -26,8 +26,10 @@ class ElectronStoreBackend {
 	type = 'backend' as const;
 
 	private store: Store<Record<string, TranslationRecord>>;
+	private services: any;
 
-	init(_services: any, backendOptions: any) {
+	init(services: any, backendOptions: any) {
+		this.services = services;
 		this.store = backendOptions.store;
 	}
 
@@ -53,7 +55,7 @@ class ElectronStoreBackend {
 					if (JSON.stringify(current) !== JSON.stringify(data)) {
 						this.store.set(language, data);
 					}
-					i18next.addResourceBundle(language, namespace, data, true, true);
+					this.services.resourceStore.addResourceBundle(language, namespace, data, true, true);
 				}
 			})
 			.catch((err) => {
