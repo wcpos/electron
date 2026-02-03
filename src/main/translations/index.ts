@@ -1,4 +1,4 @@
-import i18next from 'i18next';
+import { createInstance } from 'i18next';
 import { app } from 'electron';
 import Store from 'electron-store';
 
@@ -84,7 +84,7 @@ const getLocaleFromCode = (code: string): string => {
 	return lang.locale;
 };
 
-const i18nInstance = i18next.createInstance();
+const i18nInstance = createInstance();
 i18nInstance.use(ElectronStoreBackend).init({
 	lng: 'en',
 	fallbackLng: false,
