@@ -15,7 +15,7 @@ type LocaleInfo = {
 };
 
 const store = new Store<Record<string, TranslationRecord>>();
-const TRANSLATION_VERSION = '1.7.8';
+const TRANSLATION_VERSION = '1.8.7';
 
 /**
  * Custom i18next backend that loads translations from jsDelivr CDN
@@ -43,7 +43,7 @@ class ElectronStoreBackend {
 		}
 
 		// Fetch fresh translations from jsDelivr in the background
-		const url = `https://cdn.jsdelivr.net/gh/wcpos/translations@v${TRANSLATION_VERSION}/translations/js/${language}/${namespace}.json`;
+		const url = `https://cdn.jsdelivr.net/gh/wcpos/translations@v${TRANSLATION_VERSION}/translations/js/${language}/monorepo/${namespace}.json`;
 		fetch(url)
 			.then((response) => {
 				if (!response.ok) return;
