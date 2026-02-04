@@ -63,7 +63,7 @@ class ElectronStoreBackend {
 			})
 			.catch((err) => {
 				log.error(`Failed to fetch translations: ${err.message}`);
-				if (!cached) callback(err, false);
+				if (!cached) callback(err);
 			});
 	}
 }
