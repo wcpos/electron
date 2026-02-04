@@ -54,9 +54,7 @@ const setHardwareAcceleration = (enabled: boolean) => {
 			message: t(
 				'Hardware acceleration {enabled}, application will restart for update to take effect.',
 				{
-					enabled: enabled
-						? t('enabled')
-						: t('disabled'),
+					enabled: enabled ? t('enabled') : t('disabled'),
 				}
 			),
 		})

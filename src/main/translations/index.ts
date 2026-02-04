@@ -15,7 +15,7 @@ type LocaleInfo = {
 };
 
 const store = new Store<Record<string, TranslationRecord>>();
-const TRANSLATION_VERSION = '1.8.7';
+const TRANSLATION_VERSION = '2026.2.0';
 
 /**
  * Custom i18next backend that loads translations from jsDelivr CDN
@@ -38,12 +38,10 @@ class ElectronStoreBackend {
 		if (cached) {
 			log.debug(`Loading ${language} translations from cache`);
 			callback(null, cached);
-		} else {
-			callback(null);
 		}
 
 		// Fetch fresh translations from jsDelivr in the background
-		const url = `https://cdn.jsdelivr.net/gh/wcpos/translations@v${TRANSLATION_VERSION}/translations/js/${language}/monorepo/${namespace}.json`;
+		const url = `https://cdn.jsdelivr.net/gh/wcpos/translations@${TRANSLATION_VERSION}/translations/js/${language}/monorepo/${namespace}.json`;
 		fetch(url)
 			.then((response) => {
 				if (!response.ok) return;
@@ -56,10 +54,16 @@ class ElectronStoreBackend {
 						this.store.set(language, data);
 					}
 					this.services.resourceStore.addResourceBundle(language, namespace, data, true, true);
+					if (!cached) {
+						callback(null, data);
+					}
+				} else if (!cached) {
+					callback(null, {});
 				}
 			})
 			.catch((err) => {
 				log.error(`Failed to fetch translations: ${err.message}`);
+				if (!cached) callback(err, false);
 			});
 	}
 }
