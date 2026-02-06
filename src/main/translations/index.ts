@@ -35,7 +35,7 @@ class ElectronStoreBackend {
 	}
 
 	private buildUrl(language: string, namespace: string): string {
-		return `https://cdn.jsdelivr.net/gh/wcpos/translations@${TRANSLATION_VERSION}/translations/js/${language}/monorepo/${namespace}.json`;
+		return `https://cdn.jsdelivr.net/gh/wcpos/translations@${TRANSLATION_VERSION}/translations/js/${language}/electron/${namespace}.json`;
 	}
 
 	private getBaseLanguage(language: string): string | null {
@@ -58,7 +58,6 @@ class ElectronStoreBackend {
 		const cacheKey = `${TRANSLATION_VERSION}:${language}`;
 		const cached = this.store.get(cacheKey) as TranslationRecord | undefined;
 		if (cached) {
-			log.debug(`Loading ${language} translations from cache`);
 			callback(null, cached);
 			return;
 		}
@@ -79,7 +78,6 @@ class ElectronStoreBackend {
 					return;
 				}
 
-				log.debug(`Falling back from ${language} to ${baseLang}`);
 				return this.fetchTranslations(baseLang, namespace).then((fallbackData) => {
 					if (fallbackData && Object.keys(fallbackData).length > 0) {
 						this.store.set(cacheKey, fallbackData);
@@ -121,6 +119,7 @@ i18nInstance.use(ElectronStoreBackend).init({
 	lng: 'en',
 	fallbackLng: 'en',
 	load: 'currentOnly',
+	partialBundledLanguages: true,
 	ns: ['electron'],
 	defaultNS: 'electron',
 	resources: {
