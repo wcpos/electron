@@ -16,7 +16,7 @@ type LocaleInfo = {
 };
 
 const store = new Store<Record<string, TranslationRecord>>();
-const TRANSLATION_VERSION = '2026.2.0';
+const TRANSLATION_VERSION = '2026.2.2';
 
 /**
  * Custom i18next backend that loads translations from jsDelivr CDN
