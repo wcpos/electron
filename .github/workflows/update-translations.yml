@@ -22,14 +22,21 @@ jobs:
           echo "Updating translation version to $VERSION"
           sed -i "s/TRANSLATION_VERSION = '.*'/TRANSLATION_VERSION = '${VERSION}'/" src/main/translations/index.ts
 
-      - name: Commit and push
+      - name: Create PR
         env:
           VERSION: ${{ github.event.client_payload.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src/main/translations/index.ts
           if ! git diff --staged --quiet; then
+            BRANCH="chore/translation-version-${VERSION}"
+            git checkout -b "$BRANCH"
             git commit -m "chore: update translation version to ${VERSION}"
-            git push
+            git push -u origin "$BRANCH"
+            gh pr create \
+              --title "chore: update translation version to ${VERSION}" \
+              --body "Automated PR to update translation version to ${VERSION}." \
+              --base main
           fi
