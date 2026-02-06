@@ -15,14 +15,14 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 				]
 			: []),
 		{
-			label: t('Report an Issue', { _tags: 'electron' }) + '…',
+			label: t('menu.report_an_issue') + '…',
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://github.com/wcpos/electron/issues/new');
 			},
 		},
 		{
-			label: t('Request a Feature', { _tags: 'electron' }) + '…',
+			label: t('menu.request_a_feature') + '…',
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://github.com/wcpos/electron/discussions/new');
@@ -30,7 +30,7 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 		},
 		{ type: 'separator' },
 		{
-			label: t('Check for Updates', { _tags: 'electron' }) + '…',
+			label: t('menu.check_for_updates') + '…',
 			click: (menuItem: MenuItem) => updater.manualCheckForUpdates(menuItem),
 		},
 		// {
@@ -39,14 +39,14 @@ export const baseHelpMenu: MenuItemConstructorOptions = {
 		// },
 		{ type: 'separator' },
 		{
-			label: t('Documentation', { _tags: 'electron' }),
+			label: t('menu.documentation'),
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://docs.wcpos.com');
 			},
 		},
 		{
-			label: t('F.A.Q.', { _tags: 'electron' }),
+			label: t('menu.f_a_q'),
 			click: async () => {
 				const { shell } = await import('electron');
 				await shell.openExternal('https://faq.wcpos.com');

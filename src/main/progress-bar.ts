@@ -20,7 +20,7 @@ export default class ProgressBar {
 			show: false,
 			// modal: true,
 			resizable: false,
-			title: t('Downloading update...'),
+			title: t('update.downloading_update'),
 			// frame: false,
 			// titleBarStyle: 'hidden',
 			/**

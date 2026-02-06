@@ -10,8 +10,7 @@ import { t } from './translations';
 export const clearAppDataDialog = () => {
 	const clearAppDataMessage = t(
 		'By clicking proceed you will be removing all added accounts and preferences for WooCommerce POS. ' +
-			'When the application restarts, it will be as if you are starting WooCommerce POS for the first time.',
-		{ _tags: 'electron' }
+			'When the application restarts, it will be as if you are starting WooCommerce POS for the first time.'
 	);
 
 	const dbFolder =
@@ -22,8 +21,8 @@ export const clearAppDataDialog = () => {
 	dialog
 		.showMessageBox({
 			type: 'warning',
-			buttons: [t('Yes', { _tags: 'electron' }), t('No', { _tags: 'electron' })],
-			message: t('Are you sure?', { _tags: 'electron' }),
+			buttons: [t('common.yes'), t('common.no')],
+			message: t('app.are_you_sure'),
 			detail: clearAppDataMessage,
 		})
 		.then(({ response }) => {
@@ -33,12 +32,12 @@ export const clearAppDataDialog = () => {
 					closeAll();
 					return fs.remove(dbFolder).then(() => {
 						// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
-						logger.info(t('Cleared app data', { _tags: 'electron' }));
+						logger.info(t('app.cleared_app_data'));
 						app.relaunch();
 						app.quit();
 					});
 				} catch (err) {
-					logger.error(t('Could not clear app data', { _tags: 'electron' }), err);
+					logger.error(t('app.could_not_clear_app_data'), err);
 				}
 			}
 		});

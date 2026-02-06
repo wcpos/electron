@@ -6,7 +6,7 @@ import { t } from '../translations';
 import { isWindows } from '../util';
 
 export const baseFileMenu: MenuItemConstructorOptions = {
-	label: t('File', { _tags: 'electron' }),
+	label: t('menu.file'),
 	submenu: [
 		// {
 		//   label: 'Open…',
