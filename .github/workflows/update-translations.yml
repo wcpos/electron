@@ -1,0 +1,30 @@
+name: Update Translation Version
+
+on:
+  repository_dispatch:
+    types: [translation-release]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update translation version
+        env:
+          VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          echo "Updating translation version to $VERSION"
+          sed -i "s/TRANSLATION_VERSION = '.*'/TRANSLATION_VERSION = '${VERSION}'/" src/main/translations/index.ts
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/main/translations/index.ts
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update translation version to ${VERSION}"
+            git push
+          fi
