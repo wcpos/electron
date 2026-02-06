@@ -1,0 +1,60 @@
+name: Push JS Strings to Translations
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/main/translations/locales/en/electron.json'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Push even if strings have not changed'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  push-and-dispatch:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Push to translations-source branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p /tmp/translations-out
+          cp src/main/translations/locales/en/electron.json /tmp/translations-out/
+
+          git checkout --orphan translations-source
+          git rm -rf .
+          cp /tmp/translations-out/*.json .
+          git add .
+          git commit -m "translation source strings from ${{ github.sha }}"
+          git push -f origin translations-source
+
+          git checkout ${{ github.sha }} -- .github
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.TRANSLATION_APP_ID }}
+          private-key: ${{ secrets.TRANSLATION_APP_PRIVATE_KEY }}
+          owner: wcpos
+          repositories: translations
+
+      - name: Notify translations repo
+        run: |
+          gh api repos/wcpos/translations/dispatches \
+            -f event_type=update-js-strings \
+            -f "client_payload[repo_name]=electron" \
+            -f "client_payload[ref]=translations-source" \
+            -f "client_payload[force]=${{ inputs.force || 'false' }}"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
