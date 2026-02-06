@@ -2,6 +2,8 @@
 	"app.are_you_sure": "Are you sure?",
 	"app.cleared_app_data": "Cleared app data",
 	"app.could_not_clear_app_data": "Could not clear app data",
+	"app.disabled": "disabled",
+	"app.enabled": "enabled",
 	"app.hardware_acceleration": "Hardware Acceleration",
 	"app.hardware_acceleration_application_will_restart_for": "Hardware acceleration {enabled}, application will restart for update to take effect.",
 	"common.no": "No",

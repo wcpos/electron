@@ -51,12 +51,9 @@ const setHardwareAcceleration = (enabled: boolean) => {
 	dialog
 		.showMessageBox({
 			title: t('app.hardware_acceleration'),
-			message: t(
-				'app.hardware_acceleration_application_will_restart_for',
-				{
-					enabled: enabled ? t('enabled') : t('disabled'),
-				}
-			),
+			message: t('app.hardware_acceleration_application_will_restart_for', {
+				enabled: enabled ? t('app.enabled') : t('app.disabled'),
+			}),
 		})
 		.then(() => {
 			setImmediate(() => {

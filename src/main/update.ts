@@ -118,8 +118,7 @@ export class AutoUpdater {
 				dialog
 					.showMessageBox({
 						title: t('update.install_updates'),
-						message: t('update.updates_downloaded_application_will_restart_for', {
-						}),
+						message: t('update.updates_downloaded_application_will_restart_for'),
 					})
 					.then(() => {
 						setImmediate(() => autoUpdater.quitAndInstall());

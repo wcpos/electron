@@ -43,7 +43,10 @@ class ElectronStoreBackend {
 		return parts.length > 1 ? parts[0].toLowerCase() : null;
 	}
 
-	private fetchTranslations(language: string, namespace: string): Promise<TranslationRecord | null> {
+	private fetchTranslations(
+		language: string,
+		namespace: string
+	): Promise<TranslationRecord | null> {
 		const url = this.buildUrl(language, namespace);
 		return fetch(url).then((response) => {
 			if (!response.ok) return null;
@@ -52,7 +55,8 @@ class ElectronStoreBackend {
 	}
 
 	read(language: string, namespace: string, callback: (err: any, data?: any) => void) {
-		const cached = this.store.get(language) as TranslationRecord | undefined;
+		const cacheKey = `${TRANSLATION_VERSION}:${language}`;
+		const cached = this.store.get(cacheKey) as TranslationRecord | undefined;
 		if (cached) {
 			log.debug(`Loading ${language} translations from cache`);
 			callback(null, cached);
@@ -63,7 +67,7 @@ class ElectronStoreBackend {
 		this.fetchTranslations(language, namespace)
 			.then((data) => {
 				if (data && Object.keys(data).length > 0) {
-					this.store.set(language, data);
+					this.store.set(cacheKey, data);
 					callback(null, data);
 					return;
 				}
@@ -78,7 +82,7 @@ class ElectronStoreBackend {
 				log.debug(`Falling back from ${language} to ${baseLang}`);
 				return this.fetchTranslations(baseLang, namespace).then((fallbackData) => {
 					if (fallbackData && Object.keys(fallbackData).length > 0) {
-						this.store.set(language, fallbackData);
+						this.store.set(cacheKey, fallbackData);
 						callback(null, fallbackData);
 					} else {
 						callback(null, {});
@@ -93,7 +97,7 @@ class ElectronStoreBackend {
 }
 
 /**
- * Map system locale codes to Transifex-compatible locale codes.
+ * Map system locale codes to supported translation locale codes.
  */
 const getLocaleFromCode = (code: string): string => {
 	const localesMap = locales as unknown as Record<string, LocaleInfo>;
@@ -136,7 +140,7 @@ i18nInstance.use(ElectronStoreBackend).init({
 
 export const loadTranslations = async () => {
 	const systemLocales = app.getPreferredSystemLanguages();
-	const systemLocale = getLocaleFromCode(systemLocales[0]);
+	const systemLocale = getLocaleFromCode(systemLocales[0] ?? 'en');
 	log.debug(`System locale: ${systemLocale}`);
 
 	await i18nInstance.changeLanguage(systemLocale);
