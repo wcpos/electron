@@ -28,7 +28,7 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 		: []),
 	{ type: 'separator' } as MenuItemConstructorOptions,
 	{
-		label: t('Advanced'),
+		label: t('menu.advanced'),
 		submenu: [
 			// {
 			//   label: 'Debug Logs',
@@ -41,10 +41,10 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 			{ role: 'forceReload' },
 			{ role: 'toggleDevTools' },
 			{
-				label: t('Performance'),
+				label: t('menu.performance'),
 				submenu: [
 					{
-						label: t('Enable Hardware Acceleration'),
+						label: t('menu.enable_hardware_acceleration'),
 						type: 'checkbox',
 						checked: config.hardwareAcceleration,
 						click: (menuItem) => {
@@ -54,7 +54,7 @@ export const baseWindowSubMenu: MenuItemConstructorOptions[] = [
 				],
 			},
 			{
-				label: t('Clear App Data'),
+				label: t('menu.clear_app_data'),
 				click: () => clearAppDataDialog(),
 			},
 		],

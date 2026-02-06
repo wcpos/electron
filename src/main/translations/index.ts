@@ -3,6 +3,7 @@ import { app } from 'electron';
 import Store from 'electron-store';
 
 import locales from './locales.json';
+import en from './locales/en/electron.json';
 import log from '../log';
 
 type TranslationRecord = Record<string, string>;
@@ -33,37 +34,60 @@ class ElectronStoreBackend {
 		this.store = backendOptions.store;
 	}
 
+	private buildUrl(language: string, namespace: string): string {
+		return `https://cdn.jsdelivr.net/gh/wcpos/translations@${TRANSLATION_VERSION}/translations/js/${language}/monorepo/${namespace}.json`;
+	}
+
+	private getBaseLanguage(language: string): string | null {
+		const parts = language.split('_');
+		return parts.length > 1 ? parts[0].toLowerCase() : null;
+	}
+
+	private fetchTranslations(language: string, namespace: string): Promise<TranslationRecord | null> {
+		const url = this.buildUrl(language, namespace);
+		return fetch(url).then((response) => {
+			if (!response.ok) return null;
+			return response.json();
+		});
+	}
+
 	read(language: string, namespace: string, callback: (err: any, data?: any) => void) {
 		const cached = this.store.get(language) as TranslationRecord | undefined;
 		if (cached) {
 			log.debug(`Loading ${language} translations from cache`);
 			callback(null, cached);
+			return;
 		}
 
-		// Fetch fresh translations from jsDelivr in the background
-		const url = `https://cdn.jsdelivr.net/gh/wcpos/translations@${TRANSLATION_VERSION}/translations/js/${language}/monorepo/${namespace}.json`;
-		fetch(url)
-			.then((response) => {
-				if (!response.ok) return;
-				return response.json();
-			})
+		// Try the exact locale first, then fall back to base language (e.g. fr_CA -> fr)
+		this.fetchTranslations(language, namespace)
 			.then((data) => {
 				if (data && Object.keys(data).length > 0) {
-					const current = this.store.get(language) as TranslationRecord | undefined;
-					if (JSON.stringify(current) !== JSON.stringify(data)) {
-						this.store.set(language, data);
-					}
-					this.services.resourceStore.addResourceBundle(language, namespace, data, true, true);
-					if (!cached) {
-						callback(null, data);
-					}
-				} else if (!cached) {
-					callback(null, {});
+					this.store.set(language, data);
+					callback(null, data);
+					return;
 				}
+
+				// Regional locale not found, try base language
+				const baseLang = this.getBaseLanguage(language);
+				if (!baseLang) {
+					callback(null, {});
+					return;
+				}
+
+				log.debug(`Falling back from ${language} to ${baseLang}`);
+				return this.fetchTranslations(baseLang, namespace).then((fallbackData) => {
+					if (fallbackData && Object.keys(fallbackData).length > 0) {
+						this.store.set(language, fallbackData);
+						callback(null, fallbackData);
+					} else {
+						callback(null, {});
+					}
+				});
 			})
 			.catch((err) => {
 				log.error(`Failed to fetch translations: ${err.message}`);
-				if (!cached) callback(err);
+				callback(null, {});
 			});
 	}
 }
@@ -91,9 +115,13 @@ const getLocaleFromCode = (code: string): string => {
 const i18nInstance = createInstance();
 i18nInstance.use(ElectronStoreBackend).init({
 	lng: 'en',
-	fallbackLng: false,
+	fallbackLng: 'en',
+	load: 'currentOnly',
 	ns: ['electron'],
 	defaultNS: 'electron',
+	resources: {
+		en: { electron: en },
+	},
 	keySeparator: false,
 	nsSeparator: false,
 	interpolation: {

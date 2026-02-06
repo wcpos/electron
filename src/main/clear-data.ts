@@ -21,8 +21,8 @@ export const clearAppDataDialog = () => {
 	dialog
 		.showMessageBox({
 			type: 'warning',
-			buttons: [t('Yes'), t('No')],
-			message: t('Are you sure?'),
+			buttons: [t('common.yes'), t('common.no')],
+			message: t('app.are_you_sure'),
 			detail: clearAppDataMessage,
 		})
 		.then(({ response }) => {
@@ -32,12 +32,12 @@ export const clearAppDataDialog = () => {
 					closeAll();
 					return fs.remove(dbFolder).then(() => {
 						// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
-						logger.info(t('Cleared app data'));
+						logger.info(t('app.cleared_app_data'));
 						app.relaunch();
 						app.quit();
 					});
 				} catch (err) {
-					logger.error(t('Could not clear app data'), err);
+					logger.error(t('app.could_not_clear_app_data'), err);
 				}
 			}
 		});

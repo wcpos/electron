@@ -50,9 +50,9 @@ const setHardwareAcceleration = (enabled: boolean) => {
 	// Notify the user that they need to restart the app for changes to take effect
 	dialog
 		.showMessageBox({
-			title: t('Hardware Acceleration'),
+			title: t('app.hardware_acceleration'),
 			message: t(
-				'Hardware acceleration {enabled}, application will restart for update to take effect.',
+				'app.hardware_acceleration_application_will_restart_for',
 				{
 					enabled: enabled ? t('enabled') : t('disabled'),
 				}

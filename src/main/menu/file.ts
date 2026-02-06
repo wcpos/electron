@@ -6,7 +6,7 @@ import { t } from '../translations';
 import { isWindows } from '../util';
 
 export const baseFileMenu: MenuItemConstructorOptions = {
-	label: t('File'),
+	label: t('menu.file'),
 	submenu: [
 		// {
 		//   label: 'Open…',
