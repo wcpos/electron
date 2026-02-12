@@ -1,2 +1,2 @@
-import rules from '@wcpos/eslint-config';
-export default rules;
+import { config } from '@wcpos/eslint-config';
+export default config;
