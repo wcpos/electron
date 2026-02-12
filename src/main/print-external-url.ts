@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, IpcMainEvent } from 'electron';
 
-import logger from './log';
+import { logger } from './log';
 
 function printExternalURL(externalURL: string, printJobId: string, event: IpcMainEvent) {
 	let printWindow = new BrowserWindow({

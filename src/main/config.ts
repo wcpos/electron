@@ -1,7 +1,7 @@
 import { app, dialog } from 'electron';
 import Store from 'electron-store';
 
-import logger, { Sentry } from './log';
+import { logger, Sentry } from './log';
 import { t } from './translations';
 
 // Define the store schema

@@ -2,7 +2,7 @@ import { app, BrowserWindow, powerMonitor } from 'electron';
 
 import { initAuthHandler } from './main/auth-handler';
 import { installExtensions } from './main/extensions';
-import logger from './main/log';
+import { logger } from './main/log';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
 import { loadTranslations } from './main/translations';

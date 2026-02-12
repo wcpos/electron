@@ -13,6 +13,7 @@ declare module 'semver' {
 
 // Augment electron-store to expose get/set methods properly
 declare module 'electron-store' {
+	// eslint-disable-next-line import/no-default-export
 	export default class Store<T extends Record<string, unknown> = Record<string, unknown>> {
 		constructor(options?: { defaults?: Partial<T> });
 		get<K extends keyof T>(key: K, defaultValue?: T[K]): T[K];

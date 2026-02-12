@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron';
 
-import log from './log';
+import { logger as log } from './log';
 import { getMainWindow } from './window';
 
 interface AuthPromptParams {

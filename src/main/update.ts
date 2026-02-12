@@ -8,8 +8,8 @@ import { app, autoUpdater, BrowserWindow, dialog, MenuItem, shell } from 'electr
 import Store from 'electron-store';
 import semver from 'semver';
 
-import logger from './log';
-import ProgressBar from './progress-bar';
+import { logger } from './log';
+import { ProgressBar } from './progress-bar';
 import { t } from './translations';
 import { createDir, isDevelopment } from './util';
 import { getMainWindow } from './window';

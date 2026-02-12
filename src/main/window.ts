@@ -3,7 +3,7 @@ import * as path from 'path';
 import { BrowserWindow, shell } from 'electron';
 import serve from 'electron-serve';
 
-import log from './log';
+import { logger as log } from './log';
 import { isDevelopment } from './util';
 
 // Set up electron-serve

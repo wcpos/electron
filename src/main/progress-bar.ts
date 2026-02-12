@@ -3,7 +3,7 @@ import { BrowserWindow } from 'electron';
 import { t } from './translations';
 import { getMainWindow } from './window';
 
-export default class ProgressBar {
+export class ProgressBar {
 	private mainWindow: BrowserWindow;
 	private progressWindow: BrowserWindow;
 

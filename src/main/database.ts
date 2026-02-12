@@ -4,7 +4,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import { app, ipcMain } from 'electron';
 
-import logger from './log';
+import { logger } from './log';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 const registry = new Map();

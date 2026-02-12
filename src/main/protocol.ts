@@ -2,7 +2,7 @@ import * as path from 'path';
 
 import { app } from 'electron';
 
-import log from './log';
+import { logger as log } from './log';
 import { getMainWindow } from './window';
 
 /**

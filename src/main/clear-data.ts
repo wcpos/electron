@@ -4,7 +4,7 @@ import { app, dialog, ipcMain } from 'electron';
 import fs from 'fs-extra';
 
 import { closeAll } from './database';
-import logger from './log';
+import { logger } from './log';
 import { t } from './translations';
 
 export const clearAppDataDialog = () => {

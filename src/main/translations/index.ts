@@ -4,7 +4,7 @@ import Store from 'electron-store';
 
 import locales from './locales.json';
 import en from './locales/en/electron.json';
-import log from '../log';
+import { logger as log } from '../log';
 
 type TranslationRecord = Record<string, string>;
 type LocaleInfo = {

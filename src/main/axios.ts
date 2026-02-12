@@ -3,7 +3,7 @@ import https from 'https';
 import axios from 'axios';
 import { ipcMain } from 'electron';
 
-import logger from './log';
+import { logger } from './log';
 
 // import structuredClone from 'core-js-pure/stable/structured-clone';
 

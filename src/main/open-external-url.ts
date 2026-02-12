@@ -1,6 +1,6 @@
 import { ipcMain, shell } from 'electron';
 
-import logger from './log';
+import { logger } from './log';
 
 /**
  * IPC handler for opening URLs in the system's default external browser
