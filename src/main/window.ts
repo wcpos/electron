@@ -10,8 +10,8 @@ import { isDevelopment } from './util';
 let loadURL: (window: BrowserWindow) => void;
 
 if (isDevelopment) {
-	// In development mode, load from localhost
-	loadURL = (window: BrowserWindow) => window.loadURL('http://localhost:8088');
+	const expoPort = process.env.EXPO_PORT || '8088';
+	loadURL = (window: BrowserWindow) => window.loadURL(`http://localhost:${expoPort}`);
 } else {
 	// In production mode, serve the 'dist' directory from resources
 	const pathToDist = path.join(process.resourcesPath, 'dist');
