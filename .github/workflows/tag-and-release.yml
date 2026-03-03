@@ -17,6 +17,9 @@ on:
           - macos-arm64
           - windows
 
+permissions:
+  contents: write
+
 jobs:
   build-expo:
     runs-on: ubuntu-latest
