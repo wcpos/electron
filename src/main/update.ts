@@ -89,9 +89,9 @@ export class AutoUpdater {
 			data.on('data', (chunk: string) => {
 				loaded += Buffer.byteLength(chunk);
 				const percentCompleted = Math.floor((loaded / total) * 100);
-				progressBar.updateProgress(percentCompleted);
+				progressBar?.updateProgress(percentCompleted);
 				if (percentCompleted === 100) {
-					progressBar.close();
+					progressBar?.close();
 					progressBar = undefined;
 				}
 			});

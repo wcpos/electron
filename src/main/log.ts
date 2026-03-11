@@ -53,6 +53,7 @@ process.on('uncaughtException', (error: NodeJS.ErrnoException) => {
 });
 
 process.on('unhandledRejection', (reason) => {
+	if (reason instanceof Error && (reason as NodeJS.ErrnoException).code === 'EPIPE') return;
 	logger.error('Unhandled rejection:', reason);
 });
 

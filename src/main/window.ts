@@ -70,9 +70,17 @@ export const createWindow = (): void => {
 	});
 
 	// Handle failed loads
+	let retryCount = 0;
+	const MAX_RETRIES = 30; // ~60 seconds of retries
+
 	mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription) => {
 		log.error(`did fail load with code ${errorCode}: ${errorDescription}`);
 		if (errorDescription === 'ERR_CONNECTION_REFUSED') {
+			if (retryCount >= MAX_RETRIES) {
+				log.error('Max retries reached, giving up on dev server connection');
+				return;
+			}
+			retryCount++;
 			// Metro dev server isn't ready yet — retry after a short delay
 			log.info('Dev server not ready, retrying in 2s...');
 			setTimeout(() => {
@@ -81,7 +89,9 @@ export const createWindow = (): void => {
 				}
 			}, 2000);
 		} else {
-			loadURL(mainWindow as BrowserWindow);
+			if (mainWindow && !mainWindow.isDestroyed()) {
+				loadURL(mainWindow);
+			}
 		}
 	});
 };
