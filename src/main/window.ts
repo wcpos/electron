@@ -72,8 +72,15 @@ export const createWindow = (): void => {
 	// Handle failed loads
 	mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription) => {
 		log.error(`did fail load with code ${errorCode}: ${errorDescription}`);
-		if (errorDescription !== 'ERR_CONNECTION_REFUSED') {
-			// Reload the window
+		if (errorDescription === 'ERR_CONNECTION_REFUSED') {
+			// Metro dev server isn't ready yet — retry after a short delay
+			log.info('Dev server not ready, retrying in 2s...');
+			setTimeout(() => {
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					loadURL(mainWindow);
+				}
+			}, 2000);
+		} else {
 			loadURL(mainWindow as BrowserWindow);
 		}
 	});
