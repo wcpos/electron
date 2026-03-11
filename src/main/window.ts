@@ -89,9 +89,7 @@ export const createWindow = (): void => {
 				}
 			}, 2000);
 		} else {
-			if (mainWindow && !mainWindow.isDestroyed()) {
-				loadURL(mainWindow);
-			}
+			log.error(`Load failed without retry: ${errorDescription}`);
 		}
 	});
 };
