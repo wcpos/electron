@@ -10,8 +10,8 @@ import { isDevelopment } from './util';
 let loadURL: (window: BrowserWindow) => void;
 
 if (isDevelopment) {
-	// In development mode, load from localhost
-	loadURL = (window: BrowserWindow) => window.loadURL('http://localhost:8088');
+	const expoPort = process.env.EXPO_PORT || '8088';
+	loadURL = (window: BrowserWindow) => window.loadURL(`http://localhost:${expoPort}`);
 } else {
 	// In production mode, serve the 'dist' directory from resources
 	const pathToDist = path.join(process.resourcesPath, 'dist');
@@ -70,11 +70,26 @@ export const createWindow = (): void => {
 	});
 
 	// Handle failed loads
+	let retryCount = 0;
+	const MAX_RETRIES = 30; // ~60 seconds of retries
+
 	mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription) => {
 		log.error(`did fail load with code ${errorCode}: ${errorDescription}`);
-		if (errorDescription !== 'ERR_CONNECTION_REFUSED') {
-			// Reload the window
-			loadURL(mainWindow as BrowserWindow);
+		if (errorDescription === 'ERR_CONNECTION_REFUSED') {
+			if (retryCount >= MAX_RETRIES) {
+				log.error('Max retries reached, giving up on dev server connection');
+				return;
+			}
+			retryCount++;
+			// Metro dev server isn't ready yet — retry after a short delay
+			log.info('Dev server not ready, retrying in 2s...');
+			setTimeout(() => {
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					loadURL(mainWindow);
+				}
+			}, 2000);
+		} else {
+			log.error(`Load failed without retry: ${errorDescription}`);
 		}
 	});
 };

@@ -1,38 +1,73 @@
-import net from 'net';
+import * as net from 'net';
 
 import { ipcMain } from 'electron';
 
 import { logger } from './log';
 
-const CONNECT_TIMEOUT_MS = 10_000;
+ipcMain.handle('print-raw-tcp', async (_event, args: unknown) => {
+	if (!args || typeof args !== 'object') {
+		throw new Error('Invalid arguments: expected an object');
+	}
+	const { host, port, data } = args as {
+		host: unknown;
+		port: unknown;
+		data: unknown;
+	};
 
-ipcMain.handle(
-	'print-raw-tcp',
-	async (_event, { host, port, data }: { host: string; port: number; data: number[] }) => {
-		logger.info(`print-raw-tcp: connecting to ${host}:${port} (${data.length} bytes)`);
+	if (!host || typeof host !== 'string') {
+		throw new Error('Invalid host: must be a non-empty string');
+	}
+	if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+		throw new Error('Invalid port: must be an integer between 1 and 65535');
+	}
+	if (!Array.isArray(data) || !data.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) {
+		throw new Error('Invalid data: must be an array of byte values (0-255)');
+	}
 
-		return new Promise<void>((resolve, reject) => {
-			const socket = new net.Socket();
+	const buffer = Buffer.from(data as number[]);
 
-			socket.setTimeout(CONNECT_TIMEOUT_MS);
+	logger.info(`Sending ${buffer.length} bytes to ${host}:${port}`);
 
-			socket.on('timeout', () => {
-				socket.destroy();
-				reject(new Error(`Connection to ${host}:${port} timed out`));
-			});
+	return new Promise<void>((resolve, reject) => {
+		const socket = new net.Socket();
+		let settled = false;
 
-			socket.on('error', (err) => {
-				logger.error(`print-raw-tcp: error`, { host, port, message: err.message });
+		const finish = (err?: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeout);
+			socket.destroy();
+			if (err) {
 				reject(err);
-			});
+			} else {
+				resolve();
+			}
+		};
 
-			socket.connect(port, host, () => {
-				const buffer = Buffer.from(data);
-				socket.end(buffer, () => {
-					logger.info(`print-raw-tcp: sent ${buffer.length} bytes to ${host}:${port}`);
-					resolve();
-				});
+		const timeout = setTimeout(() => {
+			finish(new Error(`TCP connection to ${host}:${port} timed out`));
+		}, 10000);
+
+		socket.on('error', (err) => {
+			logger.error(`TCP error: ${err.message}`);
+			finish(err);
+		});
+
+		socket.on('close', () => {
+			finish(new Error(`Connection to ${host}:${port} closed unexpectedly`));
+		});
+
+		socket.connect(port, host, () => {
+			socket.write(buffer, (err) => {
+				if (err) {
+					finish(err);
+				} else {
+					socket.end(() => {
+						logger.info(`Print data sent successfully to ${host}:${port}`);
+						finish();
+					});
+				}
 			});
 		});
-	}
-);
+	});
+});

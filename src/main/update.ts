@@ -53,6 +53,11 @@ export class AutoUpdater {
 	}
 
 	public init() {
+		if (isDevelopment) {
+			logger.info('Skipping auto-update in development mode');
+			return;
+		}
+
 		// Check for updates immediately on startup
 		this.checkForUpdates().catch((error) => {
 			logger.error('Error checking for updates on startup', error);
@@ -67,7 +72,7 @@ export class AutoUpdater {
 	}
 
 	private async download(name: string, url: string, showProgress = true): Promise<void> {
-		const finished = promisify(stream.finished);
+		const pipeline = promisify(stream.pipeline);
 		const filePath = `${this.tempDirPath}/${name}`;
 		const writer = createWriteStream(filePath, { flags: 'w+' });
 		const { data, headers } = await axios.get(url, { responseType: 'stream' });
@@ -76,22 +81,28 @@ export class AutoUpdater {
 			this.targetPath = filePath;
 		}
 
+		let progressBar: ProgressBar | undefined;
 		if (showProgress || name !== 'RELEASES') {
 			let loaded = 0;
 			const total = parseFloat(headers['content-length']);
-			const progressBar = new ProgressBar();
+			progressBar = new ProgressBar();
 			data.on('data', (chunk: string) => {
 				loaded += Buffer.byteLength(chunk);
 				const percentCompleted = Math.floor((loaded / total) * 100);
-				progressBar.updateProgress(percentCompleted);
+				progressBar?.updateProgress(percentCompleted);
 				if (percentCompleted === 100) {
-					progressBar.close();
+					progressBar?.close();
+					progressBar = undefined;
 				}
 			});
 		}
 
-		data.pipe(writer);
-		return finished(writer);
+		try {
+			await pipeline(data, writer);
+		} catch (error) {
+			progressBar?.close();
+			throw error;
+		}
 	}
 
 	private async installUpdates() {
