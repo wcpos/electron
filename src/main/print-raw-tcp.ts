@@ -48,6 +48,15 @@ ipcMain.handle('print-raw-tcp', async (_event, args: unknown) => {
 			finish(new Error(`TCP connection to ${host}:${port} timed out`));
 		}, 10000);
 
+		socket.on('error', (err) => {
+			logger.error(`TCP error: ${err.message}`);
+			finish(err);
+		});
+
+		socket.on('close', () => {
+			finish(new Error(`Connection to ${host}:${port} closed unexpectedly`));
+		});
+
 		socket.connect(port, host, () => {
 			socket.write(buffer, (err) => {
 				if (err) {
@@ -59,11 +68,6 @@ ipcMain.handle('print-raw-tcp', async (_event, args: unknown) => {
 					});
 				}
 			});
-		});
-
-		socket.on('error', (err) => {
-			logger.error(`TCP error: ${err.message}`);
-			finish(err);
 		});
 	});
 });
