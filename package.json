@@ -24,7 +24,7 @@
 		"@sentry/electron": "^7.1.0",
 		"i18next": "^25.8.6",
 		"axios": "^1.11.0",
-		"better-sqlite3": "12.6.2",
+		"better-sqlite3": "12.8.0",
 		"electron-log": "^5.4.3",
 		"electron-serve": "^3.0.0",
 		"semver": "^7.6.3"
@@ -48,7 +48,7 @@
 		"@typescript-eslint/parser": "^8.55.0",
 		"@vercel/webpack-asset-relocator-loader": "1.10.0",
 		"concurrently": "^9.2.1",
-		"electron": "40.8.0",
+		"electron": "41.0.2",
 		"electron-debug": "^4.1.0",
 		"electron-devtools-installer": "4.0.0",
 		"electron-squirrel-startup": "^1.0.1",
