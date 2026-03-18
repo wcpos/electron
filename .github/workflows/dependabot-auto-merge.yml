@@ -8,5 +8,7 @@ permissions:
 jobs:
   auto-merge:
     if: github.actor == 'dependabot[bot]'
-    uses: wcpos/.github/.github/workflows/dependabot-auto-merge.yml@73969eb81ae5e73f06512b07db0da853793e9b7e # main 2026-03-18
-    secrets: inherit # required: callee workflow does not declare secret inputs
+    uses: wcpos/.github/.github/workflows/dependabot-auto-merge.yml@main
+    secrets:
+      PROJECT_BOT_APP_ID: ${{ secrets.PROJECT_BOT_APP_ID }}
+      PROJECT_BOT_PRIVATE_KEY: ${{ secrets.PROJECT_BOT_PRIVATE_KEY }}
