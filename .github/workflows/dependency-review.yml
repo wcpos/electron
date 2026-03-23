@@ -5,6 +5,7 @@ on:
       - '**/package.json'
       - '**/pnpm-lock.yaml'
       - '**/package-lock.json'
+      - '.github/workflows/*.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -18,7 +18,7 @@ on:
           - windows
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.platform || 'push' }}
   cancel-in-progress: false
 
 permissions:
