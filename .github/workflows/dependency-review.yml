@@ -1,5 +1,15 @@
 name: Dependency Review
-on: pull_request
+on:
+  pull_request:
+    paths:
+      - '**/package.json'
+      - '**/pnpm-lock.yaml'
+      - '**/package-lock.json'
+      - '.github/workflows/*.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
