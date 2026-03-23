@@ -17,6 +17,10 @@ on:
           - macos-arm64
           - windows
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
