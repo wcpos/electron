@@ -57,6 +57,12 @@ ipcMain.handle('axios', (event, obj) => {
 			axios
 				.request(config)
 				.then((response) => {
+					if (process.env.NODE_ENV === 'development') {
+						logger.debug(`${config.method?.toUpperCase()} ${config.url}`, {
+							status: response.status,
+							data: response.data,
+						});
+					}
 					// Create a serializable response object that matches Axios structure
 					const serializableResponse = {
 						success: true,
