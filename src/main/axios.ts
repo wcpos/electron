@@ -57,6 +57,18 @@ ipcMain.handle('axios', (event, obj) => {
 			axios
 				.request(config)
 				.then((response) => {
+					if (process.env.NODE_ENV === 'development') {
+						const label = `${config.method?.toUpperCase() ?? 'GET'} ${config.url}`;
+						if (process.env.DEBUG_HTTP_RESPONSES) {
+							logger.debug(label, { status: response.status, data: response.data });
+						} else {
+							logger.debug(label, {
+								status: response.status,
+								dataType: typeof response.data,
+								dataSize: JSON.stringify(response.data)?.length ?? 0,
+							});
+						}
+					}
 					// Create a serializable response object that matches Axios structure
 					const serializableResponse = {
 						success: true,
@@ -76,6 +88,21 @@ ipcMain.handle('axios', (event, obj) => {
 					resolve(serializableResponse);
 				})
 				.catch((error) => {
+					if (process.env.NODE_ENV === 'development') {
+						const label = `${config.method?.toUpperCase() ?? 'GET'} ${config.url} FAILED`;
+						if (process.env.DEBUG_HTTP_RESPONSES) {
+							logger.debug(label, {
+								status: error.response?.status,
+								data: error.response?.data,
+								message: error.message,
+							});
+						} else {
+							logger.debug(label, {
+								status: error.response?.status,
+								message: error.message,
+							});
+						}
+					}
 					// Create a serializable error object that matches Axios error structure
 					const serializableError = {
 						success: false,
