@@ -5,6 +5,34 @@ import { ipcMain } from 'electron';
 
 import { logger } from './log';
 
+/**
+ * Extract a short label from the request config for logging.
+ * e.g. "POST products/123" or "GET orders"
+ */
+function requestLabel(config: any): string {
+	const method = (config?.method || 'UNKNOWN').toUpperCase();
+	const baseURL = config?.baseURL || '';
+	const url = config?.url || '';
+	// Show the path after the API prefix (wcpos/v1/ or wc/v3/)
+	const full = `${baseURL}/${url}`.replace(/\/+/g, '/');
+	const match = full.match(/\/(?:wcpos\/v\d+|wc\/v\d+)\/(.+)/);
+	const path = match ? match[1] : url || baseURL;
+	return `${method} ${path}`.replace(/\?.*$/, ''); // strip query string
+}
+
+/**
+ * Pretty-print an object with full depth for dev console logging.
+ * Uses JSON.stringify so nested objects/arrays aren't collapsed to [Object].
+ */
+function prettyLog(label: string, obj: any): void {
+	try {
+		const json = JSON.stringify(obj, null, 2);
+		logger.debug(`${label} ${json}`);
+	} catch {
+		logger.debug(`${label} [unable to stringify]`);
+	}
+}
+
 // import structuredClone from 'core-js-pure/stable/structured-clone';
 
 /**
@@ -72,7 +100,12 @@ ipcMain.handle('axios', (event, obj) => {
 						},
 						request: null as any, // Explicitly null for serialization
 					};
-					logger.silly('HTTP success', { status: response.status, url: obj.config?.url });
+					if (process.env.NODE_ENV === 'development') {
+						prettyLog(requestLabel(obj.config), {
+							status: response.status,
+							data: response.data,
+						});
+					}
 					resolve(serializableResponse);
 				})
 				.catch((error) => {
@@ -106,11 +139,19 @@ ipcMain.handle('axios', (event, obj) => {
 							: undefined,
 						isAxiosError: true,
 					};
-					logger.error('HTTP error', {
-						status: error.response?.status,
-						message: error.message,
-						url: obj.config?.url,
-					});
+					if (process.env.NODE_ENV === 'development') {
+						prettyLog(`${requestLabel(obj.config)} ERROR`, {
+							status: error.response?.status,
+							message: error.message,
+							data: error.response?.data,
+						});
+					} else {
+						logger.error('HTTP error', {
+							status: error.response?.status,
+							message: error.message,
+							url: obj.config?.url,
+						});
+					}
 					resolve(serializableError);
 				})
 				.finally(() => {
