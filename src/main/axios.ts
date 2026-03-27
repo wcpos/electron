@@ -139,17 +139,16 @@ ipcMain.handle('axios', (event, obj) => {
 							: undefined,
 						isAxiosError: true,
 					};
+					logger.error('HTTP error', {
+						status: error.response?.status,
+						message: error.message,
+						url: obj.config?.url,
+					});
 					if (process.env.NODE_ENV === 'development') {
 						prettyLog(`${requestLabel(obj.config)} ERROR`, {
 							status: error.response?.status,
 							message: error.message,
 							data: error.response?.data,
-						});
-					} else {
-						logger.error('HTTP error', {
-							status: error.response?.status,
-							message: error.message,
-							url: obj.config?.url,
 						});
 					}
 					resolve(serializableError);
