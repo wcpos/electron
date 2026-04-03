@@ -11,6 +11,7 @@ import { updater } from './main/update';
 import { createWindow, getMainWindow } from './main/window';
 import './main/database';
 import './main/axios';
+import './main/image-cache';
 import './main/print-external-url';
 import './main/print-raw-tcp';
 import './main/basePath';
