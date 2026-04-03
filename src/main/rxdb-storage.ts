@@ -2,14 +2,85 @@ import fs from 'fs';
 import path from 'path';
 
 import { app, ipcMain } from 'electron';
-import { exposeIpcMainRxStorage } from 'rxdb/plugins/electron';
+import { IPC_RENDERER_KEY_PREFIX } from 'rxdb/plugins/electron';
+import { exposeRxStorageRemote } from 'rxdb/plugins/storage-remote';
 import { getRxStorageFilesystemNode } from 'rxdb-premium/plugins/storage-filesystem-node';
+import { Subject } from 'rxjs';
 
+import {
+	deserializeRxdbIpcMessage,
+	hasBulkWriteAttachmentBase64Strings,
+	hasGetAttachmentDataBlobReturn,
+	serializeRxdbIpcMessage,
+} from '../rxdb-ipc-attachments';
 import { logger } from './log';
 
 const MAIN_STORAGE_KEY = 'main-storage';
 let bridgeInitializationPromise: Promise<void> | undefined;
 let storagePromise: Promise<ReturnType<typeof getRxStorageFilesystemNode>> | undefined;
+
+function exposeIpcMainRxStorageWithAttachmentCodec(args: {
+	key: string;
+	storage: ReturnType<typeof getRxStorageFilesystemNode>;
+	ipcMain: typeof ipcMain;
+}) {
+	const channelId = [IPC_RENDERER_KEY_PREFIX, args.key].join('|');
+	const messages$ = new Subject<any>();
+	const openRenderers: Set<any> = new Set();
+
+	const addOpenRenderer = (renderer: any) => {
+		if (openRenderers.has(renderer)) {
+			return;
+		}
+		openRenderers.add(renderer);
+		renderer.on('destroyed', () => openRenderers.delete(renderer));
+	};
+
+	args.ipcMain.on(channelId, (event: any, message: unknown) => {
+		addOpenRenderer(event.sender);
+		if (!message) {
+			return;
+		}
+
+		if (!hasBulkWriteAttachmentBase64Strings(message)) {
+			messages$.next(message);
+			return;
+		}
+
+		void deserializeRxdbIpcMessage(message)
+			.then((decodedMessage) => {
+				messages$.next(decodedMessage);
+			})
+			.catch((error) => {
+				logger.error('Failed to decode RxDB IPC attachment payload in main process', error);
+			});
+	});
+
+	exposeRxStorageRemote({
+		storage: args.storage,
+		messages$,
+		send(message) {
+			const sendToRenderers = (payload: unknown) => {
+				openRenderers.forEach((sender) => {
+					sender.send(channelId, payload);
+				});
+			};
+
+			if (!hasGetAttachmentDataBlobReturn(message)) {
+				sendToRenderers(message);
+				return;
+			}
+
+			void serializeRxdbIpcMessage(message)
+				.then((encodedMessage) => {
+					sendToRenderers(encodedMessage);
+				})
+				.catch((error) => {
+					logger.error('Failed to encode RxDB IPC attachment payload in main process', error);
+				});
+		},
+	});
+}
 
 export function getLegacySqliteBasePath() {
 	return process.env.NODE_ENV === 'development'
@@ -60,7 +131,7 @@ export function initializeRxdbStorageBridge() {
 		.whenReady()
 		.then(async () => {
 			const storage = await getMainRxdbStorage();
-			exposeIpcMainRxStorage({
+			exposeIpcMainRxStorageWithAttachmentCodec({
 				key: MAIN_STORAGE_KEY,
 				storage,
 				ipcMain,
