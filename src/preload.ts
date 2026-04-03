@@ -12,6 +12,13 @@ contextBridge.exposeInMainWorld('electron', {
 	version: ipcRenderer.sendSync('getAppVersionSync'),
 });
 
+const isRxdbStorageChannel = (channel: string) => channel.startsWith('rxdb-ipc-renderer-storage|');
+
+const isAllowedChannel = (channel: string, validChannels: (string | RegExp)[]) =>
+	validChannels.some((matcher) =>
+		typeof matcher === 'string' ? matcher === channel : matcher.test(channel)
+	);
+
 // White-listed channels.
 const ipc = {
 	render: {
@@ -39,22 +46,41 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 		}
 	},
 	on(channel: string, func: (...args: unknown[]) => void) {
-		// Allow dynamic channels for print callbacks
+		if (isRxdbStorageChannel(channel)) {
+			ipcRenderer.on(channel, func as (event: IpcRendererEvent, ...args: unknown[]) => void);
+			return function unsubscribe() {
+				return ipcRenderer.removeListener(
+					channel,
+					func as (event: IpcRendererEvent, ...args: unknown[]) => void
+				);
+			};
+		}
+
 		const validChannels = [/^onBeforePrint-/, /^onAfterPrint-/, /^onPrintError-/, ...ipc.render.on];
-		if (
-			validChannels.some((regex) =>
-				typeof regex === 'string' ? regex === channel : regex.test(channel)
-			)
-		) {
+		if (isAllowedChannel(channel, validChannels)) {
 			const subscription = (_event: IpcRendererEvent, ...args: unknown[]) => func(...args);
 			ipcRenderer.on(channel, subscription);
 
-			// Return unsubscribe function
 			return function unsubscribe() {
 				return ipcRenderer.removeListener(channel, subscription);
 			};
 		}
 
+		throw Error(`Channel ${channel} is not allowed`);
+	},
+	removeListener(channel: string, listener: (...args: unknown[]) => void) {
+		if (isRxdbStorageChannel(channel)) {
+			return ipcRenderer.removeListener(
+				channel,
+				listener as (event: IpcRendererEvent, ...args: unknown[]) => void
+			);
+		}
+		throw Error(`Channel ${channel} is not allowed`);
+	},
+	postMessage(channel: string, message: unknown) {
+		if (isRxdbStorageChannel(channel)) {
+			return ipcRenderer.postMessage(channel, message);
+		}
 		throw Error(`Channel ${channel} is not allowed`);
 	},
 	invoke(channel: string, args: unknown) {
@@ -65,18 +91,13 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 		return Promise.reject(new Error(`Channel ${channel} is not allowed`));
 	},
 	once(channel: string, func: (...args: unknown[]) => void) {
-		// Allow dynamic channels for print callbacks
 		const validChannels = [
 			/^onBeforePrint-/,
 			/^onAfterPrint-/,
 			/^onPrintError-/,
 			...ipc.render.once,
 		];
-		if (
-			validChannels.some((regex) =>
-				typeof regex === 'string' ? regex === channel : regex.test(channel)
-			)
-		) {
+		if (isAllowedChannel(channel, validChannels)) {
 			ipcRenderer.once(channel, (_event: IpcRendererEvent, ...args: unknown[]) => func(...args));
 		} else {
 			throw Error(`Channel ${channel} is not allowed`);

@@ -3,6 +3,7 @@ import { app, BrowserWindow, powerMonitor } from 'electron';
 import { initAuthHandler } from './main/auth-handler';
 import { installExtensions } from './main/extensions';
 import { logger } from './main/log';
+import { initializeRxdbStorageBridge } from './main/rxdb-storage';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
 import { loadTranslations } from './main/translations';
@@ -34,6 +35,7 @@ app
 	.whenReady()
 	.then(loadTranslations)
 	.then(installExtensions)
+	.then(initializeRxdbStorageBridge)
 	.then(() => {
 		logger.info('Starting app');
 		createWindow();
