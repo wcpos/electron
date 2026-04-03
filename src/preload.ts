@@ -19,7 +19,9 @@ contextBridge.exposeInMainWorld('electron', {
 	version: ipcRenderer.sendSync('getAppVersionSync'),
 });
 
-const isRxdbStorageChannel = (channel: string) => channel.startsWith('rxdb-ipc-renderer-storage|');
+// Must match IPC_RENDERER_KEY_PREFIX from 'rxdb/plugins/electron' used in src/main/rxdb-storage.ts
+const RXDB_IPC_CHANNEL_PREFIX = 'rxdb-ipc-renderer-storage|';
+const isRxdbStorageChannel = (channel: string) => channel.startsWith(RXDB_IPC_CHANNEL_PREFIX);
 
 const isAllowedChannel = (channel: string, validChannels: (string | RegExp)[]) =>
 	validChannels.some((matcher) =>

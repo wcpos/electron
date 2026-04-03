@@ -38,7 +38,8 @@
 		"electron-serve": "^3.0.0",
 		"semver": "^7.6.3",
 		"rxdb": "17.0.0",
-		"rxdb-premium": "17.0.0"
+		"rxdb-premium": "17.0.0",
+		"rxjs": "7.8.2"
 	},
 	"devDependencies": {
 		"@electron-forge/cli": "^7.8.3",

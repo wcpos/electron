@@ -14,6 +14,7 @@ jobs:
         uses: ./.github/actions/setup-electron
 
       - name: 🏗 Add RXDB_LICENSE_KEY to package.json
+        if: ${{ secrets.RXDB_LICENSE_KEY != '' }}
         env:
           RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
         run: jq --arg license "$RXDB_LICENSE_KEY" '.accessTokens["rxdb-premium"] = $license' package.json > tmp.json && mv tmp.json package.json

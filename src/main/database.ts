@@ -42,6 +42,10 @@ const openDatabase = (name: string) => {
 };
 
 async function deleteDatabaseFiles(name: string) {
+	if (/[/\\]|\.\./.test(name)) {
+		throw new Error(`Invalid database name: ${name}`);
+	}
+
 	const db = registry.get(name);
 	if (db) {
 		db.close();
