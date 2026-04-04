@@ -36,9 +36,7 @@ function urlToHash(url: string): string {
  */
 const inFlight = new Map<string, Promise<{ buffer: Buffer; contentType: string }>>();
 
-async function downloadImage(
-	url: string
-): Promise<{ buffer: Buffer; contentType: string }> {
+async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType: string }> {
 	const existing = inFlight.get(url);
 	if (existing) return existing;
 
@@ -78,6 +76,17 @@ app.on('ready', () => {
 			const parsed = new URL(request.url);
 			const encodedUrl = parsed.pathname.replace(/^\//, '');
 			const originalUrl = Buffer.from(encodedUrl, 'base64url').toString('utf-8');
+
+			// Basic validation: only fetch HTTP/HTTPS URLs
+			let validatedUrl: URL;
+			try {
+				validatedUrl = new URL(originalUrl);
+			} catch {
+				return new Response(null, { status: 400 });
+			}
+			if (validatedUrl.protocol !== 'http:' && validatedUrl.protocol !== 'https:') {
+				return new Response(null, { status: 400 });
+			}
 
 			const hash = urlToHash(originalUrl);
 			const imagePath = path.join(cacheDir, hash);
