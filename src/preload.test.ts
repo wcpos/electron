@@ -168,11 +168,11 @@ async function main() {
 		() => listenerCalls.length > 0,
 		'expected wrapped RxDB listener to receive the deserialized attachment payload'
 	);
-	const [eventArg, messageArg] = listenerCalls[listenerCalls.length - 1] ?? [];
-	assert.deepEqual(
-		eventArg,
-		{ sender: 'main' },
-		'preload should preserve the original event argument'
+	const [messageArg] = listenerCalls[listenerCalls.length - 1] ?? [];
+	assert.equal(
+		listenerCalls[listenerCalls.length - 1]?.length,
+		1,
+		'preload should not expose raw IPC event objects to RxDB listeners'
 	);
 	assert.ok(messageArg, 'preload should forward a RxDB response message');
 	assert.ok(

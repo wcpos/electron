@@ -110,16 +110,16 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 	},
 	on(channel: string, func: (...args: unknown[]) => void) {
 		if (isRxdbStorageChannel(channel)) {
-			const subscription = (event: IpcRendererEvent, ...args: unknown[]) => {
+			const subscription = (_event: IpcRendererEvent, ...args: unknown[]) => {
 				const [message, ...rest] = args;
 				if (!hasGetAttachmentDataBase64Return(message)) {
-					func(event, ...args);
+					func(...args);
 					return;
 				}
 
 				void deserializeRxdbIpcMessage(message)
 					.then((decodedMessage) => {
-						func(event, decodedMessage, ...rest);
+						func(decodedMessage, ...rest);
 					})
 					.catch((error) => {
 						console.error('Failed to decode RxDB IPC attachment payload in preload', error);
@@ -149,10 +149,10 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 	removeListener(channel: string, listener: (...args: unknown[]) => void) {
 		if (isRxdbStorageChannel(channel)) {
 			const wrappedListener = forgetWrappedRxdbListener(channel, listener);
-			return ipcRenderer.removeListener(
-				channel,
-				wrappedListener ?? (listener as (event: IpcRendererEvent, ...args: unknown[]) => void)
-			);
+			if (!wrappedListener) {
+				return;
+			}
+			return ipcRenderer.removeListener(channel, wrappedListener);
 		}
 		throw Error(`Channel ${channel} is not allowed`);
 	},

@@ -74,7 +74,9 @@ app.on('ready', () => {
 	protocol.handle('wcpos-image', async (request) => {
 		try {
 			const parsed = new URL(request.url);
-			const encodedUrl = parsed.pathname.replace(/^\//, '');
+			const encodedPathname = parsed.pathname.replace(/^\//, '');
+			const encodedAuthority = parsed.host;
+			const encodedUrl = encodedPathname || encodedAuthority;
 			const originalUrl = Buffer.from(encodedUrl, 'base64url').toString('utf-8');
 
 			// Basic validation: only fetch HTTP/HTTPS URLs
