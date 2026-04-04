@@ -6,6 +6,13 @@
 	"description": "Electron app for WooCommerce POS",
 	"author": "Paul Kilmurray <paul@wcpos.com>",
 	"packageManager": "pnpm@10.31.0",
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"better-sqlite3",
+			"electron",
+			"rxdb-premium"
+		]
+	},
 	"main": ".webpack/main",
 	"scripts": {
 		"dev": "concurrently \"pnpm run dev:expo\" \"pnpm run dev:electron\"",
@@ -17,8 +24,10 @@
 		"publish-app": "electron-forge publish",
 		"lint": "eslint src --ext .js,.jsx,.ts,.tsx",
 		"lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
-		"test": "echo 'Nothing to test'",
-		"ts:check": "tsc --noEmit"
+		"test": "pnpm run test:preload && pnpm run test:rxdb-ipc-attachments",
+		"ts:check": "tsc --noEmit",
+		"test:preload": "ts-node src/preload.test.ts",
+		"test:rxdb-ipc-attachments": "ts-node src/rxdb-ipc-attachments.test.ts"
 	},
 	"dependencies": {
 		"@sentry/electron": "^7.1.0",
@@ -27,7 +36,10 @@
 		"better-sqlite3": "12.8.0",
 		"electron-log": "^5.4.3",
 		"electron-serve": "^3.0.0",
-		"semver": "^7.6.3"
+		"semver": "^7.6.3",
+		"rxdb": "17.0.0",
+		"rxdb-premium": "17.0.0",
+		"rxjs": "7.8.2"
 	},
 	"devDependencies": {
 		"@electron-forge/cli": "^7.8.3",

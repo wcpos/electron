@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
+import {
+	deserializeRxdbIpcMessage,
+	hasBulkWriteAttachmentBlobs,
+	hasGetAttachmentDataBase64Return,
+	serializeRxdbIpcMessage,
+} from './rxdb-ipc-attachments';
+
 /**
  * Expose app info to the renderer process.
  *
@@ -11,6 +18,69 @@ contextBridge.exposeInMainWorld('electron', {
 	basePath: ipcRenderer.sendSync('getBasePathSync'),
 	version: ipcRenderer.sendSync('getAppVersionSync'),
 });
+
+// Must match IPC_RENDERER_KEY_PREFIX from 'rxdb/plugins/electron' used in src/main/rxdb-storage.ts
+const RXDB_IPC_CHANNEL_PREFIX = 'rxdb-ipc-renderer-storage|';
+const isRxdbStorageChannel = (channel: string) => channel.startsWith(RXDB_IPC_CHANNEL_PREFIX);
+
+const isAllowedChannel = (channel: string, validChannels: (string | RegExp)[]) =>
+	validChannels.some((matcher) =>
+		typeof matcher === 'string' ? matcher === channel : matcher.test(channel)
+	);
+
+const rxdbChannelListeners = new Map<
+	string,
+	Map<(...args: unknown[]) => void, Set<(event: IpcRendererEvent, ...args: unknown[]) => void>>
+>();
+
+function getRxdbChannelListeners(channel: string) {
+	let listeners = rxdbChannelListeners.get(channel);
+	if (!listeners) {
+		listeners = new Map();
+		rxdbChannelListeners.set(channel, listeners);
+	}
+	return listeners;
+}
+
+function rememberWrappedRxdbListener(
+	channel: string,
+	listener: (...args: unknown[]) => void,
+	wrappedListener: (event: IpcRendererEvent, ...args: unknown[]) => void
+) {
+	const listeners = getRxdbChannelListeners(channel);
+	let wrappedListeners = listeners.get(listener);
+	if (!wrappedListeners) {
+		wrappedListeners = new Set();
+		listeners.set(listener, wrappedListeners);
+	}
+	wrappedListeners.add(wrappedListener);
+}
+
+function forgetWrappedRxdbListener(
+	channel: string,
+	listener: (...args: unknown[]) => void,
+	wrappedListener?: (event: IpcRendererEvent, ...args: unknown[]) => void
+) {
+	const listeners = rxdbChannelListeners.get(channel);
+	const wrappedListeners = listeners?.get(listener);
+	if (!wrappedListeners) {
+		return undefined;
+	}
+
+	const listenerToRemove = wrappedListener ?? wrappedListeners.values().next().value;
+	if (!listenerToRemove) {
+		return undefined;
+	}
+
+	wrappedListeners.delete(listenerToRemove);
+	if (wrappedListeners.size === 0) {
+		listeners?.delete(listener);
+	}
+	if (listeners && listeners.size === 0) {
+		rxdbChannelListeners.delete(channel);
+	}
+	return listenerToRemove;
+}
 
 // White-listed channels.
 const ipc = {
@@ -39,22 +109,68 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 		}
 	},
 	on(channel: string, func: (...args: unknown[]) => void) {
-		// Allow dynamic channels for print callbacks
+		if (isRxdbStorageChannel(channel)) {
+			const subscription = (event: IpcRendererEvent, ...args: unknown[]) => {
+				const [message, ...rest] = args;
+				if (!hasGetAttachmentDataBase64Return(message)) {
+					func(event, ...args);
+					return;
+				}
+
+				void deserializeRxdbIpcMessage(message)
+					.then((decodedMessage) => {
+						func(event, decodedMessage, ...rest);
+					})
+					.catch((error) => {
+						console.error('Failed to decode RxDB IPC attachment payload in preload', error);
+					});
+			};
+			rememberWrappedRxdbListener(channel, func, subscription);
+			ipcRenderer.on(channel, subscription);
+			return function unsubscribe() {
+				const wrappedListener =
+					forgetWrappedRxdbListener(channel, func, subscription) ?? subscription;
+				return ipcRenderer.removeListener(channel, wrappedListener);
+			};
+		}
+
 		const validChannels = [/^onBeforePrint-/, /^onAfterPrint-/, /^onPrintError-/, ...ipc.render.on];
-		if (
-			validChannels.some((regex) =>
-				typeof regex === 'string' ? regex === channel : regex.test(channel)
-			)
-		) {
+		if (isAllowedChannel(channel, validChannels)) {
 			const subscription = (_event: IpcRendererEvent, ...args: unknown[]) => func(...args);
 			ipcRenderer.on(channel, subscription);
 
-			// Return unsubscribe function
 			return function unsubscribe() {
 				return ipcRenderer.removeListener(channel, subscription);
 			};
 		}
 
+		throw Error(`Channel ${channel} is not allowed`);
+	},
+	removeListener(channel: string, listener: (...args: unknown[]) => void) {
+		if (isRxdbStorageChannel(channel)) {
+			const wrappedListener = forgetWrappedRxdbListener(channel, listener);
+			return ipcRenderer.removeListener(
+				channel,
+				wrappedListener ?? (listener as (event: IpcRendererEvent, ...args: unknown[]) => void)
+			);
+		}
+		throw Error(`Channel ${channel} is not allowed`);
+	},
+	postMessage(channel: string, message: unknown) {
+		if (isRxdbStorageChannel(channel)) {
+			if (!hasBulkWriteAttachmentBlobs(message)) {
+				return ipcRenderer.postMessage(channel, message);
+			}
+
+			void serializeRxdbIpcMessage(message)
+				.then((serializedMessage) => {
+					ipcRenderer.postMessage(channel, serializedMessage);
+				})
+				.catch((error) => {
+					console.error('Failed to encode RxDB IPC attachment payload in preload', error);
+				});
+			return;
+		}
 		throw Error(`Channel ${channel} is not allowed`);
 	},
 	invoke(channel: string, args: unknown) {
@@ -65,18 +181,13 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 		return Promise.reject(new Error(`Channel ${channel} is not allowed`));
 	},
 	once(channel: string, func: (...args: unknown[]) => void) {
-		// Allow dynamic channels for print callbacks
 		const validChannels = [
 			/^onBeforePrint-/,
 			/^onAfterPrint-/,
 			/^onPrintError-/,
 			...ipc.render.once,
 		];
-		if (
-			validChannels.some((regex) =>
-				typeof regex === 'string' ? regex === channel : regex.test(channel)
-			)
-		) {
+		if (isAllowedChannel(channel, validChannels)) {
 			ipcRenderer.once(channel, (_event: IpcRendererEvent, ...args: unknown[]) => func(...args));
 		} else {
 			throw Error(`Channel ${channel} is not allowed`);
