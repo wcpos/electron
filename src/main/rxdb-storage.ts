@@ -59,6 +59,11 @@ function exposeIpcMainRxStorageWithAttachmentCodec(args: {
 	exposeRxStorageRemote({
 		storage: args.storage,
 		messages$,
+		// The monorepo renderer uses rxdb 17.0.0 while the electron main uses 17.1.0.
+		// rxdb-premium is stuck at 17.0.0 and has not yet published a 17.1.0 release,
+		// so the renderer will continue sending version '17.0.0' in IPC messages.
+		// fakeVersion bypasses the RM1 version-mismatch check until premium catches up.
+		fakeVersion: '17.0.0',
 		send(message) {
 			const sendToRenderers = (payload: unknown) => {
 				openRenderers.forEach((sender) => {
