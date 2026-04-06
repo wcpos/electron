@@ -5,6 +5,7 @@ import { app, ipcMain } from 'electron';
 import { IPC_RENDERER_KEY_PREFIX } from 'rxdb/plugins/electron';
 import { exposeRxStorageRemote } from 'rxdb/plugins/storage-remote';
 import { getRxStorageFilesystemNode } from 'rxdb-premium/plugins/storage-filesystem-node';
+import { disableVersionCheck } from 'rxdb-premium/plugins/shared';
 import { Subject } from 'rxjs';
 
 import {
@@ -14,6 +15,11 @@ import {
 	serializeRxdbIpcMessage,
 } from '../rxdb-ipc-attachments';
 import { logger } from './log';
+
+// rxdb-premium 17.0.0 is installed but rxdb is 17.1.0. storage-abstract-filesystem
+// (used by filesystem-node) calls checkVersion() on every createStorageInstance, which
+// would throw SNH and break the IPC storage bridge. Disable the check in the main process.
+disableVersionCheck();
 
 const MAIN_STORAGE_KEY = 'main-storage';
 let bridgeInitializationPromise: Promise<void> | undefined;
