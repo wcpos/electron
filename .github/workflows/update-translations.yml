@@ -8,7 +8,16 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.TRANSLATION_APP_ID }}
+          private-key: ${{ secrets.TRANSLATION_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Update translation version
         env:
@@ -25,7 +34,7 @@ jobs:
       - name: Create PR
         env:
           VERSION: ${{ github.event.client_payload.version }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -34,7 +43,7 @@ jobs:
             BRANCH="chore/translation-version-${VERSION}"
             git checkout -b "$BRANCH"
             git commit -m "chore: update translation version to ${VERSION}"
-            git push -u origin "$BRANCH"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${BRANCH}"
             gh pr create \
               --title "chore: update translation version to ${VERSION}" \
               --body "Automated PR to update translation version to ${VERSION}." \
