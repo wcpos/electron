@@ -90,7 +90,7 @@ const ipc = {
 		// From main to render.
 		on: ['system-resume'] as string[], // System events from main process
 		// From render to main and back again.
-		invoke: ['sqlite', 'axios', 'rxStorage', 'auth:prompt', 'print-raw-tcp'] as string[],
+		invoke: ['sqlite', 'axios', 'rxStorage', 'auth:prompt', 'print-raw-tcp', 'printer-discovery'] as string[],
 		// From main to render, once
 		once: [] as string[], // We'll handle dynamic channels separately
 	},

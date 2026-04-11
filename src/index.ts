@@ -14,6 +14,7 @@ import './main/axios';
 import './main/image-cache';
 import './main/print-external-url';
 import './main/print-raw-tcp';
+import './main/printer-discovery';
 import './main/basePath';
 import './main/appVersion';
 import './main/open-external-url';
