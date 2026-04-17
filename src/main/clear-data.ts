@@ -1,10 +1,9 @@
-import path from 'path';
-
 import { app, dialog, ipcMain } from 'electron';
 import fs from 'fs-extra';
 
 import { closeAll } from './database';
 import { logger } from './log';
+import { getFilesystemNodeBasePath, getLegacySqliteBasePath } from './rxdb-storage';
 import { t } from './translations';
 
 export const clearAppDataDialog = () => {
@@ -13,10 +12,7 @@ export const clearAppDataDialog = () => {
 			'When the application restarts, it will be as if you are starting WooCommerce POS for the first time.'
 	);
 
-	const dbFolder =
-		process.env.NODE_ENV === 'development'
-			? path.resolve('databases')
-			: path.resolve(app.getPath('userData'), 'wcpos_dbs');
+	const dbFolders = [getLegacySqliteBasePath(), getFilesystemNodeBasePath()];
 
 	dialog
 		.showMessageBox({
@@ -27,12 +23,12 @@ export const clearAppDataDialog = () => {
 		})
 		.then(({ response }) => {
 			if (response === 0) {
-				// Close the db connection, delete the db file, and restart the app
+				// Close legacy sqlite connections, delete all db folders, and restart the app.
+				// filesystem-node storage has no explicit close — relaunch releases its fds.
 				try {
 					closeAll();
-					return fs.remove(dbFolder).then(() => {
-						// setTimeout(() => ipcRenderer.send('forward-message', 'hard-reload'), 1000);
-						logger.info(t('app.cleared_app_data'));
+					return Promise.all(dbFolders.map((folder) => fs.remove(folder))).then(() => {
+						logger.info(`${t('app.cleared_app_data')} (${dbFolders.join(', ')})`);
 						app.relaunch();
 						app.quit();
 					});
