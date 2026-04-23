@@ -84,7 +84,7 @@ export class AutoUpdater {
 		let progressBar: ProgressBar | undefined;
 		if (showProgress || name !== 'RELEASES') {
 			let loaded = 0;
-			const total = parseFloat(headers['content-length']);
+			const total = Number(headers['content-length'] ?? 0);
 			progressBar = new ProgressBar();
 			data.on('data', (chunk: string) => {
 				loaded += Buffer.byteLength(chunk);
