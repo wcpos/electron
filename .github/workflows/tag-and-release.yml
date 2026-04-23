@@ -45,7 +45,7 @@ jobs:
         run: pnpm --filter @wcpos/main build:electron
 
       - name: 📦 Archive production artifacts
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: expo-dist
           path: apps/main/electron-build
@@ -66,7 +66,7 @@ jobs:
           path: dist
 
       - name: 🏗 Install Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
 
@@ -74,7 +74,7 @@ jobs:
         run: python3 -m pip install --break-system-packages setuptools
 
       - name: 🔐 Signing By Apple Developer ID
-        uses: apple-actions/import-codesign-certs@fe74d46e82474f87e1ba79832ad28a4013d0e33a # v6.1.0
+        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
         with:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
@@ -110,12 +110,12 @@ jobs:
           path: dist
 
       - name: 🏗 Install Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
 
       - name: 🔐 Signing By Apple Developer ID
-        uses: apple-actions/import-codesign-certs@fe74d46e82474f87e1ba79832ad28a4013d0e33a # v6.1.0
+        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
         with:
           p12-file-base64: ${{ secrets.MAC_CERTS }}
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
@@ -150,7 +150,7 @@ jobs:
           path: dist
 
       - name: 🏗 Install Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
 
