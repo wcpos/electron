@@ -16,7 +16,26 @@ type LocaleInfo = {
 };
 
 const store = new Store<Record<string, TranslationRecord>>();
-const TRANSLATION_VERSION = '2026.2.10';
+const TRANSLATION_VERSION = '2026.4.48';
+const TRANSLATION_CACHE_NAMESPACE = 'translations';
+const TRANSLATION_CACHE_KEY_PATTERN = /^translations:\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
+const LEGACY_TRANSLATION_CACHE_KEY_PATTERN = /^\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
+const buildTranslationCacheKey = (language: string) =>
+	`${TRANSLATION_CACHE_NAMESPACE}:${TRANSLATION_VERSION}:${language}`;
+
+const removeOldTranslationCacheKeys = () => {
+	const currentPrefix = `${TRANSLATION_CACHE_NAMESPACE}:${TRANSLATION_VERSION}:`;
+	Object.keys(store.store).forEach((key) => {
+		if (LEGACY_TRANSLATION_CACHE_KEY_PATTERN.test(key)) {
+			store.delete(key);
+			return;
+		}
+
+		if (TRANSLATION_CACHE_KEY_PATTERN.test(key) && !key.startsWith(currentPrefix)) {
+			store.delete(key);
+		}
+	});
+};
 
 /**
  * Custom i18next backend that loads translations from jsDelivr CDN
@@ -55,7 +74,7 @@ class ElectronStoreBackend {
 	}
 
 	read(language: string, namespace: string, callback: (err: any, data?: any) => void) {
-		const cacheKey = `${TRANSLATION_VERSION}:${language}`;
+		const cacheKey = buildTranslationCacheKey(language);
 		const cached = this.store.get(cacheKey) as TranslationRecord | undefined;
 		if (cached) {
 			callback(null, cached);
@@ -138,6 +157,13 @@ i18nInstance.use(ElectronStoreBackend).init({
 });
 
 export const loadTranslations = async () => {
+	try {
+		removeOldTranslationCacheKeys();
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		log.warn(`Failed to prune old translation cache keys: ${message}`);
+	}
+
 	const systemLocales = app.getPreferredSystemLanguages();
 	const systemLocale = getLocaleFromCode(systemLocales[0] ?? 'en');
 	log.debug(`System locale: ${systemLocale}`);

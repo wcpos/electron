@@ -1,6 +1,7 @@
 import { app, BrowserWindow, powerMonitor } from 'electron';
 
 import { initAuthHandler } from './main/auth-handler';
+import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
 import { logger } from './main/log';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
@@ -35,6 +36,7 @@ if (require('electron-squirrel-startup')) {
 app
 	.whenReady()
 	.then(loadTranslations)
+	.then(clearPendingAppDataOnStartup)
 	.then(installExtensions)
 	.then(initializeRxdbStorageBridge)
 	.then(() => {
