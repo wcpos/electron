@@ -124,7 +124,7 @@ app.on('ready', () => {
 				} satisfies CacheMeta)
 			);
 
-			return new Response(new Uint8Array(buffer), {
+			return new Response(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength), {
 				status: 200,
 				headers: {
 					'Content-Type': contentType,
