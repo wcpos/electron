@@ -80,7 +80,10 @@ jobs:
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
       - name: 📦 Install and rebuild native modules
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
+          node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           npm install
           npm run rebuild:all
 
@@ -121,7 +124,10 @@ jobs:
           p12-password: ${{ secrets.MAC_CERTS_PASSWORD }}
 
       - name: 📦 Install and rebuild native modules
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
+          node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           npm install
           npm run rebuild:all
 
@@ -155,7 +161,10 @@ jobs:
           node-version: 22
 
       - name: 📦 Install and rebuild native modules
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
+          node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           npm install
           npm run rebuild:all
 
