@@ -11,7 +11,7 @@
     "rootDir": ".",
     "outDir": "dist",
     "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "resolveJsonModule": true,
     "paths": {
       "*": ["node_modules/*"]

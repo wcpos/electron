@@ -124,13 +124,19 @@ app.on('ready', () => {
 				} satisfies CacheMeta)
 			);
 
-			return new Response(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength), {
-				status: 200,
-				headers: {
-					'Content-Type': contentType,
-					'Cache-Control': 'max-age=31536000',
-				},
-			});
+			return new Response(
+				buffer.buffer.slice(
+					buffer.byteOffset,
+					buffer.byteOffset + buffer.byteLength
+				) as ArrayBuffer,
+				{
+					status: 200,
+					headers: {
+						'Content-Type': contentType,
+						'Cache-Control': 'max-age=31536000',
+					},
+				}
+			);
 		} catch (err: any) {
 			logger.error('Image cache error:', err.message);
 			return new Response(null, { status: 404 });
