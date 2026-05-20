@@ -8,6 +8,8 @@ import Module from 'module';
 const readyListeners: (() => void)[] = [];
 let imageHandler: ((request: { url: string }) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
+let nextImageBytes = Buffer.from('image-bytes');
+const warnMessages: unknown[][] = [];
 const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-image-cache-test-'));
 
 const electronMock = {
@@ -36,7 +38,7 @@ const axiosMock = {
 	get(url: string) {
 		requestedUrl = url;
 		return Promise.resolve({
-			data: imageBytes,
+			data: nextImageBytes,
 			headers: { 'content-type': 'image/jpeg' },
 		});
 	},
@@ -44,9 +46,20 @@ const axiosMock = {
 
 const loggerMock = {
 	info() {},
-	warn() {},
+	warn(...args: unknown[]) {
+		warnMessages.push(args);
+	},
 	error() {},
 };
+
+async function waitFor(condition: () => boolean, message: string) {
+	for (let attempt = 0; attempt < 50; attempt += 1) {
+		if (condition()) return;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+
+	throw new Error(message);
+}
 
 type ModuleWithMutableLoad = typeof Module & {
 	_load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
@@ -83,6 +96,7 @@ async function main() {
 
 	const originalUrl = 'https://demo.wcpos.com/wp-content/uploads/example.jpg';
 	const encoded = Buffer.from(originalUrl, 'utf-8').toString('base64url');
+	nextImageBytes = imageBytes;
 	const response = await imageHandler!({ url: `wcpos-image://cache/${encoded}` });
 
 	assert.equal(response.status, 200, 'handler should recreate a deleted cache directory');
@@ -109,6 +123,62 @@ async function main() {
 		'handler should save metadata with the source URL and content type'
 	);
 	assert.equal(typeof metadata.cachedAt, 'number', 'handler should save the cache timestamp');
+
+	const staleUrl = 'https://demo.wcpos.com/wp-content/uploads/stale.jpg';
+	const staleHash = crypto.createHash('sha256').update(staleUrl).digest('hex');
+	const staleImagePath = path.join(cacheDir, staleHash);
+	const staleMetaPath = path.join(cacheDir, `${staleHash}.json`);
+	const staleBytes = Buffer.from('stale-image-bytes');
+	const refreshedBytes = Buffer.from('refreshed-image-bytes');
+	fs.writeFileSync(staleImagePath, staleBytes);
+	fs.writeFileSync(
+		staleMetaPath,
+		JSON.stringify({
+			url: staleUrl,
+			contentType: 'image/jpeg',
+			cachedAt: Date.now() - 8 * 24 * 60 * 60 * 1000,
+		})
+	);
+
+	nextImageBytes = refreshedBytes;
+	const originalWriteFileSync = fs.writeFileSync;
+	fs.writeFileSync = function patchedWriteFileSync(file, data, options) {
+		if (
+			String(file).includes(staleHash) &&
+			!String(file).endsWith('.json') &&
+			Buffer.isBuffer(data) &&
+			data.equals(refreshedBytes)
+		) {
+			originalWriteFileSync.call(fs, file, data, options as any);
+			throw new Error('simulated failed refresh write');
+		}
+
+		return originalWriteFileSync.call(fs, file, data, options as any);
+	} as typeof fs.writeFileSync;
+
+	try {
+		const staleEncoded = Buffer.from(staleUrl, 'utf-8').toString('base64url');
+		const staleResponse = await imageHandler!({ url: `wcpos-image://cache/${staleEncoded}` });
+		assert.equal(staleResponse.status, 200, 'stale cache response should still be served');
+		assert.deepEqual(
+			Buffer.from(await staleResponse.arrayBuffer()),
+			staleBytes,
+			'stale cache response should use the existing cached bytes'
+		);
+		await waitFor(
+			() =>
+				warnMessages.some((args) => String(args[0]).includes('Background image refresh failed')),
+			'expected failed background refresh to be logged'
+		);
+	} finally {
+		fs.writeFileSync = originalWriteFileSync;
+	}
+
+	assert.deepEqual(
+		fs.readFileSync(staleImagePath),
+		staleBytes,
+		'failed stale refresh should not corrupt the existing cached image'
+	);
 }
 
 main()
