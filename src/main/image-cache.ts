@@ -58,6 +58,7 @@ function writeCacheEntry(
 
 	const imageTempPath = getTempPath(imagePath);
 	const metaTempPath = getTempPath(metaPath);
+	let imagePromoted = false;
 
 	try {
 		fs.writeFileSync(imageTempPath, buffer);
@@ -66,10 +67,14 @@ function writeCacheEntry(
 			JSON.stringify({ url, contentType, cachedAt: Date.now() } satisfies CacheMeta)
 		);
 		fs.renameSync(imageTempPath, imagePath);
+		imagePromoted = true;
 		fs.renameSync(metaTempPath, metaPath);
 	} catch (err) {
 		removeIfExists(imageTempPath);
 		removeIfExists(metaTempPath);
+		if (imagePromoted) {
+			removeIfExists(imagePath);
+		}
 		throw err;
 	}
 }

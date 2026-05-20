@@ -179,6 +179,47 @@ async function main() {
 		staleBytes,
 		'failed stale refresh should not corrupt the existing cached image'
 	);
+
+	const failedMetaUrl = 'https://demo.wcpos.com/wp-content/uploads/meta-fail.jpg';
+	const failedMetaHash = crypto.createHash('sha256').update(failedMetaUrl).digest('hex');
+	const failedMetaImagePath = path.join(cacheDir, failedMetaHash);
+	const failedMetaPath = path.join(cacheDir, `${failedMetaHash}.json`);
+	const failedMetaBytes = Buffer.from('failed-meta-image-bytes');
+	nextImageBytes = failedMetaBytes;
+
+	const originalRenameSync = fs.renameSync;
+	fs.renameSync = function patchedRenameSync(oldPath, newPath) {
+		if (String(oldPath).includes(failedMetaHash) && String(newPath).endsWith('.json')) {
+			throw new Error('simulated failed metadata promotion');
+		}
+
+		return originalRenameSync.call(fs, oldPath, newPath);
+	} as typeof fs.renameSync;
+
+	try {
+		const failedMetaEncoded = Buffer.from(failedMetaUrl, 'utf-8').toString('base64url');
+		const failedMetaResponse = await imageHandler!({
+			url: `wcpos-image://cache/${failedMetaEncoded}`,
+		});
+		assert.equal(
+			failedMetaResponse.status,
+			404,
+			'failed metadata promotion should fail the request'
+		);
+	} finally {
+		fs.renameSync = originalRenameSync;
+	}
+
+	assert.equal(
+		fs.existsSync(failedMetaImagePath),
+		false,
+		'failed metadata promotion should remove the promoted image file'
+	);
+	assert.equal(
+		fs.existsSync(failedMetaPath),
+		false,
+		'failed metadata promotion should not leave metadata behind'
+	);
 }
 
 main()
