@@ -57,6 +57,7 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType
 function refreshInBackground(url: string, imagePath: string, metaPath: string): void {
 	downloadImage(url)
 		.then(({ buffer, contentType }) => {
+			fs.mkdirSync(path.dirname(imagePath), { recursive: true });
 			fs.writeFileSync(imagePath, buffer);
 			fs.writeFileSync(
 				metaPath,
@@ -69,7 +70,7 @@ function refreshInBackground(url: string, imagePath: string, metaPath: string): 
 }
 
 app.on('ready', () => {
-	const cacheDir = getCacheDir();
+	getCacheDir();
 
 	protocol.handle('wcpos-image', async (request) => {
 		try {
@@ -88,6 +89,7 @@ app.on('ready', () => {
 				return new Response(null, { status: 400 });
 			}
 
+			const cacheDir = getCacheDir();
 			const hash = urlToHash(originalUrl);
 			const imagePath = path.join(cacheDir, hash);
 			const metaPath = path.join(cacheDir, `${hash}.json`);
