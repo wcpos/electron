@@ -30,6 +30,55 @@ function urlToHash(url: string): string {
 	return crypto.createHash('sha256').update(url).digest('hex');
 }
 
+function getTempPath(targetPath: string): string {
+	return path.join(
+		path.dirname(targetPath),
+		`.${path.basename(targetPath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`
+	);
+}
+
+function removeIfExists(filePath: string): void {
+	try {
+		fs.unlinkSync(filePath);
+	} catch (err: any) {
+		if (err?.code !== 'ENOENT') {
+			logger.warn('Failed to remove temporary image cache file:', filePath, err.message);
+		}
+	}
+}
+
+function writeCacheEntry(
+	imagePath: string,
+	metaPath: string,
+	buffer: Buffer,
+	contentType: string,
+	url: string
+): void {
+	fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+
+	const imageTempPath = getTempPath(imagePath);
+	const metaTempPath = getTempPath(metaPath);
+	let imagePromoted = false;
+
+	try {
+		fs.writeFileSync(imageTempPath, buffer);
+		fs.writeFileSync(
+			metaTempPath,
+			JSON.stringify({ url, contentType, cachedAt: Date.now() } satisfies CacheMeta)
+		);
+		fs.renameSync(imageTempPath, imagePath);
+		imagePromoted = true;
+		fs.renameSync(metaTempPath, metaPath);
+	} catch (err) {
+		removeIfExists(imageTempPath);
+		removeIfExists(metaTempPath);
+		if (imagePromoted) {
+			removeIfExists(imagePath);
+		}
+		throw err;
+	}
+}
+
 /**
  * Deduplicate in-flight downloads so multiple <img> tags requesting the
  * same uncached image don't trigger parallel downloads.
@@ -57,11 +106,7 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType
 function refreshInBackground(url: string, imagePath: string, metaPath: string): void {
 	downloadImage(url)
 		.then(({ buffer, contentType }) => {
-			fs.writeFileSync(imagePath, buffer);
-			fs.writeFileSync(
-				metaPath,
-				JSON.stringify({ url, contentType, cachedAt: Date.now() } satisfies CacheMeta)
-			);
+			writeCacheEntry(imagePath, metaPath, buffer, contentType, url);
 		})
 		.catch((err) => {
 			logger.warn('Background image refresh failed:', url, err.message);
@@ -69,7 +114,7 @@ function refreshInBackground(url: string, imagePath: string, metaPath: string): 
 }
 
 app.on('ready', () => {
-	const cacheDir = getCacheDir();
+	getCacheDir();
 
 	protocol.handle('wcpos-image', async (request) => {
 		try {
@@ -88,6 +133,7 @@ app.on('ready', () => {
 				return new Response(null, { status: 400 });
 			}
 
+			const cacheDir = getCacheDir();
 			const hash = urlToHash(originalUrl);
 			const imagePath = path.join(cacheDir, hash);
 			const metaPath = path.join(cacheDir, `${hash}.json`);
@@ -114,15 +160,7 @@ app.on('ready', () => {
 			// Download and cache
 			const { buffer, contentType } = await downloadImage(originalUrl);
 
-			fs.writeFileSync(imagePath, buffer);
-			fs.writeFileSync(
-				metaPath,
-				JSON.stringify({
-					url: originalUrl,
-					contentType,
-					cachedAt: Date.now(),
-				} satisfies CacheMeta)
-			);
+			writeCacheEntry(imagePath, metaPath, buffer, contentType, originalUrl);
 
 			return new Response(
 				buffer.buffer.slice(
