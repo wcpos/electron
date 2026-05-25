@@ -1,12 +1,12 @@
 import { ipcMain } from 'electron';
-import { type Device, type Endpoint, getDeviceList, type OutEndpoint } from 'usb';
+import { type Device, type Endpoint, getDeviceList, type OutEndpoint, usb } from 'usb';
 
 import { logger } from './log';
 
 const USB_PRINTER_CLASS = 0x07;
 
 interface UsbPrinterInfo {
-	id: string; // `usb:<vid>:<pid>` — stored as the profile address
+	id: string; // `usb:<vid>:<pid>:<bus>:<address>` — stored as the profile address
 	name: string;
 	vendorId: number;
 	productId: number;
@@ -14,7 +14,7 @@ interface UsbPrinterInfo {
 
 function deviceKey(d: Device): string {
 	const { idVendor, idProduct } = d.deviceDescriptor;
-	return `usb:${idVendor}:${idProduct}`;
+	return `usb:${idVendor}:${idProduct}:${d.busNumber}:${d.deviceAddress}`;
 }
 
 function isPrinter(d: Device): boolean {
@@ -43,12 +43,16 @@ ipcMain.handle('usb-discovery', async (): Promise<UsbPrinterInfo[]> => {
 ipcMain.handle(
 	'print-raw-usb',
 	async (_event, args: { device: string; data: number[] }): Promise<void> => {
-		const match = /^usb:(\d+):(\d+)$/.exec(args.device);
+		const match = /^usb:(\d+):(\d+):(\d+):(\d+)$/.exec(args.device);
 		if (!match) throw new Error(`Invalid USB device key: ${args.device}`);
-		const [vid, pid] = [Number(match[1]), Number(match[2])];
+		const [vid, pid, busNumber, deviceAddress] = match.slice(1).map(Number);
 
 		const device = getDeviceList().find(
-			(d) => d.deviceDescriptor.idVendor === vid && d.deviceDescriptor.idProduct === pid
+			(d) =>
+				d.deviceDescriptor.idVendor === vid &&
+				d.deviceDescriptor.idProduct === pid &&
+				d.busNumber === busNumber &&
+				d.deviceAddress === deviceAddress
 		);
 		if (!device) throw new Error(`USB printer ${args.device} not found`);
 
@@ -68,9 +72,9 @@ ipcMain.handle(
 			if (iface.isKernelDriverActive()) iface.detachKernelDriver();
 			iface.claim();
 
-			const out = iface.endpoints.find((e: Endpoint) => e.direction === 'out') as
-				| OutEndpoint
-				| undefined;
+			const out = iface.endpoints.find(
+				(e: Endpoint) => e.direction === 'out' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
+			) as OutEndpoint | undefined;
 			if (!out) throw new Error('USB printer interface has no bulk OUT endpoint');
 
 			await new Promise<void>((resolve, reject) => {
