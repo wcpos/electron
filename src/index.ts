@@ -3,6 +3,7 @@ import { app, BrowserWindow, powerMonitor } from 'electron';
 import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
+import { registerBluetoothSelection } from './main/bluetooth-select';
 import { logger } from './main/log';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
 import { registerMenu } from './main/menu';
@@ -43,6 +44,8 @@ app
 	.then(() => {
 		logger.info('Starting app');
 		createWindow();
+		const mainWindow = getMainWindow();
+		if (mainWindow) registerBluetoothSelection(mainWindow);
 		initAuthHandler();
 		if (process.env.NODE_ENV === 'development') {
 			// force protocol handling in development
