@@ -3,6 +3,7 @@ import { app, BrowserWindow, powerMonitor } from 'electron';
 import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
+import { registerBluetoothSelection } from './main/bluetooth-select';
 import { logger } from './main/log';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
 import { registerMenu } from './main/menu';
@@ -15,6 +16,7 @@ import './main/axios';
 import './main/image-cache';
 import './main/print-external-url';
 import './main/print-raw-tcp';
+import './main/usb-printer';
 import './main/basePath';
 import './main/appVersion';
 import './main/open-external-url';
@@ -42,6 +44,8 @@ app
 	.then(() => {
 		logger.info('Starting app');
 		createWindow();
+		const mainWindow = getMainWindow();
+		if (mainWindow) registerBluetoothSelection(mainWindow);
 		initAuthHandler();
 		if (process.env.NODE_ENV === 'development') {
 			// force protocol handling in development
@@ -70,6 +74,8 @@ app.on('activate', () => {
 	// dock icon is clicked and there are no other windows open.
 	if (BrowserWindow.getAllWindows().length === 0) {
 		createWindow();
+		const mainWindow = getMainWindow();
+		if (mainWindow) registerBluetoothSelection(mainWindow);
 	}
 });
 

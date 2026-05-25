@@ -86,11 +86,24 @@ function forgetWrappedRxdbListener(
 const ipc = {
 	render: {
 		// From render to main.
-		send: ['clearData', 'print-external-url', 'open-external-url'] as string[],
+		send: [
+			'clearData',
+			'print-external-url',
+			'open-external-url',
+			'bluetooth-device-selected',
+		] as string[],
 		// From main to render.
-		on: ['system-resume'] as string[], // System events from main process
+		on: ['system-resume', 'bluetooth-devices'] as string[], // System events from main process
 		// From render to main and back again.
-		invoke: ['sqlite', 'axios', 'rxStorage', 'auth:prompt', 'print-raw-tcp'] as string[],
+		invoke: [
+			'sqlite',
+			'axios',
+			'rxStorage',
+			'auth:prompt',
+			'print-raw-tcp',
+			'usb-discovery',
+			'print-raw-usb',
+		] as string[],
 		// From main to render, once
 		once: [] as string[], // We'll handle dynamic channels separately
 	},
