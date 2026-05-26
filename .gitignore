@@ -102,3 +102,6 @@ dist/
 
 # git worktrees
 .worktrees/
+
+# Electron dev filesystem-backed databases
+filesystem-databases/
