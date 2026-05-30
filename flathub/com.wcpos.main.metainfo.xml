@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.wcpos.POS</id>
+  <id>com.wcpos.main</id>
 
-  <name>WooCommerce POS</name>
-  <summary>Point of Sale client for WooCommerce</summary>
+  <name>WCPOS</name>
+  <summary>Point of Sale for WooCommerce</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
   <!-- The app bundles proprietary components (rxdb-premium). Confirm the correct
@@ -17,13 +17,13 @@
 
   <description>
     <p>
-      WooCommerce POS is a point of sale client for WooCommerce stores. Manage
-      orders, products and customers, and take payments in person, with offline
-      support and receipt/USB printer integration.
+      WCPOS is a point of sale client for WooCommerce stores. Manage orders,
+      products and customers, and take payments in person, with offline support
+      and receipt/USB printer integration.
     </p>
   </description>
 
-  <launchable type="desktop-id">com.wcpos.POS.desktop</launchable>
+  <launchable type="desktop-id">com.wcpos.main.desktop</launchable>
 
   <url type="homepage">https://wcpos.com</url>
   <url type="bugtracker">https://github.com/wcpos/electron/issues</url>
@@ -33,7 +33,7 @@
        Replace these placeholders with real hosted screenshots before submitting. -->
   <screenshots>
     <screenshot type="default">
-      <caption>The WooCommerce POS checkout</caption>
+      <caption>The WCPOS checkout</caption>
       <image>https://wcpos.com/screenshots/pos-checkout.png</image>
     </screenshot>
   </screenshots>

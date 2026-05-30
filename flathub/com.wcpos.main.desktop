@@ -1,14 +1,14 @@
 [Desktop Entry]
 Type=Application
-Name=WooCommerce POS
+Name=WCPOS
 GenericName=Point of Sale
-Comment=Point of Sale client for WooCommerce
+Comment=Point of Sale for WooCommerce
 Exec=wcpos %u
-Icon=com.wcpos.POS
+Icon=com.wcpos.main
 Terminal=false
 Categories=Office;Finance;
 MimeType=x-scheme-handler/wcpos;
 StartupNotify=true
 # Must match the Electron app's WM class so the window maps to this .desktop file.
-# Confirm with `xprop WM_CLASS` on a running build; usually the productName.
-StartupWMClass=WooCommerce POS
+# Confirm with `xprop WM_CLASS` on a running build; usually the productName (WCPOS).
+StartupWMClass=WCPOS

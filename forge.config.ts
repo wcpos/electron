@@ -22,14 +22,18 @@ import type { ForgeConfig } from '@electron-forge/shared-types';
 const isOnGithubActions = process.env.CI === 'true';
 
 // Reverse-DNS application id used by the Linux desktop integration (Flatpak / .desktop file).
-// Must match the id of the Flathub manifest in `flathub/` and is verifiable via the wcpos.com
-// domain. Keep this in sync if the Flathub app id changes.
-const LINUX_APP_ID = 'com.wcpos.POS';
+// Must match the id of the Flathub manifest in `flathub/`. Matches the convention used by the
+// other wcpos apps. Keep this in sync if the Flathub app id changes.
+const LINUX_APP_ID = 'com.wcpos.main';
 
 const config: ForgeConfig = {
 	packagerConfig: {
-		name: 'WooCommerce POS',
+		name: 'WCPOS',
 		executableName: 'WooCommercePOS',
+		// Pin the macOS bundle id to the value @electron/packager derived from the previous
+		// app name ("WooCommerce POS"). macOS auto-update keys on the bundle id, so this MUST
+		// stay fixed across the rename — do not let it follow the new `name`.
+		appBundleId: 'com.electron.woocommerce-pos',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
@@ -44,7 +48,7 @@ const config: ForgeConfig = {
 			: undefined,
 		protocols: [
 			{
-				name: 'WooCommerce POS',
+				name: 'WCPOS',
 				schemes: ['wcpos'],
 			},
 		],
@@ -104,8 +108,11 @@ const config: ForgeConfig = {
 		new MakerDeb(
 			{
 				options: {
+					// `name` is the package + output-file name (kept as woocommerce-pos);
+					// `productName` is the user-facing display name.
+					name: 'woocommerce-pos',
 					bin: 'WooCommercePOS',
-					productName: 'WooCommerce POS',
+					productName: 'WCPOS',
 					genericName: 'Point of Sale',
 					maintainer: 'Paul Kilmurray <paul@wcpos.com>',
 					homepage: 'https://wcpos.com',
@@ -120,8 +127,9 @@ const config: ForgeConfig = {
 		new MakerRpm(
 			{
 				options: {
+					name: 'woocommerce-pos',
 					bin: 'WooCommercePOS',
-					productName: 'WooCommerce POS',
+					productName: 'WCPOS',
 					genericName: 'Point of Sale',
 					homepage: 'https://wcpos.com',
 					license: 'MIT',
@@ -138,7 +146,7 @@ const config: ForgeConfig = {
 			{
 				options: {
 					id: LINUX_APP_ID,
-					productName: 'WooCommerce POS',
+					productName: 'WCPOS',
 					genericName: 'Point of Sale',
 					// Electron BaseApp + Freedesktop runtime is the recommended pairing for Electron.
 					// NOTE: confirm these are still the latest non-EOL branches at release time.
