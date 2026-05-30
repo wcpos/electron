@@ -16,6 +16,7 @@ on:
           - macos
           - macos-arm64
           - windows
+          - linux
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.platform || 'push' }}
@@ -27,7 +28,7 @@ permissions:
 jobs:
   build-expo:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: 📥 Check out the Monorepo repository
@@ -169,6 +170,61 @@ jobs:
           npm run rebuild:all
 
       - name: 🚀 Publish Windows release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run publish-app
+
+  publish-linux:
+    needs: build-expo
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 📦 Download expo-dist artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: expo-dist
+          path: dist
+
+      - name: 🏗 Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+
+      # Build tooling for the makers (.deb -> dpkg/fakeroot, .rpm -> rpm,
+      # .flatpak -> flatpak/flatpak-builder/eu-strip) plus libudev for the `usb` native module.
+      - name: 🐧 Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libudev-dev \
+            dpkg fakeroot \
+            rpm \
+            flatpak flatpak-builder elfutils
+
+      # The Flatpak maker builds against the Freedesktop runtime + Electron BaseApp,
+      # which are pulled from Flathub. Pre-install them so the build is deterministic.
+      - name: 🐧 Install Flatpak runtime + Electron BaseApp
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub \
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08 \
+            org.electronjs.Electron2.BaseApp//24.08
+
+      - name: 📦 Install and rebuild native modules
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
+        run: |
+          node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
+          npm install
+          npm run rebuild:all
+
+      - name: 🚀 Publish Linux release (.deb / .rpm / .flatpak)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run publish-app
