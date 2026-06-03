@@ -38,7 +38,7 @@
 		"electron-serve": "^3.0.0",
 		"i18next": "^26.0.0",
 		"rxdb": "17.3.0",
-		"rxdb-premium": "17.3.0",
+		"rxdb-premium": "17.2.0",
 		"rxjs": "7.8.2",
 		"semver": "^7.6.3",
 		"usb": "2.17.0"
