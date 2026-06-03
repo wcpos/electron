@@ -1,13 +1,15 @@
 import { rmSync } from 'fs';
 import path from 'path';
 
+import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerDMG } from '@electron-forge/maker-dmg';
+import { MakerFlatpak } from '@electron-forge/maker-flatpak';
+import { MakerRpm } from '@electron-forge/maker-rpm';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 // import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { PublisherGithub } from '@electron-forge/publisher-github';
-// import MakerAppImage from 'electron-forge-maker-appimage';
 import { move, pathExists, remove } from 'fs-extra';
 // import PublisherGithubLatestYml from 'publisher-github-latest-yml';
 
@@ -19,10 +21,19 @@ import type { ForgeConfig } from '@electron-forge/shared-types';
 
 const isOnGithubActions = process.env.CI === 'true';
 
+// Reverse-DNS application id used by the Linux desktop integration (Flatpak / .desktop file).
+// Must match the id of the Flathub manifest in `flathub/`. Matches the convention used by the
+// other wcpos apps. Keep this in sync if the Flathub app id changes.
+const LINUX_APP_ID = 'com.wcpos.main';
+
 const config: ForgeConfig = {
 	packagerConfig: {
-		name: 'WooCommerce POS',
+		name: 'WCPOS',
 		executableName: 'WooCommercePOS',
+		// Pin the macOS bundle id to the value @electron/packager derived from the previous
+		// app name ("WooCommerce POS"). macOS auto-update keys on the bundle id, so this MUST
+		// stay fixed across the rename — do not let it follow the new `name`.
+		appBundleId: 'com.electron.woocommerce-pos',
 		buildVersion: `${pkg.version}`,
 		icon: path.resolve(__dirname, 'icons', 'icon'),
 		extraResource: [path.resolve(__dirname, 'dist')],
@@ -37,7 +48,7 @@ const config: ForgeConfig = {
 			: undefined,
 		protocols: [
 			{
-				name: 'WooCommerce POS',
+				name: 'WCPOS',
 				schemes: ['wcpos'],
 			},
 		],
@@ -93,23 +104,79 @@ const config: ForgeConfig = {
 			},
 			['darwin']
 		),
-		// new MakerRpm({
-		// 	// https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
-		// 	options: { bin: 'WooCommercePOS' },
-		// }),
-		// new MakerDeb({
-		// 	// https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
-		// 	options: { bin: 'WooCommercePOS' },
-		// }),
-		// new MakerAppImage(
-		// 	{
-		// 		options: {
-		// 			icon: path.resolve(__dirname, 'icons/icon.png'),
-		// 			categories: ['Office'],
-		// 		},
-		// 	},
-		// 	['linux']
-		// ),
+		// .deb for Debian/Ubuntu — https://js.electronforge.io/interfaces/_electron_forge_maker_deb.InternalOptions.MakerDebConfigOptions.html
+		new MakerDeb(
+			{
+				options: {
+					// `name` is the package + output-file name (kept as woocommerce-pos);
+					// `productName` is the user-facing display name.
+					name: 'woocommerce-pos',
+					bin: 'WooCommercePOS',
+					productName: 'WCPOS',
+					genericName: 'Point of Sale',
+					maintainer: 'Paul Kilmurray <paul@wcpos.com>',
+					homepage: 'https://wcpos.com',
+					icon: path.resolve(__dirname, 'icons/icon.png'),
+					categories: ['Office', 'Finance'],
+					mimeType: ['x-scheme-handler/wcpos'],
+				},
+			},
+			['linux']
+		),
+		// .rpm for Fedora/RHEL/openSUSE — https://js.electronforge.io/interfaces/_electron_forge_maker_rpm.InternalOptions.MakerRpmConfigOptions.html
+		new MakerRpm(
+			{
+				options: {
+					name: 'woocommerce-pos',
+					bin: 'WooCommercePOS',
+					productName: 'WCPOS',
+					genericName: 'Point of Sale',
+					homepage: 'https://wcpos.com',
+					license: 'MIT',
+					icon: path.resolve(__dirname, 'icons/icon.png'),
+					categories: ['Office', 'Finance'],
+					mimeType: ['x-scheme-handler/wcpos'],
+				},
+			},
+			['linux']
+		),
+		// Sandboxed Flatpak bundle (also the format published to Flathub) —
+		// https://js.electronforge.io/interfaces/_electron_forge_maker_flatpak.MakerFlatpakConfig.html
+		new MakerFlatpak(
+			{
+				options: {
+					id: LINUX_APP_ID,
+					productName: 'WCPOS',
+					genericName: 'Point of Sale',
+					// Electron BaseApp + Freedesktop runtime is the recommended pairing for Electron.
+					// NOTE: confirm these are still the latest non-EOL branches at release time.
+					base: 'org.electronjs.Electron2.BaseApp',
+					baseVersion: '24.08',
+					runtime: 'org.freedesktop.Platform',
+					runtimeVersion: '24.08',
+					sdk: 'org.freedesktop.Sdk',
+					icon: path.resolve(__dirname, 'icons/icon.png'),
+					categories: ['Office', 'Finance'],
+					mimeType: ['x-scheme-handler/wcpos'],
+					// Sandbox permissions. --device=all is required for raw USB receipt printers /
+					// cash drawers (the `usb` native module); --share=network covers TCP/ESC-POS
+					// network printers and sync. Keep this in sync with the Flathub manifest.
+					finishArgs: [
+						'--share=ipc',
+						'--share=network',
+						'--socket=x11',
+						'--socket=fallback-x11',
+						'--socket=wayland',
+						'--socket=pulseaudio',
+						'--device=dri',
+						'--device=all',
+						'--talk-name=org.freedesktop.Notifications',
+						'--env=ELECTRON_TRASH=gio',
+					],
+				},
+			},
+			['linux']
+		),
 	],
 	publishers: [
 		new PublisherGithub({

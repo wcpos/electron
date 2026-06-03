@@ -37,8 +37,8 @@ export const clearPendingAppDataOnStartup = async () => {
 
 export const clearAppDataDialog = () => {
 	const clearAppDataMessage = t(
-		'By clicking proceed you will be removing all added accounts and preferences for WooCommerce POS. ' +
-			'When the application restarts, it will be as if you are starting WooCommerce POS for the first time.'
+		'By clicking proceed you will be removing all added accounts and preferences for WCPOS. ' +
+			'When the application restarts, it will be as if you are starting WCPOS for the first time.'
 	);
 
 	dialog
