@@ -174,8 +174,32 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run publish-app
 
+
+  validate-flathub-extra-data:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: 🐧 Validate Flathub extra-data placeholders
+        run: |
+          set -euo pipefail
+          manifest=flathub/com.wcpos.main.yml
+
+          echo "Checking $manifest for unresolved Flathub placeholders..."
+          if grep -En 'sha256:[[:space:]]*0{64}|size:[[:space:]]*0([[:space:]#]|$)|TODO' "$manifest"; then
+            echo "::error file=$manifest::Resolve Flathub extra-data placeholders before publishing Linux artifacts."
+            exit 1
+          fi
+
+          echo "Flathub extra-data placeholders resolved."
+
   publish-linux:
-    needs: build-expo
+    needs:
+      - build-expo
+      - validate-flathub-extra-data
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
