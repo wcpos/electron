@@ -177,11 +177,13 @@ jobs:
 
   validate-flathub-extra-data:
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: Check out Git repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: 🐧 Validate Flathub extra-data placeholders
         run: |
@@ -201,7 +203,7 @@ jobs:
       - build-expo
       - validate-flathub-extra-data
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: Check out Git repository
