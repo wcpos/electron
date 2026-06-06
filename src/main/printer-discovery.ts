@@ -63,7 +63,9 @@ function detectVendor(service: MdnsServiceLike): 'epson' | 'star' | 'generic' {
 export function mapMdnsServiceToPrinter(service: MdnsServiceLike): DiscoveredNetworkPrinter | null {
 	const address = pickAddress(service);
 	if (!address) return null;
-	const port = service.port && service.port > 0 ? service.port : 9100;
+	const servicePort = Number(service.port);
+	const port =
+		Number.isInteger(servicePort) && servicePort >= 1 && servicePort <= 65535 ? servicePort : 9100;
 	const id = `mdns-${sanitizeIdPart(address)}-${port}`;
 
 	return {

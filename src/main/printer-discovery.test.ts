@@ -73,6 +73,24 @@ try {
 		}
 	);
 
+	assert.deepEqual(
+		mapMdnsServiceToPrinter({
+			name: 'Invalid port printer',
+			type: 'printer',
+			port: 70000,
+			host: 'invalid-port.local',
+			addresses: ['192.168.1.45'],
+		}),
+		{
+			id: 'mdns-192.168.1.45-9100',
+			name: 'Invalid port printer',
+			connectionType: 'network',
+			address: '192.168.1.45',
+			port: 9100,
+			vendor: 'generic',
+		}
+	);
+
 	assert.equal(
 		mapMdnsServiceToPrinter({ name: 'No address', type: 'printer' }),
 		null,
