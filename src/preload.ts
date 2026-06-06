@@ -101,6 +101,7 @@ const ipc = {
 			'rxStorage',
 			'auth:prompt',
 			'print-raw-tcp',
+			'printer-discovery',
 			'usb-discovery',
 			'print-raw-usb',
 		] as string[],
