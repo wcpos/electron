@@ -14,6 +14,14 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # rxdb + rxdb-premium MUST stay on the exact version pinned by the monorepo
+      # (currently 17.2). The Electron main process and the renderer share an RxDB
+      # storage bridge that rejects ANY version difference (RxError RM1), so a
+      # Dependabot bump here (e.g. #242/#246 -> 17.3) breaks `electron dev` entirely.
+      # Their version is governed by the monorepo, not this repo — never auto-bump.
+      - dependency-name: "rxdb"
+      - dependency-name: "rxdb-premium"
     groups:
       dev-dependencies:
         dependency-type: "development"
