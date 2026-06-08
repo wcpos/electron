@@ -17,6 +17,7 @@ import './main/image-cache';
 import './main/print-external-url';
 import './main/print-raw-tcp';
 import './main/usb-printer';
+import './main/printer-discovery';
 import './main/basePath';
 import './main/appVersion';
 import './main/open-external-url';

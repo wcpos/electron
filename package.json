@@ -24,16 +24,18 @@
 		"publish-app": "electron-forge publish",
 		"lint": "eslint src --ext .js,.jsx,.ts,.tsx",
 		"lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
-		"test": "pnpm run test:preload && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache",
+		"test": "pnpm run test:preload && pnpm run test:printer-discovery && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache",
 		"ts:check": "tsc --noEmit",
 		"test:preload": "ts-node src/preload.test.ts",
 		"test:rxdb-ipc-attachments": "ts-node src/rxdb-ipc-attachments.test.ts",
-		"test:image-cache": "ts-node src/main/image-cache.test.ts"
+		"test:image-cache": "ts-node src/main/image-cache.test.ts",
+		"test:printer-discovery": "ts-node src/main/printer-discovery.test.ts"
 	},
 	"dependencies": {
 		"@sentry/electron": "^7.1.0",
 		"axios": "^1.15.2",
 		"better-sqlite3": "12.10.0",
+		"bonjour-service": "1.4.0",
 		"electron-log": "^5.4.3",
 		"electron-serve": "^3.0.0",
 		"i18next": "^26.0.0",
