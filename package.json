@@ -2,7 +2,7 @@
 	"name": "@wcpos/app-electron",
 	"license": "MIT",
 	"productName": "WCPOS",
-	"version": "1.9.1",
+	"version": "1.9.2",
 	"description": "WCPOS desktop client",
 	"author": "Paul Kilmurray <paul@wcpos.com>",
 	"packageManager": "pnpm@10.31.0",
