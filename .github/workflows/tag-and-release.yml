@@ -192,16 +192,14 @@ jobs:
 
           echo "Checking $manifest for unresolved Flathub placeholders..."
           if grep -En 'sha256:[[:space:]]*0{64}|size:[[:space:]]*0([[:space:]#]|$)|TODO' "$manifest"; then
-            echo "::error file=$manifest::Resolve Flathub extra-data placeholders before publishing Linux artifacts."
-            exit 1
+            echo "::warning file=$manifest::Flathub submission manifest still has placeholders. This does not block Electron app publishing; finalize it after the Linux .deb has been published."
+          else
+            echo "Flathub extra-data placeholders resolved."
           fi
-
-          echo "Flathub extra-data placeholders resolved."
 
   publish-linux:
     needs:
       - build-expo
-      - validate-flathub-extra-data
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
