@@ -243,6 +243,8 @@ jobs:
       - name: 📦 Install and rebuild native modules
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
+          CXXFLAGS: -std=c++17
+          npm_config_cxxflags: -std=c++17
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           npm install
