@@ -15,6 +15,7 @@ async function main() {
 
 	fs.mkdirSync(webpackMainPath, { recursive: true });
 	fs.mkdirSync(sqliteBuildPath, { recursive: true });
+	fs.writeFileSync(path.join(webpackMainPath, 'index.js'), '// packaged main entry');
 	fs.writeFileSync(path.join(sqliteBuildPath, 'placeholder.txt'), 'remove me');
 
 	try {
@@ -38,9 +39,14 @@ async function main() {
 		);
 
 		const packagedRequire = createRequire(path.join(webpackMainPath, 'index.js'));
+		const nodeGypBuildPath = path.join(buildPath, 'node_modules', 'node-gyp-build');
 		const usbEntry = packagedRequire.resolve('usb');
 		const usbModule = packagedRequire('usb') as typeof import('usb');
 
+		assert.ok(
+			fs.existsSync(nodeGypBuildPath),
+			'packageAfterPrune should copy node-gyp-build for usb native binding resolution'
+		);
 		assert.ok(
 			usbEntry.startsWith(path.join(buildPath, 'node_modules', 'usb')),
 			`packaged main process should resolve usb from packaged node_modules, got ${usbEntry}`

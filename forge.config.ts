@@ -66,7 +66,7 @@ const config: ForgeConfig = {
 	},
 	rebuildConfig: {},
 	hooks: {
-		packageAfterPrune: async (forgeConfig, buildPath) => {
+		packageAfterPrune: async (forgeConfig, buildPath, electronVersion, platform, arch) => {
 			const sqliteBuildPath = path.join(buildPath, 'node_modules', 'better-sqlite3', 'build');
 			// console.log("Sqlite BuildPath: ", sqliteBuildPath);
 			// needs to be deleted otherwise macos codesign will fail
