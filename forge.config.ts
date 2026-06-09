@@ -10,7 +10,7 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 // import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { PublisherGithub } from '@electron-forge/publisher-github';
-import { move, pathExists, remove } from 'fs-extra';
+import { copy, move, pathExists, remove } from 'fs-extra';
 // import PublisherGithubLatestYml from 'publisher-github-latest-yml';
 
 import pkg from './package.json';
@@ -25,6 +25,17 @@ const isOnGithubActions = process.env.CI === 'true';
 // Must match the id of the Flathub manifest in `flathub/`. Matches the convention used by the
 // other wcpos apps. Keep this in sync if the Flathub app id changes.
 const LINUX_APP_ID = 'com.wcpos.main';
+
+const runtimeExternalDependencies = ['usb', 'node-gyp-build'];
+
+async function copyRuntimeExternalDependency(packageName: string, buildPath: string) {
+	const sourcePackageJsonPath = require.resolve(`${packageName}/package.json`);
+	const sourcePath = path.dirname(sourcePackageJsonPath);
+	const destinationPath = path.join(buildPath, 'node_modules', packageName);
+
+	await remove(destinationPath);
+	await copy(sourcePath, destinationPath, { dereference: true });
+}
 
 const config: ForgeConfig = {
 	packagerConfig: {
@@ -63,6 +74,10 @@ const config: ForgeConfig = {
 				recursive: true,
 				force: true,
 			});
+
+			for (const packageName of runtimeExternalDependencies) {
+				await copyRuntimeExternalDependency(packageName, buildPath);
+			}
 		},
 		postMake: async (forgeConfig, makeResults) => {
 			// Having a space in the name is not allowed on GitHub releases
