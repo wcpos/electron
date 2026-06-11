@@ -2,14 +2,15 @@ import { ipcMain } from 'electron';
 import { type Device, type Endpoint, getDeviceList, type OutEndpoint, usb } from 'usb';
 
 import { logger } from './log';
+import { listSpoolerPrinters, printRawToSpooler, WINSPOOL_PREFIX } from './winspool-printer';
 
 const USB_PRINTER_CLASS = 0x07;
 
 interface UsbPrinterInfo {
 	id: string; // `usb:<vid>:<pid>:<bus>:<address>` — stored as the profile address
 	name: string;
-	vendorId: number;
-	productId: number;
+	vendorId?: number;
+	productId?: number;
 }
 
 function deviceKey(d: Device): string {
@@ -29,7 +30,15 @@ function isPrinter(d: Device): boolean {
 	}
 }
 
-ipcMain.handle('usb-discovery', async (): Promise<UsbPrinterInfo[]> => {
+ipcMain.handle('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
+	// Windows: libusb can enumerate USB printers but cannot claim them — plug-and-play
+	// binds usbprint.sys (or a vendor driver) to every USB printer, and libusb I/O
+	// requires a WinUSB-class driver. Listing libusb devices here would offer printers
+	// that can never print, so list the installed spooler queues instead; print-raw-usb
+	// routes their `winspool:` keys through the spooler RAW datatype.
+	if (process.platform === 'win32') {
+		return listSpoolerPrinters(event.sender);
+	}
 	return getDeviceList()
 		.filter(isPrinter)
 		.map((d) => ({
@@ -43,8 +52,37 @@ ipcMain.handle('usb-discovery', async (): Promise<UsbPrinterInfo[]> => {
 ipcMain.handle(
 	'print-raw-usb',
 	async (_event, args: { device: string; data: number[] }): Promise<void> => {
+		if (!args || typeof args.device !== 'string') {
+			throw new Error('Invalid arguments: expected { device: string, data: number[] }');
+		}
+		if (
+			!Array.isArray(args.data) ||
+			!args.data.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)
+		) {
+			throw new Error('Invalid data: must be an array of byte values (0-255)');
+		}
+
+		if (args.device.startsWith(WINSPOOL_PREFIX)) {
+			if (process.platform !== 'win32') {
+				throw new Error('Spooler device keys are only valid on Windows');
+			}
+			const printerName = args.device.slice(WINSPOOL_PREFIX.length);
+			await printRawToSpooler(printerName, Buffer.from(args.data));
+			logger.info(`print-raw-usb spooled ${args.data.length} bytes to "${printerName}"`);
+			return;
+		}
+
 		const match = /^usb:(\d+):(\d+):(\d+):(\d+)$/.exec(args.device);
 		if (!match) throw new Error(`Invalid USB device key: ${args.device}`);
+
+		if (process.platform === 'win32') {
+			// A `usb:` key saved by an older version can never work here (usbprint.sys owns
+			// the device); a fresh scan yields a working `winspool:` key.
+			throw new Error(
+				'Direct USB printing is not supported on Windows. Open the printer settings, re-scan for USB printers, and select your installed Windows printer.'
+			);
+		}
+
 		const [vid, pid, busNumber, deviceAddress] = match.slice(1).map(Number);
 
 		const device = getDeviceList().find(
@@ -69,7 +107,11 @@ ipcMain.handle(
 		}
 
 		try {
-			if (iface.isKernelDriverActive()) iface.detachKernelDriver();
+			// Kernel-driver detach exists for Linux, where usblp claims printer-class
+			// interfaces; both calls throw LIBUSB_ERROR_NOT_SUPPORTED on other platforms.
+			if (process.platform === 'linux' && iface.isKernelDriverActive()) {
+				iface.detachKernelDriver();
+			}
 			iface.claim();
 
 			const out = iface.endpoints.find(
