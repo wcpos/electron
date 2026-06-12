@@ -230,16 +230,6 @@ jobs:
             rpm \
             flatpak flatpak-builder elfutils
 
-      # The Flatpak maker builds against the Freedesktop runtime + Electron BaseApp,
-      # which are pulled from Flathub. Pre-install them so the build is deterministic.
-      - name: 🐧 Install Flatpak runtime + Electron BaseApp
-        run: |
-          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install -y --user flathub \
-            org.freedesktop.Platform//24.08 \
-            org.freedesktop.Sdk//24.08 \
-            org.electronjs.Electron2.BaseApp//24.08
-
       - name: 📦 Install and rebuild native modules
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
@@ -250,7 +240,63 @@ jobs:
           npm install
           npm run rebuild:all
 
-      - name: 🚀 Publish Linux release (.deb / .rpm / .flatpak)
+      # Flatpak is excluded from this step (forge.config.ts only enables the
+      # Flatpak maker when WCPOS_FLATPAK=1) so a flatpak-builder failure can
+      # never block the .deb/.rpm assets again. Flatpak is attempted below as
+      # a non-blocking step.
+      - name: 🚀 Publish Linux release (.deb / .rpm)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run publish-app
+
+      # --- Non-blocking Flatpak attempt below: every step is continue-on-error ---
+
+      # The Flatpak maker builds against the Freedesktop runtime + Electron BaseApp,
+      # which are pulled from Flathub. Pre-install them so the build is deterministic.
+      - name: 🐧 Install Flatpak runtime + Electron BaseApp (non-blocking)
+        id: flatpak-runtime
+        continue-on-error: true
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub \
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08 \
+            org.electronjs.Electron2.BaseApp//24.08
+
+      - name: 📦 Make Flatpak bundle (non-blocking)
+        id: make-flatpak
+        if: steps.flatpak-runtime.outcome == 'success'
+        continue-on-error: true
+        env:
+          WCPOS_FLATPAK: '1'
+          # Surface flatpak-builder output — Forge swallows it otherwise, which is
+          # why past failures only showed "flatpak-builder failed with status code 1".
+          DEBUG: 'electron-installer-flatpak*'
+        run: npx electron-forge make --targets=@electron-forge/maker-flatpak --skip-package
+
+      - name: ⬆️ Upload Flatpak to release (non-blocking)
+        if: steps.make-flatpak.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          files=$(find out/make -name '*.flatpak' -type f)
+          if [ -z "$files" ]; then
+            echo "::warning title=Flatpak missing::Flatpak make reported success but no .flatpak file was found under out/make."
+            exit 0
+          fi
+          echo "$files" | while read -r f; do
+            echo "Uploading $f to release v$version"
+            gh release upload "v$version" "$f" --clobber
+          done
+
+      - name: 📋 Report Flatpak result
+        if: steps.flatpak-runtime.outcome != 'success' || steps.make-flatpak.outcome != 'success'
+        run: |
+          echo "::warning title=Flatpak deferred::The non-blocking Flatpak build did not complete (runtime install: ${{ steps.flatpak-runtime.outcome }}, make: ${{ steps.make-flatpak.outcome }}). .deb/.rpm assets are unaffected. See the 'Make Flatpak bundle' step log (DEBUG output enabled) for the flatpak-builder error."
+          {
+            echo "## :warning: Flatpak deferred"
+            echo "The non-blocking Flatpak build did not complete (runtime install: \`${{ steps.flatpak-runtime.outcome }}\`, make: \`${{ steps.make-flatpak.outcome }}\`)."
+            echo ".deb/.rpm assets are unaffected."
+          } >> "$GITHUB_STEP_SUMMARY"
