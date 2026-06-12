@@ -89,3 +89,40 @@ jobs:
             echo "::error::WooCommercePOS binary missing from the installed app — apply_extra.sh failed"
             exit 1
           fi
+
+      # StartupWMClass in the .desktop must match the running app's WM_CLASS or the
+      # window won't associate with the launcher. Install the same published .deb the
+      # manifest references, run it under Xvfb, and read the class off the real window.
+      - name: 🔍 Verify StartupWMClass matches the running app
+        run: |
+          sudo apt-get install -y xvfb xdotool x11-utils
+          deb_url=$(grep -oE 'https://[^ ]+\.deb' flathub/com.wcpos.main.yml | head -1)
+          curl -sLo /tmp/wcpos.deb "$deb_url"
+          sudo apt-get install -y /tmp/wcpos.deb
+          Xvfb :99 -screen 0 1280x800x24 &
+          export DISPLAY=:99
+          sleep 2
+          /usr/lib/woocommerce-pos/WooCommercePOS --no-sandbox --disable-gpu > /tmp/wcpos-app.log 2>&1 &
+          expected=$(sed -n 's/^StartupWMClass=//p' flathub/com.wcpos.main.desktop)
+          echo "Expected StartupWMClass: $expected"
+          found=""
+          for _attempt in $(seq 1 45); do
+            wids=$( (xdotool search --name '.*' 2>/dev/null; xdotool search --class '.*' 2>/dev/null) | sort -u)
+            for wid in $wids; do
+              wmclass=$(xprop -id "$wid" WM_CLASS 2>/dev/null || true)
+              if echo "$wmclass" | grep -q 'WM_CLASS(STRING)'; then
+                echo "window $wid: $wmclass"
+                if echo "$wmclass" | grep -q "\"$expected\""; then
+                  found="yes"
+                fi
+              fi
+            done
+            [ -n "$found" ] && break
+            sleep 2
+          done
+          if [ -z "$found" ]; then
+            echo "--- app log ---"; tail -50 /tmp/wcpos-app.log || true
+            echo "::error::No window with WM_CLASS containing \"$expected\" appeared — check StartupWMClass in com.wcpos.main.desktop against the output above"
+            exit 1
+          fi
+          echo "WM_CLASS matches StartupWMClass=$expected"
