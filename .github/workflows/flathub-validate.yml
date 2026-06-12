@@ -26,6 +26,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y flatpak dbus
 
+      # Ubuntu 24.04 runners restrict unprivileged user namespaces via AppArmor,
+      # which breaks bwrap (used by flatpak to run apply_extra at install time).
+      - name: 🐧 Allow unprivileged user namespaces (bwrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # Pre-install the build deps here: host-level `flatpak install` works without
       # a session bus, whereas flatpak-builder's internal install calls need D-Bus
       # (hence dbus-run-session on the build step below).
