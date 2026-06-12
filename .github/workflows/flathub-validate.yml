@@ -24,12 +24,19 @@ jobs:
       - name: 🐧 Install flatpak
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak
+          sudo apt-get install -y flatpak dbus
 
-      - name: 🐧 Install org.flatpak.Builder
+      # Pre-install the build deps here: host-level `flatpak install` works without
+      # a session bus, whereas flatpak-builder's internal install calls need D-Bus
+      # (hence dbus-run-session on the build step below).
+      - name: 🐧 Install org.flatpak.Builder + runtimes
         run: |
           flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install -y --user flathub org.flatpak.Builder
+          flatpak install -y --user flathub \
+            org.flatpak.Builder \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.electronjs.Electron2.BaseApp//25.08
 
       # appid-url-not-reachable is tolerated (with a warning): wcpos.com's bot
       # protection returns 403 to the linter's HTTP client. It must still be
@@ -56,7 +63,7 @@ jobs:
       - name: 🏗 Build + install (exercises extra-data / apply_extra.sh)
         working-directory: flathub
         run: |
-          flatpak run org.flatpak.Builder --user --install --force-clean \
+          dbus-run-session -- flatpak run org.flatpak.Builder --user --install --force-clean \
             --install-deps-from=flathub build-dir com.wcpos.main.yml
 
       - name: ✅ Verify installed app layout
