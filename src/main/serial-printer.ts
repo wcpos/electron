@@ -35,7 +35,8 @@ export function filterSerialPorts(ports: { path: string }[]): SerialPrinterInfo[
 		});
 }
 
-const PRINT_TIMEOUT_MS = 20_000; // renderer gives up at 30s — fail first with a real error
+// Exported as a mutable object so tests can override timeoutMs without a module reload.
+export const printConfig = { timeoutMs: 20_000 }; // renderer gives up at 30s — fail first with a real error
 
 ipcMain.handle('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
 	// Windows: OS-paired Bluetooth Classic printers are enumerated and printed via the
@@ -70,6 +71,9 @@ ipcMain.handle(
 		}
 
 		const portPath = args.device.slice(SERIAL_PREFIX.length);
+		if (portPath === '') {
+			throw new Error(`Invalid serial device key: ${args.device}`);
+		}
 		// SPP (Bluetooth Classic) virtual serial ports ignore baud rate — 9600 is the
 		// conventional default and what most receipt printer SDKs use.
 		const port = new SerialPort({ path: portPath, baudRate: 9600, autoOpen: false });
@@ -101,13 +105,23 @@ ipcMain.handle(
 
 			timeoutHandle = setTimeout(() => {
 				void cleanup().finally(() =>
-					finish(new Error(`Serial print to "${portPath}" timed out after ${PRINT_TIMEOUT_MS}ms`))
+					finish(
+						new Error(`Serial print to "${portPath}" timed out after ${printConfig.timeoutMs}ms`)
+					)
 				);
-			}, PRINT_TIMEOUT_MS);
+			}, printConfig.timeoutMs);
 
 			port.open((openErr) => {
 				if (openErr) {
 					void cleanup().finally(() => finish(openErr));
+					return;
+				}
+
+				// The timeout may have fired while open() was still pending.
+				// If already settled, close the now-open port and bail out to
+				// prevent a ghost print after the renderer has already seen a failure.
+				if (settled) {
+					void cleanup();
 					return;
 				}
 

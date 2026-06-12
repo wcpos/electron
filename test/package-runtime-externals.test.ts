@@ -69,8 +69,8 @@ async function main() {
 			fs.existsSync(serialportNamespacePath),
 			'packageAfterPrune should copy @serialport namespace for serialport dependencies'
 		);
-		// Verify the module shape via the actual installed serialport (avoids mock-env dep chain issues)
-		const { SerialPort } = require('serialport') as typeof import('serialport');
+		// Verify the module loads correctly from the packaged copy, including the transitive dep chain
+		const { SerialPort } = packagedRequire('serialport') as typeof import('serialport');
 		assert.equal(
 			typeof SerialPort.list,
 			'function',

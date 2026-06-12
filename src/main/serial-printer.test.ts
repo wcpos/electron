@@ -302,6 +302,115 @@ async function main() {
 		'close should be called even when write fails'
 	);
 
+	// ──────────────────────────────────────────────────────────────────────────
+	// print-raw-serial handler — ghost-print guard: open() resolves after timeout
+	// ──────────────────────────────────────────────────────────────────────────
+	// Arrange: use a FakeSerialPort that captures the open callback without
+	// calling it immediately (simulating a slow device handshake that exceeds
+	// the print timeout). The module's PRINT_TIMEOUT_MS export is set to a
+	// small value so the test runs fast.
+	delete require.cache[require.resolve('./serial-printer')];
+	handlers.clear();
+
+	let capturedOpenCallback: PortCallback | null = null;
+
+	class DeferredOpenSerialPort extends FakeSerialPort {
+		open(cb: PortCallback) {
+			this.calls.push({ method: 'open' });
+			// Capture a wrapper that sets isOpen before calling the original callback,
+			// matching what the real SerialPort does when it finally opens.
+			capturedOpenCallback = (err?: Error | null): void => {
+				if (!err) this.isOpen = true;
+				cb(err);
+			};
+		}
+	}
+
+	mutableModule._load = function patchedLoadDeferred(
+		request: string,
+		parent: NodeModule | null,
+		isMain: boolean
+	) {
+		if (request === 'electron') return { ipcMain: fakeIpcMain };
+		if (request === './log') {
+			return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
+		}
+		if (request === 'serialport') return { SerialPort: DeferredOpenSerialPort };
+		return originalLoad.call(this, request, parent, isMain);
+	};
+
+	// Shrink the timeout to 10ms so the test completes immediately.
+	// printConfig is an exported mutable object — mutating its property affects the
+	// live module scope because the handler reads printConfig.timeoutMs at call time.
+	const { printConfig } = require('./serial-printer') as typeof import('./serial-printer');
+	const originalTimeoutMs = printConfig.timeoutMs;
+	printConfig.timeoutMs = 10;
+
+	const ghostPrintHandler = handlers.get('print-raw-serial') as (
+		_e: null,
+		args: unknown
+	) => Promise<void>;
+
+	FakeSerialPort.instances.length = 0;
+	capturedOpenCallback = null;
+
+	// Start the print — it will time out in 10ms before open() resolves.
+	// Immediately attach a catch handler to prevent Node from treating the
+	// eventual rejection as unhandled before assert.rejects observes it.
+	const ghostPrintPromise = ghostPrintHandler(null, {
+		device: 'serial:/dev/cu.GhostPrinter',
+		data: [0x1b, 0x40],
+	});
+	// Suppress unhandled-rejection noise; assert.rejects below will still see the error.
+	ghostPrintPromise.catch((_err: unknown): void => undefined);
+
+	// Assert the promise rejects with a timeout error (also waits for it to settle)
+	await assert.rejects(
+		() => ghostPrintPromise,
+		/timed out/,
+		'ghost-print: should reject with timeout when open() takes too long'
+	);
+
+	// Now fire the late open callback — simulates the device finally opening
+	// after the renderer has already seen a failure
+	assert.ok(capturedOpenCallback !== null, 'ghost-print: open callback should have been captured');
+	(capturedOpenCallback as PortCallback)(null);
+
+	// Give the late callback a tick to run cleanup
+	await new Promise<void>((res) => setTimeout(res, 10));
+
+	assert.equal(FakeSerialPort.instances.length, 1, 'ghost-print: exactly one port created');
+	const ghostPort = FakeSerialPort.instances[0];
+
+	// write must NEVER have been called — the guard prevented the ghost print
+	assert.ok(
+		!ghostPort.calls.some((c) => c.method === 'write'),
+		'ghost-print: write must not be called after timeout'
+	);
+
+	// close must be called — the guard closes the now-open port
+	assert.ok(
+		ghostPort.calls.some((c) => c.method === 'close'),
+		'ghost-print: close must be called to release the port after late open'
+	);
+
+	// Restore printConfig.timeoutMs to its original value for subsequent tests
+	printConfig.timeoutMs = originalTimeoutMs;
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// print-raw-serial handler — empty path: 'serial:' with no path component
+	// ──────────────────────────────────────────────────────────────────────────
+	// Re-use the last loaded module's handler (deferred-open variant is fine for
+	// validation tests — the handler rejects before constructing a SerialPort)
+	await assert.rejects(
+		() => ghostPrintHandler(null, { device: 'serial:', data: [0x1b] }),
+		/Invalid serial device key/,
+		'empty path: device "serial:" with no port path should be rejected'
+	);
+
+	// Restore default loader
+	installDefaultLoad();
+
 	console.log('serial-printer tests passed');
 }
 

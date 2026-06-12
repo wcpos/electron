@@ -26,7 +26,7 @@ const isOnGithubActions = process.env.CI === 'true';
 // other wcpos apps. Keep this in sync if the Flathub app id changes.
 const LINUX_APP_ID = 'com.wcpos.main';
 
-const runtimeExternalDependencies = ['usb', 'serialport', 'node-gyp-build'];
+const runtimeExternalDependencies = ['usb', 'serialport', 'node-gyp-build', 'debug', 'ms'];
 
 async function copyRuntimeExternalDependency(packageName: string, buildPath: string) {
 	const sourcePackageJsonPath = require.resolve(`${packageName}/package.json`);
