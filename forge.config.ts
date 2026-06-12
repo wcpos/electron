@@ -157,41 +157,49 @@ const config: ForgeConfig = {
 		),
 		// Sandboxed Flatpak bundle (also the format published to Flathub) —
 		// https://js.electronforge.io/interfaces/_electron_forge_maker_flatpak.MakerFlatpakConfig.html
-		new MakerFlatpak(
-			{
-				options: {
-					id: LINUX_APP_ID,
-					productName: 'WCPOS',
-					genericName: 'Point of Sale',
-					// Electron BaseApp + Freedesktop runtime is the recommended pairing for Electron.
-					// NOTE: confirm these are still the latest non-EOL branches at release time.
-					base: 'org.electronjs.Electron2.BaseApp',
-					baseVersion: '24.08',
-					runtime: 'org.freedesktop.Platform',
-					runtimeVersion: '24.08',
-					sdk: 'org.freedesktop.Sdk',
-					icon: path.resolve(__dirname, 'icons/icon.png'),
-					categories: ['Office', 'Finance'],
-					mimeType: ['x-scheme-handler/wcpos'],
-					// Sandbox permissions. --device=all is required for raw USB receipt printers /
-					// cash drawers (the `usb` native module); --share=network covers TCP/ESC-POS
-					// network printers and sync. Keep this in sync with the Flathub manifest.
-					finishArgs: [
-						'--share=ipc',
-						'--share=network',
-						'--socket=x11',
-						'--socket=fallback-x11',
-						'--socket=wayland',
-						'--socket=pulseaudio',
-						'--device=dri',
-						'--device=all',
-						'--talk-name=org.freedesktop.Notifications',
-						'--env=ELECTRON_TRASH=gio',
-					],
-				},
-			},
-			['linux']
-		),
+		// Opt-in via WCPOS_FLATPAK=1: the Flatpak maker has been failing in CI and a
+		// maker failure aborts the whole `electron-forge publish` run, which blocked
+		// .deb/.rpm from shipping (no Linux assets since v1.9.1). The publish workflow
+		// runs deb/rpm by default and attempts the Flatpak in a separate non-blocking step.
+		...(process.env.WCPOS_FLATPAK === '1'
+			? [
+					new MakerFlatpak(
+						{
+							options: {
+								id: LINUX_APP_ID,
+								productName: 'WCPOS',
+								genericName: 'Point of Sale',
+								// Electron BaseApp + Freedesktop runtime is the recommended pairing for Electron.
+								// NOTE: confirm these are still the latest non-EOL branches at release time.
+								base: 'org.electronjs.Electron2.BaseApp',
+								baseVersion: '24.08',
+								runtime: 'org.freedesktop.Platform',
+								runtimeVersion: '24.08',
+								sdk: 'org.freedesktop.Sdk',
+								icon: path.resolve(__dirname, 'icons/icon.png'),
+								categories: ['Office', 'Finance'],
+								mimeType: ['x-scheme-handler/wcpos'],
+								// Sandbox permissions. --device=all is required for raw USB receipt printers /
+								// cash drawers (the `usb` native module); --share=network covers TCP/ESC-POS
+								// network printers and sync. Keep this in sync with the Flathub manifest.
+								finishArgs: [
+									'--share=ipc',
+									'--share=network',
+									'--socket=x11',
+									'--socket=fallback-x11',
+									'--socket=wayland',
+									'--socket=pulseaudio',
+									'--device=dri',
+									'--device=all',
+									'--talk-name=org.freedesktop.Notifications',
+									'--env=ELECTRON_TRASH=gio',
+								],
+							},
+						},
+						['linux']
+					),
+				]
+			: []),
 	],
 	publishers: [
 		new PublisherGithub({
