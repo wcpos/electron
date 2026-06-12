@@ -185,7 +185,8 @@ const config: ForgeConfig = {
 								finishArgs: [
 									'--share=ipc',
 									'--share=network',
-									'--socket=x11',
+									// No plain --socket=x11: Flathub's linter rejects x11 combined with
+									// wayland/fallback-x11; fallback-x11 covers X11-only sessions.
 									'--socket=fallback-x11',
 									'--socket=wayland',
 									'--socket=pulseaudio',

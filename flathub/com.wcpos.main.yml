@@ -21,7 +21,8 @@ separate-locales: false
 finish-args:
   - --share=ipc
   - --share=network # TCP / ESC-POS network printers + sync
-  - --socket=x11
+  # No plain --socket=x11: flatpak-builder-lint rejects x11 combined with
+  # wayland/fallback-x11; fallback-x11 grants X11 only when Wayland is absent.
   - --socket=fallback-x11
   - --socket=wayland
   - --socket=pulseaudio

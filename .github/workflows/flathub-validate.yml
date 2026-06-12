@@ -31,9 +31,23 @@ jobs:
           flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak install -y --user flathub org.flatpak.Builder
 
+      # appid-url-not-reachable is tolerated (with a warning): wcpos.com's bot
+      # protection returns 403 to the linter's HTTP client. It must still be
+      # resolved before the Flathub submission — either allow the linter through
+      # the WAF or request a linter exception from Flathub reviewers.
       - name: 🔍 Lint manifest
         working-directory: flathub
-        run: flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest com.wcpos.main.yml
+        run: |
+          out=$(flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest com.wcpos.main.yml) || true
+          echo "$out"
+          remaining=$(echo "$out" | jq '[.errors[]? | select(. != "appid-url-not-reachable")] | length')
+          if [ "$remaining" -gt 0 ]; then
+            echo "::error::flatpak-builder-lint reported blocking manifest errors"
+            exit 1
+          fi
+          if echo "$out" | jq -e '.errors[]? | select(. == "appid-url-not-reachable")' > /dev/null; then
+            echo "::warning title=appid-url-not-reachable::wcpos.com returns 403 to flatpak-builder-lint (bot protection). Allow the linter through the WAF or request a Flathub linter exception before submitting."
+          fi
 
       - name: 🔍 Lint AppStream metadata
         working-directory: flathub
