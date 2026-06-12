@@ -24,5 +24,5 @@ export const mainConfig: WebpackConfiguration = {
 	// statically follow the `NODE_USB_PATH ||` dynamic path, so it emits nothing for it.
 	// Externalizing `usb` keeps it a runtime `require('usb')` resolved from node_modules,
 	// where node-gyp-build finds the electron-rebuilt build/Release/usb_bindings.node.
-	externals: ['aws-sdk', 'mock-aws-s3', 'nock', 'usb'],
+	externals: ['aws-sdk', 'mock-aws-s3', 'nock', 'serialport', 'usb'],
 };

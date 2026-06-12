@@ -56,6 +56,26 @@ async function main() {
 			'function',
 			'packaged main process should load usb and its native binding dependencies'
 		);
+
+		// serialport — OS-paired Bluetooth Classic serial path
+		const serialportEntry = packagedRequire.resolve('serialport');
+		assert.ok(
+			serialportEntry.startsWith(path.join(buildPath, 'node_modules', 'serialport')),
+			`packaged main process should resolve serialport from packaged node_modules, got ${serialportEntry}`
+		);
+		// Verify @serialport/* namespace was copied alongside serialport
+		const serialportNamespacePath = path.join(buildPath, 'node_modules', '@serialport');
+		assert.ok(
+			fs.existsSync(serialportNamespacePath),
+			'packageAfterPrune should copy @serialport namespace for serialport dependencies'
+		);
+		// Verify the module loads correctly from the packaged copy, including the transitive dep chain
+		const { SerialPort } = packagedRequire('serialport') as typeof import('serialport');
+		assert.equal(
+			typeof SerialPort.list,
+			'function',
+			'serialport should load with SerialPort.list available'
+		);
 	} finally {
 		fs.rmSync(buildPath, { recursive: true, force: true });
 	}

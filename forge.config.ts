@@ -26,7 +26,7 @@ const isOnGithubActions = process.env.CI === 'true';
 // other wcpos apps. Keep this in sync if the Flathub app id changes.
 const LINUX_APP_ID = 'com.wcpos.main';
 
-const runtimeExternalDependencies = ['usb', 'node-gyp-build'];
+const runtimeExternalDependencies = ['usb', 'serialport', 'node-gyp-build', 'debug', 'ms'];
 
 async function copyRuntimeExternalDependency(packageName: string, buildPath: string) {
 	const sourcePackageJsonPath = require.resolve(`${packageName}/package.json`);
@@ -78,6 +78,18 @@ const config: ForgeConfig = {
 			for (const packageName of runtimeExternalDependencies) {
 				await copyRuntimeExternalDependency(packageName, buildPath);
 			}
+
+			// serialport re-exports all @serialport/* sub-packages (parsers, bindings, stream).
+			// Some of these do not export `./package.json` so they cannot be copied individually
+			// via require.resolve; copy the whole @serialport namespace directory instead.
+			const serialportNamespaceSrc = path.join(
+				path.dirname(require.resolve('serialport/package.json')),
+				'..',
+				'@serialport'
+			);
+			const serialportNamespaceDest = path.join(buildPath, 'node_modules', '@serialport');
+			await remove(serialportNamespaceDest);
+			await copy(serialportNamespaceSrc, serialportNamespaceDest, { dereference: true });
 		},
 		postMake: async (forgeConfig, makeResults) => {
 			// Having a space in the name is not allowed on GitHub releases
