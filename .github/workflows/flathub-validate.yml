@@ -65,11 +65,21 @@ jobs:
         working-directory: flathub
         run: flatpak run --command=flatpak-builder-lint org.flatpak.Builder appstream com.wcpos.main.metainfo.xml
 
-      - name: 🏗 Build + install (exercises extra-data / apply_extra.sh)
+      # Build WITHOUT --install: flatpak-builder would otherwise run the install
+      # (and apply_extra's bwrap) inside the org.flatpak.Builder sandbox, where
+      # nested user namespaces are blocked. Export to a local OSTree repo instead
+      # and install from the host — the same split Flathub's CI uses.
+      - name: 🏗 Build (exports to local OSTree repo)
         working-directory: flathub
         run: |
-          dbus-run-session -- flatpak run org.flatpak.Builder --user --install --force-clean \
-            --install-deps-from=flathub build-dir com.wcpos.main.yml
+          dbus-run-session -- flatpak run org.flatpak.Builder --user --force-clean \
+            --repo=repo --install-deps-from=flathub build-dir com.wcpos.main.yml
+
+      - name: 🏗 Install from local repo (exercises extra-data / apply_extra.sh)
+        working-directory: flathub
+        run: |
+          flatpak remote-add --user --no-gpg-verify local-repo repo
+          flatpak install -y --user local-repo com.wcpos.main
 
       - name: ✅ Verify installed app layout
         run: |
