@@ -106,12 +106,19 @@ jobs:
           expected=$(sed -n 's/^StartupWMClass=//p' flathub/com.wcpos.main.desktop)
           echo "Expected StartupWMClass: $expected"
           found=""
-          for _attempt in $(seq 1 45); do
+          visible_classes=""
+          for _attempt in $(seq 1 60); do
             wids=$( (xdotool search --name '.*' 2>/dev/null; xdotool search --class '.*' 2>/dev/null) | sort -u)
+            visible_classes=""
             for wid in $wids; do
-              wmclass=$(xprop -id "$wid" WM_CLASS 2>/dev/null || true)
-              if echo "$wmclass" | grep -q 'WM_CLASS(STRING)'; then
-                echo "window $wid: $wmclass"
+              wmclass=$(xprop -id "$wid" WM_CLASS 2>/dev/null | sed -n 's/.*= //p')
+              [ -z "$wmclass" ] && continue
+              info=$(xwininfo -id "$wid" 2>/dev/null || true)
+              state=$(echo "$info" | sed -n 's/.*Map State: //p')
+              geom=$(echo "$info" | sed -n 's/^  -geometry //p')
+              echo "window $wid: class=$wmclass state=$state geometry=$geom"
+              if [ "$state" = "IsViewable" ]; then
+                visible_classes="$visible_classes $wmclass"
                 if echo "$wmclass" | grep -q "\"$expected\""; then
                   found="yes"
                 fi
@@ -122,7 +129,7 @@ jobs:
           done
           if [ -z "$found" ]; then
             echo "--- app log ---"; tail -50 /tmp/wcpos-app.log || true
-            echo "::error::No window with WM_CLASS containing \"$expected\" appeared — check StartupWMClass in com.wcpos.main.desktop against the output above"
+            echo "::error::No VISIBLE window has WM_CLASS containing \"$expected\". Visible window classes:$visible_classes — set StartupWMClass in com.wcpos.main.desktop to the visible window's class."
             exit 1
           fi
-          echo "WM_CLASS matches StartupWMClass=$expected"
+          echo "Visible window WM_CLASS matches StartupWMClass=$expected"
