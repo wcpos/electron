@@ -218,8 +218,10 @@ jobs:
         with:
           node-version: 22
 
-      # Build tooling for the makers (.deb -> dpkg/fakeroot, .rpm -> rpm,
-      # .flatpak -> flatpak/flatpak-builder/eu-strip) plus libudev for the `usb` native module.
+      # Build tooling for the blocking makers only (.deb -> dpkg/fakeroot,
+      # .rpm -> rpm) plus libudev for the `usb` native module. Flatpak tooling
+      # is installed in the non-blocking Flatpak section below so an apt
+      # failure on those packages can't block the .deb/.rpm publish.
       - name: 🐧 Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -227,8 +229,7 @@ jobs:
             build-essential \
             libudev-dev \
             dpkg fakeroot \
-            rpm \
-            flatpak flatpak-builder elfutils
+            rpm
 
       - name: 📦 Install and rebuild native modules
         env:
@@ -251,12 +252,14 @@ jobs:
 
       # --- Non-blocking Flatpak attempt below: every step is continue-on-error ---
 
-      # The Flatpak maker builds against the Freedesktop runtime + Electron BaseApp,
-      # which are pulled from Flathub. Pre-install them so the build is deterministic.
-      - name: 🐧 Install Flatpak runtime + Electron BaseApp (non-blocking)
+      # Flatpak build tooling (flatpak-builder, eu-strip from elfutils), then the
+      # Freedesktop runtime + Electron BaseApp pulled from Flathub. Pre-install the
+      # runtimes so the build is deterministic.
+      - name: 🐧 Install Flatpak tooling + runtime + Electron BaseApp (non-blocking)
         id: flatpak-runtime
         continue-on-error: true
         run: |
+          sudo apt-get install -y flatpak flatpak-builder elfutils
           flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak install -y --user flathub \
             org.freedesktop.Platform//24.08 \
