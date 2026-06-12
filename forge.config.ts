@@ -172,9 +172,9 @@ const config: ForgeConfig = {
 								// Electron BaseApp + Freedesktop runtime is the recommended pairing for Electron.
 								// NOTE: confirm these are still the latest non-EOL branches at release time.
 								base: 'org.electronjs.Electron2.BaseApp',
-								baseVersion: '24.08',
+								baseVersion: '25.08',
 								runtime: 'org.freedesktop.Platform',
-								runtimeVersion: '24.08',
+								runtimeVersion: '25.08',
 								sdk: 'org.freedesktop.Sdk',
 								icon: path.resolve(__dirname, 'icons/icon.png'),
 								categories: ['Office', 'Finance'],

@@ -1,0 +1,55 @@
+name: Flathub Validate
+
+# Validates the Flathub submission assets the same way Flathub CI does:
+# flatpak-builder-lint on the manifest + AppStream metadata, then a real
+# build + install of the extra-data manifest, which downloads the published
+# .deb and runs apply_extra.sh — an end-to-end test of the install path.
+on:
+  pull_request:
+    paths:
+      - 'flathub/**'
+      - '.github/workflows/flathub-validate.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: 🐧 Install flatpak
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+
+      - name: 🐧 Install org.flatpak.Builder
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub org.flatpak.Builder
+
+      - name: 🔍 Lint manifest
+        working-directory: flathub
+        run: flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest com.wcpos.main.yml
+
+      - name: 🔍 Lint AppStream metadata
+        working-directory: flathub
+        run: flatpak run --command=flatpak-builder-lint org.flatpak.Builder appstream com.wcpos.main.metainfo.xml
+
+      - name: 🏗 Build + install (exercises extra-data / apply_extra.sh)
+        working-directory: flathub
+        run: |
+          flatpak run org.flatpak.Builder --user --install --force-clean \
+            --install-deps-from=flathub build-dir com.wcpos.main.yml
+
+      - name: ✅ Verify installed app layout
+        run: |
+          flatpak info --user com.wcpos.main
+          # apply_extra runs at install time; confirm the unpacked Electron binary landed in /app/extra.
+          if ! find "$HOME/.local/share/flatpak/app/com.wcpos.main" -name WooCommercePOS -type f | grep -q .; then
+            echo "::error::WooCommercePOS binary missing from the installed app — apply_extra.sh failed"
+            exit 1
+          fi
