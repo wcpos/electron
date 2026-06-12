@@ -1,0 +1,135 @@
+name: Flathub Validate
+
+# Validates the Flathub submission assets the same way Flathub CI does:
+# flatpak-builder-lint on the manifest + AppStream metadata, then a real
+# build + install of the extra-data manifest, which downloads the published
+# .deb and runs apply_extra.sh — an end-to-end test of the install path.
+on:
+  pull_request:
+    paths:
+      - 'flathub/**'
+      - '.github/workflows/flathub-validate.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: 🐧 Install flatpak
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak dbus
+
+      # Ubuntu 24.04 runners restrict unprivileged user namespaces via AppArmor,
+      # which breaks bwrap (used by flatpak to run apply_extra at install time).
+      - name: 🐧 Allow unprivileged user namespaces (bwrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Pre-install the build deps here: host-level `flatpak install` works without
+      # a session bus, whereas flatpak-builder's internal install calls need D-Bus
+      # (hence dbus-run-session on the build step below).
+      - name: 🐧 Install org.flatpak.Builder + runtimes
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub \
+            org.flatpak.Builder \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.electronjs.Electron2.BaseApp//25.08
+
+      # appid-url-not-reachable is tolerated (with a warning): wcpos.com's bot
+      # protection returns 403 to the linter's HTTP client. It must still be
+      # resolved before the Flathub submission — either allow the linter through
+      # the WAF or request a linter exception from Flathub reviewers.
+      - name: 🔍 Lint manifest
+        working-directory: flathub
+        run: |
+          out=$(flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest com.wcpos.main.yml) || true
+          echo "$out"
+          remaining=$(echo "$out" | jq '[.errors[]? | select(. != "appid-url-not-reachable")] | length')
+          if [ "$remaining" -gt 0 ]; then
+            echo "::error::flatpak-builder-lint reported blocking manifest errors"
+            exit 1
+          fi
+          if echo "$out" | jq -e '.errors[]? | select(. == "appid-url-not-reachable")' > /dev/null; then
+            echo "::warning title=appid-url-not-reachable::wcpos.com returns 403 to flatpak-builder-lint (bot protection). Allow the linter through the WAF or request a Flathub linter exception before submitting."
+          fi
+
+      - name: 🔍 Lint AppStream metadata
+        working-directory: flathub
+        run: flatpak run --command=flatpak-builder-lint org.flatpak.Builder appstream com.wcpos.main.metainfo.xml
+
+      # Build WITHOUT --install: flatpak-builder would otherwise run the install
+      # (and apply_extra's bwrap) inside the org.flatpak.Builder sandbox, where
+      # nested user namespaces are blocked. Export to a local OSTree repo instead
+      # and install from the host — the same split Flathub's CI uses.
+      - name: 🏗 Build (exports to local OSTree repo)
+        working-directory: flathub
+        run: |
+          dbus-run-session -- flatpak run org.flatpak.Builder --user --force-clean \
+            --repo=repo --install-deps-from=flathub build-dir com.wcpos.main.yml
+
+      - name: 🏗 Install from local repo (exercises extra-data / apply_extra.sh)
+        working-directory: flathub
+        run: |
+          flatpak remote-add --user --no-gpg-verify local-repo repo
+          flatpak install -y --user local-repo com.wcpos.main
+
+      - name: ✅ Verify installed app layout
+        run: |
+          flatpak info --user com.wcpos.main
+          # apply_extra runs at install time; confirm the unpacked Electron binary landed in /app/extra.
+          if ! find "$HOME/.local/share/flatpak/app/com.wcpos.main" -name WooCommercePOS -type f | grep -q .; then
+            echo "::error::WooCommercePOS binary missing from the installed app — apply_extra.sh failed"
+            exit 1
+          fi
+
+      # StartupWMClass in the .desktop must match the running app's WM_CLASS or the
+      # window won't associate with the launcher. Install the same published .deb the
+      # manifest references, run it under Xvfb, and read the class off the real window.
+      - name: 🔍 Verify StartupWMClass matches the running app
+        run: |
+          sudo apt-get install -y xvfb xdotool x11-utils
+          deb_url=$(grep -oE 'https://[^ ]+\.deb' flathub/com.wcpos.main.yml | head -1)
+          curl -sLo /tmp/wcpos.deb "$deb_url"
+          sudo apt-get install -y /tmp/wcpos.deb
+          Xvfb :99 -screen 0 1280x800x24 &
+          export DISPLAY=:99
+          sleep 2
+          /usr/lib/woocommerce-pos/WooCommercePOS --no-sandbox --disable-gpu > /tmp/wcpos-app.log 2>&1 &
+          expected=$(sed -n 's/^StartupWMClass=//p' flathub/com.wcpos.main.desktop)
+          echo "Expected StartupWMClass: $expected"
+          found=""
+          visible_classes=""
+          for _attempt in $(seq 1 60); do
+            wids=$( (xdotool search --name '.*' 2>/dev/null; xdotool search --class '.*' 2>/dev/null) | sort -u)
+            visible_classes=""
+            for wid in $wids; do
+              wmclass=$(xprop -id "$wid" WM_CLASS 2>/dev/null | sed -n 's/.*= //p')
+              [ -z "$wmclass" ] && continue
+              info=$(xwininfo -id "$wid" 2>/dev/null || true)
+              state=$(echo "$info" | sed -n 's/.*Map State: //p')
+              geom=$(echo "$info" | sed -n 's/^  -geometry //p')
+              echo "window $wid: class=$wmclass state=$state geometry=$geom"
+              if [ "$state" = "IsViewable" ]; then
+                visible_classes="$visible_classes $wmclass"
+                if echo "$wmclass" | grep -q "\"$expected\""; then
+                  found="yes"
+                fi
+              fi
+            done
+            [ -n "$found" ] && break
+            sleep 2
+          done
+          if [ -z "$found" ]; then
+            echo "--- app log ---"; tail -50 /tmp/wcpos-app.log || true
+            echo "::error::No VISIBLE window has WM_CLASS containing \"$expected\". Visible window classes:$visible_classes — set StartupWMClass in com.wcpos.main.desktop to the visible window's class."
+            exit 1
+          fi
+          echo "Visible window WM_CLASS matches StartupWMClass=$expected"

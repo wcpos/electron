@@ -30,11 +30,11 @@
   <url type="help">https://docs.wcpos.com</url>
 
   <!-- Flathub REQUIRES at least one screenshot with a publicly reachable image URL.
-       Replace these placeholders with real hosted screenshots before submitting. -->
+       This is the WordPress.org plugin-directory asset (stable, 2048x1536). -->
   <screenshots>
     <screenshot type="default">
-      <caption>The WCPOS checkout</caption>
-      <image>https://wcpos.com/screenshots/pos-checkout.png</image>
+      <caption>The WCPOS main screen</caption>
+      <image>https://ps.w.org/woocommerce-pos/assets/screenshot-1.png</image>
     </screenshot>
   </screenshots>
 
@@ -42,6 +42,21 @@
 
   <!-- Keep the newest release first. Update each time a new version is published. -->
   <releases>
+    <release version="1.9.4" date="2026-06-12">
+      <description>
+        <p>Windows raw USB printing routed through the print spooler; improved web printer setup with Local Network Access support; receipt tax breakdown fixes; expanded product sorting; updated translations.</p>
+      </description>
+    </release>
+    <release version="1.9.3" date="2026-06-09">
+      <description>
+        <p>Fixed a startup failure after updating from 1.9.2 caused by a missing packaged USB module.</p>
+      </description>
+    </release>
+    <release version="1.9.2" date="2026-06-09">
+      <description>
+        <p>Star Online cloud printing, redesigned printer settings, product sorting controls and server-side PDF receipts.</p>
+      </description>
+    </release>
     <release version="1.9.1" date="2026-05-19">
       <description>
         <p>Updated bundled translations.</p>

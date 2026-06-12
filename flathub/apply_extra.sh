@@ -2,17 +2,18 @@
 # Runs at install time with the working directory set to /app/extra.
 # Unpacks the prebuilt .deb and flattens the app payload into /app/extra so the
 # launcher can exec /app/extra/WooCommercePOS.
+#
+# bsdtar reads the .deb (ar) container and the nested data tarball regardless of
+# compression (.xz/.gz/.zst). GNU ar (binutils) is NOT in the Freedesktop
+# *Platform* runtime that apply_extra runs against — only the Sdk — so `ar x`
+# would fail at install time. This mirrors other extra-data .deb manifests on
+# Flathub (e.g. com.google.Chrome).
 set -e
 
-ar x woocommerce-pos.deb
-rm -f debian-binary control.tar.* woocommerce-pos.deb
+bsdtar -Oxf woocommerce-pos.deb 'data.tar.*' | bsdtar -xf -
+rm -f woocommerce-pos.deb
 
-# data.tar may be .xz, .gz or .zst depending on the dpkg version that built it.
-tar xf data.tar.*
-rm -f data.tar.*
-
-# electron-installer-deb lays the app down under /usr/lib/<package-name>/.
-# Confirm this path against a real .deb (`dpkg -c <file>.deb`) before submitting —
-# the package name is derived from the productName ("woocommerce-pos").
+# electron-installer-deb lays the app down under /usr/lib/<package-name>/
+# (verified against woocommerce-pos_1.9.4_amd64.deb).
 mv usr/lib/woocommerce-pos/* .
 rm -rf usr

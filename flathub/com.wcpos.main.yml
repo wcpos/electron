@@ -10,10 +10,10 @@
 # Electron Forge. See flathub/README.md for how to finalise and submit it.
 app-id: com.wcpos.main
 runtime: org.freedesktop.Platform
-runtime-version: '24.08' # TODO: confirm latest non-EOL Freedesktop runtime at submission time
+runtime-version: '25.08' # latest Freedesktop runtime branch (verified 2026-06: BaseApp branch/25.08 exists)
 sdk: org.freedesktop.Sdk
 base: org.electronjs.Electron2.BaseApp
-base-version: '24.08' # must match runtime-version
+base-version: '25.08' # must match runtime-version
 command: wcpos
 separate-locales: false
 
@@ -21,7 +21,8 @@ separate-locales: false
 finish-args:
   - --share=ipc
   - --share=network # TCP / ESC-POS network printers + sync
-  - --socket=x11
+  # No plain --socket=x11: flatpak-builder-lint rejects x11 combined with
+  # wayland/fallback-x11; fallback-x11 grants X11 only when Wayland is absent.
   - --socket=fallback-x11
   - --socket=wayland
   - --socket=pulseaudio
@@ -41,14 +42,14 @@ modules:
       - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/com.wcpos.main.png
     sources:
       # The prebuilt .deb (package name is woocommerce-pos), downloaded on the user's
-      # machine at install time. sha256/size MUST be regenerated against the real
-      # published artifact — flatpak-external-data-checker (x-checker-data) automates
-      # this per release.
+      # machine at install time. sha256/size are regenerated against the real
+      # published artifact on every release — flatpak-external-data-checker
+      # (x-checker-data) automates this per release.
       - type: extra-data
         filename: woocommerce-pos.deb
-        url: https://github.com/wcpos/electron/releases/download/v1.9.1/woocommerce-pos_1.9.1_amd64.deb # TODO: confirm exact asset name
-        sha256: 0000000000000000000000000000000000000000000000000000000000000000 # TODO
-        size: 0 # TODO: bytes of the .deb
+        url: https://github.com/wcpos/electron/releases/download/v1.9.4/woocommerce-pos_1.9.4_amd64.deb
+        sha256: 2b1c74dbb760a85dc9838f47657c36b74136aa5125f4cf8a093b0c45f8024b01
+        size: 95721396
         x-checker-data:
           type: html
           url: https://github.com/wcpos/electron/releases/latest

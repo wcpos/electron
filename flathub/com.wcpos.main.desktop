@@ -10,5 +10,7 @@ Categories=Office;Finance;
 MimeType=x-scheme-handler/wcpos;
 StartupNotify=true
 # Must match the Electron app's WM class so the window maps to this .desktop file.
-# Confirm with `xprop WM_CLASS` on a running build; usually the productName (WCPOS).
-StartupWMClass=WCPOS
+# Measured via xprop under Xvfb in CI (flathub-validate.yml): the app's windows
+# report classes "wcpos" (app-name derived) and "WooCommercePOS" (binary derived);
+# the visible main window uses "wcpos".
+StartupWMClass=wcpos

@@ -172,9 +172,9 @@ const config: ForgeConfig = {
 								// Electron BaseApp + Freedesktop runtime is the recommended pairing for Electron.
 								// NOTE: confirm these are still the latest non-EOL branches at release time.
 								base: 'org.electronjs.Electron2.BaseApp',
-								baseVersion: '24.08',
+								baseVersion: '25.08',
 								runtime: 'org.freedesktop.Platform',
-								runtimeVersion: '24.08',
+								runtimeVersion: '25.08',
 								sdk: 'org.freedesktop.Sdk',
 								icon: path.resolve(__dirname, 'icons/icon.png'),
 								categories: ['Office', 'Finance'],
@@ -185,7 +185,8 @@ const config: ForgeConfig = {
 								finishArgs: [
 									'--share=ipc',
 									'--share=network',
-									'--socket=x11',
+									// No plain --socket=x11: Flathub's linter rejects x11 combined with
+									// wayland/fallback-x11; fallback-x11 covers X11-only sessions.
 									'--socket=fallback-x11',
 									'--socket=wayland',
 									'--socket=pulseaudio',
