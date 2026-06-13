@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.5] - 2026-06-13
+
+### Added
+- Serial printing path for OS-paired Bluetooth Classic printers, with `serialport` transitive dependencies packaged into the app
+
+### Fixed
+- Use a single persistent Bluetooth chooser reply listener per window to avoid duplicate device prompts
+- Guard against ghost print jobs firing after a print timeout
+
+### Changed
+- Linux `.deb`/`.rpm` publishing is decoupled from Flatpak, so Linux packages ship even when the Flatpak maker fails (Flatpak is now opt-in via `WCPOS_FLATPAK=1`)
+- Flathub submission assets finalized against the v1.9.4 `.deb`, with a `Flathub Validate` CI workflow proving the install path
+- Includes the [WCPOS app v1.9.4](https://github.com/wcpos/monorepo/releases/tag/v1.9.4) updates — redesigned Bluetooth printer setup, serial printing, Windows print-spooler routing, USB printer flow improvements, and network print fixes
+- Updated bundled translations to 2026.6.4
+
+### Platforms
+- macOS Intel, macOS Apple Silicon, Windows, and Linux (`.deb`/`.rpm`) assets are published in this release
+- Flatpak/Flathub remains a separate, in-progress submission
+
 ## [1.9.4] - 2026-06-12
 
 ### Fixed
