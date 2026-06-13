@@ -16,7 +16,7 @@ type LocaleInfo = {
 };
 
 const store = new Store<Record<string, TranslationRecord>>();
-const TRANSLATION_VERSION = '2026.6.2';
+const TRANSLATION_VERSION = '2026.6.3';
 const TRANSLATION_CACHE_NAMESPACE = 'translations';
 const TRANSLATION_CACHE_KEY_PATTERN = /^translations:\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
 const LEGACY_TRANSLATION_CACHE_KEY_PATTERN = /^\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
