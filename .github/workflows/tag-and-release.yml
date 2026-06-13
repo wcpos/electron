@@ -143,7 +143,10 @@ jobs:
 
   publish-windows:
     needs: build-expo
-    runs-on: windows-latest
+    # Pin to windows-2022 (VS 2022 / v17). The windows-latest image rolled to
+    # Visual Studio 18, which the bundled @electron/node-gyp cannot classify
+    # (invalid versionYear), breaking native module rebuilds (@serialport/bindings-cpp).
+    runs-on: windows-2022
     if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
 
     steps:
