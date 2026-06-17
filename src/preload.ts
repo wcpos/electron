@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 import {
+	DYNAMIC_ON_PATTERNS,
+	INVOKE_CHANNELS,
+	ON_CHANNELS,
+	RXDB_IPC_CHANNEL_PREFIX,
+	SEND_CHANNELS,
+} from '@wcpos/printer/ipc-channels';
+
+import {
 	deserializeRxdbIpcMessage,
 	hasBulkWriteAttachmentBlobs,
 	hasGetAttachmentDataBase64Return,
@@ -19,11 +27,9 @@ contextBridge.exposeInMainWorld('electron', {
 	version: ipcRenderer.sendSync('getAppVersionSync'),
 });
 
-// Must match IPC_RENDERER_KEY_PREFIX from 'rxdb/plugins/electron' used in src/main/rxdb-storage.ts
-const RXDB_IPC_CHANNEL_PREFIX = 'rxdb-ipc-renderer-storage|';
 const isRxdbStorageChannel = (channel: string) => channel.startsWith(RXDB_IPC_CHANNEL_PREFIX);
 
-const isAllowedChannel = (channel: string, validChannels: (string | RegExp)[]) =>
+const isAllowedChannel = (channel: string, validChannels: readonly (string | RegExp)[]) =>
 	validChannels.some((matcher) =>
 		typeof matcher === 'string' ? matcher === channel : matcher.test(channel)
 	);
@@ -86,29 +92,13 @@ function forgetWrappedRxdbListener(
 const ipc = {
 	render: {
 		// From render to main.
-		send: [
-			'clearData',
-			'print-external-url',
-			'open-external-url',
-			'bluetooth-device-selected',
-		] as string[],
+		send: SEND_CHANNELS,
 		// From main to render.
-		on: ['system-resume', 'bluetooth-devices'] as string[], // System events from main process
+		on: ON_CHANNELS, // System events from main process
 		// From render to main and back again.
-		invoke: [
-			'sqlite',
-			'axios',
-			'rxStorage',
-			'auth:prompt',
-			'print-raw-tcp',
-			'printer-discovery',
-			'usb-discovery',
-			'print-raw-usb',
-			'serial-discovery',
-			'print-raw-serial',
-		] as string[],
+		invoke: INVOKE_CHANNELS,
 		// From main to render, once
-		once: [] as string[], // We'll handle dynamic channels separately
+		once: [] as const, // We'll handle dynamic channels separately
 	},
 };
 
@@ -117,7 +107,7 @@ const ipc = {
  */
 contextBridge.exposeInMainWorld('ipcRenderer', {
 	send(channel: string, args: unknown) {
-		const validChannels = ipc.render.send;
+		const validChannels: readonly string[] = ipc.render.send;
 		if (validChannels.includes(channel)) {
 			ipcRenderer.send(channel, args);
 		} else {
@@ -150,7 +140,7 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 			};
 		}
 
-		const validChannels = [/^onBeforePrint-/, /^onAfterPrint-/, /^onPrintError-/, ...ipc.render.on];
+		const validChannels = [...DYNAMIC_ON_PATTERNS, ...ipc.render.on];
 		if (isAllowedChannel(channel, validChannels)) {
 			const subscription = (_event: IpcRendererEvent, ...args: unknown[]) => func(...args);
 			ipcRenderer.on(channel, subscription);
@@ -190,19 +180,14 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 		throw Error(`Channel ${channel} is not allowed`);
 	},
 	invoke(channel: string, args: unknown) {
-		const validChannels = ipc.render.invoke;
+		const validChannels: readonly string[] = ipc.render.invoke;
 		if (validChannels.includes(channel)) {
 			return ipcRenderer.invoke(channel, args);
 		}
 		return Promise.reject(new Error(`Channel ${channel} is not allowed`));
 	},
 	once(channel: string, func: (...args: unknown[]) => void) {
-		const validChannels = [
-			/^onBeforePrint-/,
-			/^onAfterPrint-/,
-			/^onPrintError-/,
-			...ipc.render.once,
-		];
+		const validChannels = [...DYNAMIC_ON_PATTERNS, ...ipc.render.once];
 		if (isAllowedChannel(channel, validChannels)) {
 			ipcRenderer.once(channel, (_event: IpcRendererEvent, ...args: unknown[]) => func(...args));
 		} else {

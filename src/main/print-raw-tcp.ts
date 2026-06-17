@@ -1,18 +1,13 @@
 import * as net from 'net';
 
-import { ipcMain } from 'electron';
-
+import { handleIpc } from './ipc';
 import { logger } from './log';
 
-ipcMain.handle('print-raw-tcp', async (_event, args: unknown) => {
+handleIpc('print-raw-tcp', async (_event, args) => {
 	if (!args || typeof args !== 'object') {
 		throw new Error('Invalid arguments: expected an object');
 	}
-	const { host, port, data } = args as {
-		host: unknown;
-		port: unknown;
-		data: unknown;
-	};
+	const { host, port, data } = args;
 
 	if (!host || typeof host !== 'string') {
 		throw new Error('Invalid host: must be a non-empty string');
@@ -24,7 +19,7 @@ ipcMain.handle('print-raw-tcp', async (_event, args: unknown) => {
 		throw new Error('Invalid data: must be an array of byte values (0-255)');
 	}
 
-	const buffer = Buffer.from(data as number[]);
+	const buffer = Buffer.from(data);
 
 	logger.info(`Sending ${buffer.length} bytes to ${host}:${port}`);
 

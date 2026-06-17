@@ -1,17 +1,14 @@
-import { ipcMain } from 'electron';
 import { type Device, type Endpoint, getDeviceList, type OutEndpoint, usb } from 'usb';
 
+import type { UsbPrinterInfo } from '@wcpos/printer/ipc-channels';
+
+import { handleIpc } from './ipc';
 import { logger } from './log';
 import { listSpoolerPrinters, printRawToSpooler, WINSPOOL_PREFIX } from './winspool-printer';
 
 const USB_PRINTER_CLASS = 0x07;
 
-interface UsbPrinterInfo {
-	id: string; // `usb:<vid>:<pid>:<bus>:<address>` — stored as the profile address
-	name: string;
-	vendorId?: number;
-	productId?: number;
-}
+export type { UsbPrinterInfo } from '@wcpos/printer/ipc-channels';
 
 function deviceKey(d: Device): string {
 	const { idVendor, idProduct } = d.deviceDescriptor;
@@ -30,7 +27,7 @@ function isPrinter(d: Device): boolean {
 	}
 }
 
-ipcMain.handle('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
+handleIpc('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
 	// Windows: libusb can enumerate USB printers but cannot claim them — plug-and-play
 	// binds usbprint.sys (or a vendor driver) to every USB printer, and libusb I/O
 	// requires a WinUSB-class driver. Listing libusb devices here would offer printers
@@ -49,7 +46,7 @@ ipcMain.handle('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
 		}));
 });
 
-ipcMain.handle(
+handleIpc(
 	'print-raw-usb',
 	async (_event, args: { device: string; data: number[] }): Promise<void> => {
 		if (!args || typeof args.device !== 'string') {

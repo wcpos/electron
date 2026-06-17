@@ -1,14 +1,13 @@
-import { ipcMain } from 'electron';
 import { SerialPort } from 'serialport';
 
+import type { SerialPrinterInfo } from '@wcpos/printer/ipc-channels';
+
+import { handleIpc } from './ipc';
 import { logger } from './log';
 
 export const SERIAL_PREFIX = 'serial:';
 
-export interface SerialPrinterInfo {
-	id: string; // `serial:<path>` — stored as the profile address
-	name: string;
-}
+export type { SerialPrinterInfo } from '@wcpos/printer/ipc-channels';
 
 // macOS ships virtual ports that can never be a printer; /dev/tty.* are the
 // blocking call-in devices — we only offer the call-out /dev/cu.* counterparts.
@@ -38,7 +37,7 @@ export function filterSerialPorts(ports: { path: string }[]): SerialPrinterInfo[
 // Exported as a mutable object so tests can override timeoutMs without a module reload.
 export const printConfig = { timeoutMs: 20_000 }; // renderer gives up at 30s — fail first with a real error
 
-ipcMain.handle('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
+handleIpc('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
 	// Windows: OS-paired Bluetooth Classic printers are enumerated and printed via the
 	// spooler (winspool path). Offering serial ports here would list COM ports that are
 	// already covered, leading to duplicate entries or permission conflicts.
@@ -54,7 +53,7 @@ ipcMain.handle('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
 	}
 });
 
-ipcMain.handle(
+handleIpc(
 	'print-raw-serial',
 	async (_event, args: { device: string; data: number[] }): Promise<void> => {
 		if (!args || typeof args.device !== 'string') {

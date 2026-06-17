@@ -36,6 +36,7 @@
 		"test:serial-printer": "ts-node src/main/serial-printer.test.ts"
 	},
 	"dependencies": {
+		"@wcpos/printer": "workspace:*",
 		"@sentry/electron": "^7.13.0",
 		"axios": "^1.17.0",
 		"better-sqlite3": "12.10.0",
