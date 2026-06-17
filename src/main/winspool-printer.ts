@@ -4,6 +4,11 @@ import { unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import {
+	buildWinspoolKey,
+	WINSPOOL_PREFIX as DEVICE_KEY_WINSPOOL_PREFIX,
+} from '@wcpos/printer/transport/device-key';
+
 import { logger } from './log';
 
 import type { WebContents } from 'electron';
@@ -19,7 +24,7 @@ import type { WebContents } from 'electron';
  * to the device unmodified. This is the same approach QZ Tray uses.
  */
 
-export const WINSPOOL_PREFIX = 'winspool:';
+export const WINSPOOL_PREFIX = DEVICE_KEY_WINSPOOL_PREFIX;
 
 export interface SpoolerPrinterInfo {
 	id: string; // `winspool:<queue name>` — stored as the profile address
@@ -42,7 +47,7 @@ export function filterSpoolerPrinters(
 		.filter((p) => !VIRTUAL_PRINTER_NAMES.has(p.name))
 		.map((p) => ({
 			// OpenPrinterW needs the queue name, not the display name — the id must carry `name`.
-			id: `${WINSPOOL_PREFIX}${p.name}`,
+			id: buildWinspoolKey(p.name),
 			name: p.displayName || p.name,
 		}));
 }
