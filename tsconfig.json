@@ -20,7 +20,8 @@
   "include": ["src/**/*"],
   "ts-node": {
     "moduleTypes": {
-      "../../packages/printer/src/transport/device-key.ts": "cjs"
+      "../../packages/printer/src/transport/device-key.ts": "cjs",
+      "packages/printer/src/transport/device-key.ts": "cjs"
     }
   }
 }
