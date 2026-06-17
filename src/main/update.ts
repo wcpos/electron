@@ -12,7 +12,6 @@ import { logger } from './log';
 import { ProgressBar } from './progress-bar';
 import { t } from './translations';
 import { createDir, isDevelopment } from './util';
-import { getMainWindow } from './window';
 
 interface Asset {
 	url: string;
@@ -37,19 +36,29 @@ const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
-export class AutoUpdater {
+export interface UpdaterHandle {
+	init: () => void;
+	manualCheckForUpdates: (menuItem: MenuItem) => Promise<void>;
+	setMainWindow: (mainWindow: BrowserWindow) => void;
+}
+
+export class AutoUpdater implements UpdaterHandle {
 	private mainWindow: BrowserWindow;
 	private targetPath: string;
 	private tempDirPath: string;
 	private readonly updateUrl = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
 
-	constructor() {
+	constructor(mainWindow: BrowserWindow) {
 		this.targetPath = '';
-		this.mainWindow = getMainWindow();
+		this.mainWindow = mainWindow;
 
 		const tempDirPath = path.join(app.getPath('temp'), 'NTWRK');
 		createDir(tempDirPath);
 		this.tempDirPath = tempDirPath;
+	}
+
+	public setMainWindow(mainWindow: BrowserWindow): void {
+		this.mainWindow = mainWindow;
 	}
 
 	public init() {
@@ -234,5 +243,24 @@ export class AutoUpdater {
 	}
 }
 
-// Usage
-export const updater = new AutoUpdater();
+let activeUpdater: AutoUpdater | null = null;
+
+export const setUpdater = (nextUpdater: AutoUpdater): AutoUpdater => {
+	activeUpdater = nextUpdater;
+	return nextUpdater;
+};
+
+const getUpdater = (): AutoUpdater => {
+	if (!activeUpdater) {
+		throw new Error('AutoUpdater has not been configured');
+	}
+
+	return activeUpdater;
+};
+
+// Stable menu-facing handle. It resolves to the boot-configured updater at use time.
+export const updater: UpdaterHandle = {
+	init: () => getUpdater().init(),
+	manualCheckForUpdates: (menuItem: MenuItem) => getUpdater().manualCheckForUpdates(menuItem),
+	setMainWindow: (mainWindow: BrowserWindow) => getUpdater().setMainWindow(mainWindow),
+};
