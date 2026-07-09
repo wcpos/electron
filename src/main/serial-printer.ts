@@ -1,14 +1,27 @@
 import { ipcMain } from 'electron';
 import { SerialPort } from 'serialport';
 
+import {
+	buildSerialKey,
+	connectionTypeForTarget,
+	parseTarget,
+	SERIAL_PREFIX,
+} from '@wcpos/printer/transport/device-key';
+
 import { logger } from './log';
 import { type Delivery, sendRawPrint } from './raw-print';
 
-export const SERIAL_PREFIX = 'serial:';
+export { SERIAL_PREFIX };
 
 export interface SerialPrinterInfo {
 	id: string; // `serial:<path>` — stored as the profile address
 	name: string;
+}
+
+interface DiscoveredSerialPrinter extends SerialPrinterInfo {
+	connectionType: 'bluetooth';
+	address: string;
+	vendor: 'generic';
 }
 
 // macOS ships virtual ports that can never be a printer; /dev/tty.* are the
@@ -30,10 +43,23 @@ export function filterSerialPorts(ports: { path: string }[]): SerialPrinterInfo[
 			const name =
 				stripped === '' || /^\d+$/.test(stripped) ? basename : stripped.replace(/[-_]/g, ' ');
 			return {
-				id: `${SERIAL_PREFIX}${p.path}`,
+				id: buildSerialKey(p.path),
 				name,
 			};
 		});
+}
+
+function toDiscoveredSerialPrinter(port: SerialPrinterInfo): DiscoveredSerialPrinter {
+	const connectionType = connectionTypeForTarget(port.id);
+	if (connectionType !== 'bluetooth') {
+		throw new Error(`Unsupported serial discovery device key: ${port.id}`);
+	}
+	return {
+		...port,
+		connectionType,
+		address: port.id,
+		vendor: 'generic',
+	};
 }
 
 // Exported as a mutable object so tests can override timeoutMs without a module reload.
@@ -96,7 +122,7 @@ function createSerialDelivery(portPath: string): Delivery {
 	};
 }
 
-ipcMain.handle('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
+ipcMain.handle('serial-discovery', async (): Promise<DiscoveredSerialPrinter[]> => {
 	// Windows: OS-paired Bluetooth Classic printers are enumerated and printed via the
 	// spooler (winspool path). Offering serial ports here would list COM ports that are
 	// already covered, leading to duplicate entries or permission conflicts.
@@ -105,7 +131,7 @@ ipcMain.handle('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
 	}
 	try {
 		const ports = await SerialPort.list();
-		return filterSerialPorts(ports);
+		return filterSerialPorts(ports).map(toDiscoveredSerialPrinter);
 	} catch (err) {
 		logger.error(`serial-discovery failed: ${err instanceof Error ? err.message : String(err)}`);
 		throw err;
@@ -118,14 +144,10 @@ ipcMain.handle(
 		if (!args || typeof args.device !== 'string') {
 			throw new Error('Invalid arguments: expected { device: string, data: number[] }');
 		}
-		if (!args.device.startsWith(SERIAL_PREFIX)) {
+		const target = parseTarget(args.device);
+		if (target.kind !== 'serial') {
 			throw new Error(`Invalid serial device key: ${args.device}`);
 		}
-
-		const portPath = args.device.slice(SERIAL_PREFIX.length);
-		if (portPath === '') {
-			throw new Error(`Invalid serial device key: ${args.device}`);
-		}
-		return sendRawPrint(args, createSerialDelivery(portPath));
+		return sendRawPrint(args, createSerialDelivery(target.path));
 	}
 );

@@ -1,0 +1,21 @@
+{
+	"name": "@wcpos/printer",
+	"version": "1.9.1",
+	"description": "Printer encoding and transport for WooCommerce POS",
+	"author": "kilbot <paul@kilbot.com>",
+	"license": "MIT",
+	"main": "./src/index.ts",
+	"exports": {
+		"./transport/device-key": "./src/transport/device-key.ts"
+	},
+	"typesVersions": {
+		"*": {
+			"transport/device-key": [
+				"src/transport/device-key.ts"
+			]
+		}
+	},
+	"files": [
+		"src/**"
+	]
+}

@@ -1,23 +1,50 @@
 import { ipcMain } from 'electron';
 import { type Device, type Endpoint, getDeviceList, type OutEndpoint, usb } from 'usb';
 
+import {
+	buildUsbKey,
+	connectionTypeForTarget,
+	parseTarget,
+} from '@wcpos/printer/transport/device-key';
+
+import { logger } from './log';
 import { type Delivery, rawPrintBufferFromData, sendRawBytes } from './raw-print';
-import { listSpoolerPrinters, printRawToSpooler, WINSPOOL_PREFIX } from './winspool-printer';
+import { listSpoolerPrinters, printRawToSpooler } from './winspool-printer';
 
 const USB_PRINTER_CLASS = 0x07;
 const USB_PRINT_TIMEOUT_MS = 20_000;
 type UsbInterface = NonNullable<Device['interfaces']>[number];
 
 interface UsbPrinterInfo {
-	id: string; // `usb:<vid>:<pid>:<bus>:<address>` — stored as the profile address
+	id: string; // `usb:<vid>:<pid>:<bus>:<address>` or `winspool:<queue>` profile address
 	name: string;
-	vendorId?: number;
-	productId?: number;
+	connectionType: 'usb' | 'system';
+	address: string;
+	vendor: 'generic';
 }
 
 function deviceKey(d: Device): string {
 	const { idVendor, idProduct } = d.deviceDescriptor;
-	return `usb:${idVendor}:${idProduct}:${d.busNumber}:${d.deviceAddress}`;
+	return buildUsbKey({
+		vid: idVendor,
+		pid: idProduct,
+		bus: d.busNumber,
+		address: d.deviceAddress,
+	});
+}
+
+function discoveredPrinter(id: string, name: string): UsbPrinterInfo {
+	const connectionType = connectionTypeForTarget(id);
+	if (connectionType !== 'usb' && connectionType !== 'system') {
+		throw new Error(`Unsupported USB discovery device key: ${id}`);
+	}
+	return {
+		id,
+		name,
+		connectionType,
+		address: id,
+		vendor: 'generic',
+	};
 }
 
 function isPrinter(d: Device): boolean {
@@ -102,16 +129,15 @@ ipcMain.handle('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
 	// that can never print, so list the installed spooler queues instead; print-raw-usb
 	// routes their `winspool:` keys through the spooler RAW datatype.
 	if (process.platform === 'win32') {
-		return listSpoolerPrinters(event.sender);
+		const printers = await listSpoolerPrinters(event.sender);
+		return printers.map((p) => discoveredPrinter(p.id, p.name));
 	}
 	return getDeviceList()
 		.filter(isPrinter)
-		.map((d) => ({
-			id: deviceKey(d),
-			name: `USB printer (${deviceKey(d)})`,
-			vendorId: d.deviceDescriptor.idVendor,
-			productId: d.deviceDescriptor.idProduct,
-		}));
+		.map((d) => {
+			const id = deviceKey(d);
+			return discoveredPrinter(id, `USB printer (${id})`);
+		});
 });
 
 ipcMain.handle(
@@ -122,17 +148,18 @@ ipcMain.handle(
 		}
 		const bytes = rawPrintBufferFromData(args.data);
 
-		if (args.device.startsWith(WINSPOOL_PREFIX)) {
+		const target = parseTarget(args.device);
+		if (target.kind === 'winspool') {
 			if (process.platform !== 'win32') {
 				throw new Error('Spooler device keys are only valid on Windows');
 			}
-			const printerName = args.device.slice(WINSPOOL_PREFIX.length);
+			const printerName = target.queue;
 			await printRawToSpooler(printerName, bytes);
+			logger.info(`print-raw-usb spooled ${bytes.length} bytes to "${printerName}"`);
 			return;
 		}
 
-		const match = /^usb:(\d+):(\d+):(\d+):(\d+)$/.exec(args.device);
-		if (!match) throw new Error(`Invalid USB device key: ${args.device}`);
+		if (target.kind !== 'usb') throw new Error(`Invalid USB device key: ${args.device}`);
 
 		if (process.platform === 'win32') {
 			// A `usb:` key saved by an older version can never work here (usbprint.sys owns
@@ -142,7 +169,7 @@ ipcMain.handle(
 			);
 		}
 
-		const [vid, pid, busNumber, deviceAddress] = match.slice(1).map(Number);
+		const { vid, pid, bus: busNumber, address: deviceAddress } = target;
 
 		const device = getDeviceList().find(
 			(d) =>
