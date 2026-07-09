@@ -1,3 +1,5 @@
+import path from 'path';
+
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 import {
@@ -15,16 +17,23 @@ import {
 	serializeRxdbIpcMessage,
 } from './rxdb-ipc-attachments';
 
+// Keep in sync with src/main/window.ts.
+const APP_VERSION_ARG_PREFIX = '--wcpos-app-version=';
+const versionArg = process.argv.find((arg) => arg.startsWith(APP_VERSION_ARG_PREFIX));
+const version = versionArg ? versionArg.slice(APP_VERSION_ARG_PREFIX.length) : '0.0.0';
+
+// No trailing slash: the Expo bundle puts the slash at the start of split asset paths.
+const basePath = `file://${path.join(process.resourcesPath, 'dist')}`;
+
 /**
  * Expose app info to the renderer process.
  *
- * @NOTE - These are synchronous calls, they will block the thread, but they're quick calls.
  * basePath is needed for the bundle splitting to work correctly.
  * version is needed for app-info utility to report correct electron version.
  */
 contextBridge.exposeInMainWorld('electron', {
-	basePath: ipcRenderer.sendSync('getBasePathSync'),
-	version: ipcRenderer.sendSync('getAppVersionSync'),
+	basePath,
+	version,
 });
 
 const isRxdbStorageChannel = (channel: string) => channel.startsWith(RXDB_IPC_CHANNEL_PREFIX);

@@ -1,18 +1,45 @@
 import { type Device, type Endpoint, getDeviceList, type OutEndpoint, usb } from 'usb';
 
 import type { UsbPrinterInfo } from '@wcpos/printer/ipc-channels';
+import {
+	buildUsbKey,
+	connectionTypeForTarget,
+	parseTarget,
+} from '@wcpos/printer/transport/device-key';
 
 import { handleIpc } from './ipc';
 import { logger } from './log';
-import { listSpoolerPrinters, printRawToSpooler, WINSPOOL_PREFIX } from './winspool-printer';
+import { type Delivery, rawPrintBufferFromData, sendRawBytes } from './raw-print';
+import { listSpoolerPrinters, printRawToSpooler } from './winspool-printer';
 
 const USB_PRINTER_CLASS = 0x07;
+const USB_PRINT_TIMEOUT_MS = 20_000;
+type UsbInterface = NonNullable<Device['interfaces']>[number];
 
 export type { UsbPrinterInfo } from '@wcpos/printer/ipc-channels';
 
 function deviceKey(d: Device): string {
 	const { idVendor, idProduct } = d.deviceDescriptor;
-	return `usb:${idVendor}:${idProduct}:${d.busNumber}:${d.deviceAddress}`;
+	return buildUsbKey({
+		vid: idVendor,
+		pid: idProduct,
+		bus: d.busNumber,
+		address: d.deviceAddress,
+	});
+}
+
+function discoveredPrinter(id: string, name: string): UsbPrinterInfo {
+	const connectionType = connectionTypeForTarget(id);
+	if (connectionType !== 'usb' && connectionType !== 'system') {
+		throw new Error(`Unsupported USB discovery device key: ${id}`);
+	}
+	return {
+		id,
+		name,
+		connectionType,
+		address: id,
+		vendor: 'generic',
+	};
 }
 
 function isPrinter(d: Device): boolean {
@@ -27,6 +54,69 @@ function isPrinter(d: Device): boolean {
 	}
 }
 
+function createUsbDelivery(deviceKey: string, device: Device): Delivery {
+	let deviceOpened = false;
+	let iface: UsbInterface | undefined;
+	let ifaceClaimed = false;
+
+	const cleanup = async (): Promise<void> => {
+		if (iface && ifaceClaimed) {
+			await new Promise<void>((resolve) => {
+				try {
+					iface?.release(true, () => resolve());
+				} catch {
+					resolve();
+				}
+			});
+			ifaceClaimed = false;
+		}
+		if (deviceOpened) {
+			device.close();
+			deviceOpened = false;
+		}
+	};
+
+	return {
+		label: deviceKey,
+		operation: 'print-raw-usb',
+		timeoutMs: USB_PRINT_TIMEOUT_MS,
+		timeoutMessage: `USB print to ${deviceKey} timed out after ${USB_PRINT_TIMEOUT_MS}ms`,
+		successMessage: (bytes) => `print-raw-usb sent ${bytes} bytes to ${deviceKey}`,
+		cleanup,
+		async send(bytes, ctx): Promise<void> {
+			device.open();
+			deviceOpened = true;
+
+			if (ctx.settled()) return;
+
+			// Select the printer-class interface — NOT blindly interfaces[0]. Composite devices and
+			// printers with multiple interfaces can put the printer class elsewhere; claiming the wrong
+			// one yields no OUT endpoint or a failed claim.
+			iface = device.interfaces?.find((i) => i.descriptor.bInterfaceClass === USB_PRINTER_CLASS);
+			if (!iface) throw new Error('USB printer has no printer-class (0x07) interface');
+
+			// Kernel-driver detach exists for Linux, where usblp claims printer-class
+			// interfaces; both calls throw LIBUSB_ERROR_NOT_SUPPORTED on other platforms.
+			if (process.platform === 'linux' && iface.isKernelDriverActive()) {
+				iface.detachKernelDriver();
+			}
+			iface.claim();
+			ifaceClaimed = true;
+
+			if (ctx.settled()) return;
+
+			const out = iface.endpoints.find(
+				(e: Endpoint) => e.direction === 'out' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
+			) as OutEndpoint | undefined;
+			if (!out) throw new Error('USB printer interface has no bulk OUT endpoint');
+
+			await new Promise<void>((resolve, reject) => {
+				out.transfer(bytes, (err) => (err ? reject(err) : resolve()));
+			});
+		},
+	};
+}
+
 handleIpc('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
 	// Windows: libusb can enumerate USB printers but cannot claim them — plug-and-play
 	// binds usbprint.sys (or a vendor driver) to every USB printer, and libusb I/O
@@ -34,16 +124,15 @@ handleIpc('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
 	// that can never print, so list the installed spooler queues instead; print-raw-usb
 	// routes their `winspool:` keys through the spooler RAW datatype.
 	if (process.platform === 'win32') {
-		return listSpoolerPrinters(event.sender);
+		const printers = await listSpoolerPrinters(event.sender);
+		return printers.map((p) => discoveredPrinter(p.id, p.name));
 	}
 	return getDeviceList()
 		.filter(isPrinter)
-		.map((d) => ({
-			id: deviceKey(d),
-			name: `USB printer (${deviceKey(d)})`,
-			vendorId: d.deviceDescriptor.idVendor,
-			productId: d.deviceDescriptor.idProduct,
-		}));
+		.map((d) => {
+			const id = deviceKey(d);
+			return discoveredPrinter(id, `USB printer (${id})`);
+		});
 });
 
 handleIpc(
@@ -52,25 +141,20 @@ handleIpc(
 		if (!args || typeof args.device !== 'string') {
 			throw new Error('Invalid arguments: expected { device: string, data: number[] }');
 		}
-		if (
-			!Array.isArray(args.data) ||
-			!args.data.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)
-		) {
-			throw new Error('Invalid data: must be an array of byte values (0-255)');
-		}
+		const bytes = rawPrintBufferFromData(args.data);
 
-		if (args.device.startsWith(WINSPOOL_PREFIX)) {
+		const target = parseTarget(args.device);
+		if (target.kind === 'winspool') {
 			if (process.platform !== 'win32') {
 				throw new Error('Spooler device keys are only valid on Windows');
 			}
-			const printerName = args.device.slice(WINSPOOL_PREFIX.length);
-			await printRawToSpooler(printerName, Buffer.from(args.data));
-			logger.info(`print-raw-usb spooled ${args.data.length} bytes to "${printerName}"`);
+			const printerName = target.queue;
+			await printRawToSpooler(printerName, bytes);
+			logger.info(`print-raw-usb spooled ${bytes.length} bytes to "${printerName}"`);
 			return;
 		}
 
-		const match = /^usb:(\d+):(\d+):(\d+):(\d+)$/.exec(args.device);
-		if (!match) throw new Error(`Invalid USB device key: ${args.device}`);
+		if (target.kind !== 'usb') throw new Error(`Invalid USB device key: ${args.device}`);
 
 		if (process.platform === 'win32') {
 			// A `usb:` key saved by an older version can never work here (usbprint.sys owns
@@ -80,7 +164,7 @@ handleIpc(
 			);
 		}
 
-		const [vid, pid, busNumber, deviceAddress] = match.slice(1).map(Number);
+		const { vid, pid, bus: busNumber, address: deviceAddress } = target;
 
 		const device = getDeviceList().find(
 			(d) =>
@@ -91,39 +175,6 @@ handleIpc(
 		);
 		if (!device) throw new Error(`USB printer ${args.device} not found`);
 
-		device.open();
-		// Select the printer-class interface — NOT blindly interfaces[0]. Composite devices and
-		// printers with multiple interfaces can put the printer class elsewhere; claiming the wrong
-		// one yields no OUT endpoint or a failed claim.
-		const iface = device.interfaces?.find(
-			(i) => i.descriptor.bInterfaceClass === USB_PRINTER_CLASS
-		);
-		if (!iface) {
-			device.close();
-			throw new Error('USB printer has no printer-class (0x07) interface');
-		}
-
-		try {
-			// Kernel-driver detach exists for Linux, where usblp claims printer-class
-			// interfaces; both calls throw LIBUSB_ERROR_NOT_SUPPORTED on other platforms.
-			if (process.platform === 'linux' && iface.isKernelDriverActive()) {
-				iface.detachKernelDriver();
-			}
-			iface.claim();
-
-			const out = iface.endpoints.find(
-				(e: Endpoint) => e.direction === 'out' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
-			) as OutEndpoint | undefined;
-			if (!out) throw new Error('USB printer interface has no bulk OUT endpoint');
-
-			await new Promise<void>((resolve, reject) => {
-				out.transfer(Buffer.from(args.data), (err) => (err ? reject(err) : resolve()));
-			});
-			logger.info(`print-raw-usb sent ${args.data.length} bytes to ${args.device}`);
-		} finally {
-			// Always release + close, even if claim/transfer threw.
-			await new Promise<void>((resolve) => iface.release(true, () => resolve()));
-			device.close();
-		}
+		await sendRawBytes(bytes, createUsbDelivery(args.device, device));
 	}
 );

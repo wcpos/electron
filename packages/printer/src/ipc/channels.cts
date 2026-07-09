@@ -1,0 +1,143 @@
+/**
+ * Shared Electron IPC channel registry.
+ *
+ * This module is intentionally electron-free: it contains only const string literals and
+ * structural request/response types so both the Electron preload/main process and renderer
+ * packages can import it without pulling native Electron dependencies into web builds.
+ */
+
+export interface DiscoveredNetworkPrinter {
+	id: string;
+	name: string;
+	connectionType: 'network';
+	address: string;
+	port: number;
+	vendor: 'epson' | 'star' | 'generic';
+}
+
+export interface UsbPrinterInfo {
+	/** `usb:<vid>:<pid>:<bus>:<address>` or `winspool:<queue>` — stored as the profile address. */
+	id: string;
+	name: string;
+	connectionType: 'usb' | 'system';
+	address: string;
+	vendor: 'generic';
+}
+
+export interface SerialPrinterInfo {
+	/** `serial:<path>` — stored as the profile address. */
+	id: string;
+	name: string;
+}
+
+export interface DiscoveredSerialPrinter extends SerialPrinterInfo {
+	connectionType: 'bluetooth';
+	address: string;
+	vendor: 'generic';
+}
+
+export interface AuthPromptParams {
+	authUrl: string;
+	redirectUri: string;
+}
+
+export interface AuthResult {
+	type: 'success' | 'error' | 'dismiss' | 'cancel';
+	params?: Record<string, string>;
+	error?: string;
+}
+
+/**
+ * invoke = render→main→render (Promise); send = render→main (fire-and-forget);
+ * on = main→render push (renderer subscribes).
+ */
+export interface IpcInvokeChannels {
+	'print-raw-tcp': { req: { host: string; port: number; data: number[] }; res: void };
+	'print-raw-usb': { req: { device: string; data: number[] }; res: void };
+	'print-raw-serial': { req: { device: string; data: number[] }; res: void };
+	'printer-discovery': {
+		req: { action?: 'start' | 'stop'; timeoutMs?: number };
+		res: DiscoveredNetworkPrinter[];
+	};
+	'usb-discovery': { req: Record<string, never>; res: UsbPrinterInfo[] };
+	'serial-discovery': { req: Record<string, never>; res: DiscoveredSerialPrinter[] };
+	'sqlite': { req: unknown; res: unknown };
+	'axios': { req: unknown; res: unknown };
+	'auth:prompt': { req: AuthPromptParams; res: AuthResult };
+}
+
+export interface IpcSendChannels {
+	clearData: unknown;
+	'print-external-url': { externalURL: string; printJobId: string };
+	'open-external-url': string;
+	'bluetooth-device-selected': string;
+}
+
+export interface IpcOnChannels {
+	'system-resume': [];
+	'bluetooth-devices': [Array<{ id: string; name: string }>];
+}
+
+export const INVOKE_CHANNELS = [
+	'print-raw-tcp',
+	'print-raw-usb',
+	'print-raw-serial',
+	'printer-discovery',
+	'usb-discovery',
+	'serial-discovery',
+	'sqlite',
+	'axios',
+	'auth:prompt',
+] as const satisfies readonly (keyof IpcInvokeChannels)[];
+
+export const SEND_CHANNELS = [
+	'clearData',
+	'print-external-url',
+	'open-external-url',
+	'bluetooth-device-selected',
+] as const satisfies readonly (keyof IpcSendChannels)[];
+
+export const ON_CHANNELS = [
+	'system-resume',
+	'bluetooth-devices',
+] as const satisfies readonly (keyof IpcOnChannels)[];
+
+type ExactChannelKeys<RegistryKeys extends string, ArrayKeys extends string> =
+	[Exclude<RegistryKeys, ArrayKeys>, Exclude<ArrayKeys, RegistryKeys>] extends [never, never]
+		? true
+		: false;
+type AssertExactChannelKeys<T extends true> = T;
+
+type _InvokeChannelsCoverRegistry = AssertExactChannelKeys<
+	ExactChannelKeys<keyof IpcInvokeChannels, (typeof INVOKE_CHANNELS)[number]>
+>;
+type _SendChannelsCoverRegistry = AssertExactChannelKeys<
+	ExactChannelKeys<keyof IpcSendChannels, (typeof SEND_CHANNELS)[number]>
+>;
+type _OnChannelsCoverRegistry = AssertExactChannelKeys<
+	ExactChannelKeys<keyof IpcOnChannels, (typeof ON_CHANNELS)[number]>
+>;
+
+/** Dynamic channels NOT enumerable as literal keys. */
+export const DYNAMIC_ON_PATTERNS = [/^onBeforePrint-/, /^onAfterPrint-/, /^onPrintError-/] as const;
+
+/** Must equal IPC_RENDERER_KEY_PREFIX from rxdb/plugins/electron used in apps/electron/src/main/rxdb-storage.ts. */
+export const RXDB_IPC_CHANNEL_PREFIX = 'rxdb-ipc-renderer-storage|';
+
+export interface TypedIpcRenderer {
+	invoke<C extends keyof IpcInvokeChannels>(
+		channel: C,
+		args: IpcInvokeChannels[C]['req']
+	): Promise<IpcInvokeChannels[C]['res']>;
+	send<C extends keyof IpcSendChannels>(channel: C, args: IpcSendChannels[C]): void;
+	on<C extends keyof IpcOnChannels>(
+		channel: C,
+		listener: (...args: IpcOnChannels[C]) => void
+	): () => void;
+	// Dynamic per-job channels (onBeforePrint-/onAfterPrint-/onPrintError-) stay string-based.
+	on(channel: string, listener: (...args: unknown[]) => void): () => void;
+	once<C extends keyof IpcOnChannels>(channel: C, listener: (...args: IpcOnChannels[C]) => void): void;
+	once(channel: string, listener: (...args: unknown[]) => void): void;
+	removeListener(channel: string, listener: (...args: unknown[]) => void): void;
+	postMessage(channel: string, message: unknown): void;
+}
