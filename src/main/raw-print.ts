@@ -61,6 +61,9 @@ export async function sendRawBytes(bytes: Buffer, delivery: Delivery): Promise<v
 // Resolves/rejects exactly once; always clears the timer; always runs cleanup. If the
 // timeout wins but run() later settles (for example, a resource opens after timeout),
 // cleanup runs again so the newly-opened resource is released without writing.
+// Cleanup calls are serialized: a re-run waits for the in-flight cleanup to settle first,
+// so an operation aborted mid-cleanup never triggers a concurrent release/close on the
+// same resource.
 export function withTimeout<T>(
 	run: (ctx: RawPrintContext) => Promise<T>,
 	cleanup: () => Promise<void> | void,
@@ -72,7 +75,15 @@ export function withTimeout<T>(
 	let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 	const ctx: RawPrintContext = { settled: () => settled };
 
-	const runCleanup = (): Promise<void> => Promise.resolve().then(cleanup);
+	let cleanupChain: Promise<void> | null = null;
+	const runCleanup = (): Promise<void> => {
+		const previous = cleanupChain ?? Promise.resolve();
+		cleanupChain = previous.then(
+			() => cleanup(),
+			() => cleanup()
+		);
+		return cleanupChain;
+	};
 
 	return new Promise<T>((resolve, reject) => {
 		const finish = (hasError: boolean, payload?: unknown): void => {

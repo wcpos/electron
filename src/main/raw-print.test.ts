@@ -209,6 +209,41 @@ async function main() {
 		'cleanup should run again after the late-open operation settles'
 	);
 
+	// Cleanup serialization: when the timeout aborts an in-flight send, the send's rejection
+	// must not start a second cleanup while the first is still running.
+	let activeCleanups = 0;
+	let maxConcurrentCleanups = 0;
+	let overlapCleanupRuns = 0;
+	let abortSend: ((err: Error) => void) | null = null;
+	const overlapping = withTimeout(
+		() =>
+			new Promise<void>((_resolve, reject) => {
+				abortSend = reject;
+			}),
+		async () => {
+			activeCleanups += 1;
+			overlapCleanupRuns += 1;
+			maxConcurrentCleanups = Math.max(maxConcurrentCleanups, activeCleanups);
+			await new Promise<void>((resolve) => originalSetTimeout(resolve, 20));
+			activeCleanups -= 1;
+		},
+		5,
+		'overlap timed out'
+	);
+	overlapping.catch((_err: unknown): void => undefined);
+
+	// Let the timeout fire and cleanup #1 start (but not finish).
+	await new Promise<void>((resolve) => originalSetTimeout(resolve, 10));
+	assert.equal(overlapCleanupRuns, 1, 'timeout should start the first cleanup');
+	assert.ok(abortSend, 'abort callback should be captured');
+	// The first cleanup aborts the in-flight send while it is still releasing resources.
+	abortSend(new Error('aborted by cleanup'));
+	await assert.rejects(() => overlapping, /overlap timed out/);
+	await new Promise<void>((resolve) => originalSetTimeout(resolve, 60));
+
+	assert.equal(overlapCleanupRuns, 2, 'cleanup should re-run after the aborted send settles');
+	assert.equal(maxConcurrentCleanups, 1, 'cleanup runs must never overlap');
+
 	console.log('raw-print tests passed');
 }
 
