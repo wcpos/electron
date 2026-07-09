@@ -24,9 +24,9 @@ if (isDevelopment) {
 	});
 }
 
-let mainWindow: BrowserWindow | null;
+let mainWindow: BrowserWindow | null = null;
 
-export const createWindow = (): void => {
+export const createWindow = (): BrowserWindow => {
 	// Create the browser window.
 	mainWindow = new BrowserWindow({
 		show: false,
@@ -96,6 +96,8 @@ export const createWindow = (): void => {
 			log.error(`Load failed without retry: ${errorDescription}`);
 		}
 	});
+
+	return mainWindow;
 };
 
 export const getMainWindow = (): BrowserWindow | null => {
