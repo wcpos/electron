@@ -85,6 +85,24 @@ export function withTimeout<T>(
 		return cleanupChain;
 	};
 
+	const waitForCleanupQueue = async (firstCleanup: Promise<void>): Promise<void> => {
+		let current = firstCleanup;
+		let cleanupError: unknown;
+		while (true) {
+			try {
+				await current;
+			} catch (err) {
+				cleanupError ??= err;
+			}
+			if (cleanupChain === current) {
+				if (cleanupError) throw cleanupError;
+				return;
+			}
+			if (!cleanupChain) return;
+			current = cleanupChain;
+		}
+	};
+
 	return new Promise<T>((resolve, reject) => {
 		const finish = (hasError: boolean, payload?: unknown): void => {
 			if (settled) return;
@@ -93,7 +111,7 @@ export function withTimeout<T>(
 				clearTimeout(timeoutHandle);
 				timeoutHandle = undefined;
 			}
-			runCleanup().then(
+			waitForCleanupQueue(runCleanup()).then(
 				() => {
 					if (hasError) {
 						reject(payload);
