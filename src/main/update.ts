@@ -61,6 +61,13 @@ export class AutoUpdater implements UpdaterHandle {
 		this.mainWindow = mainWindow;
 	}
 
+	// On macOS the app outlives its windows: after window-all-closed the stored window
+	// is destroyed until 'activate' recreates one. A destroyed parent makes
+	// dialog.showMessageBox throw, so fall back to an unparented dialog.
+	private dialogParent(): BrowserWindow | undefined {
+		return this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow : undefined;
+	}
+
 	public init() {
 		if (isDevelopment) {
 			logger.info('Skipping auto-update in development mode');
@@ -174,13 +181,17 @@ export class AutoUpdater implements UpdaterHandle {
 		releaseDate: string,
 		notes: string
 	) {
-		const { response } = await dialog.showMessageBox(this.mainWindow, {
-			type: 'question',
+		const options = {
+			type: 'question' as const,
 			title: t('update.found_updates'),
 			message: t('update.a_new_version_is_available_do', { version }),
 			buttons: [t('common.yes'), t('update.remind_me_later'), t('common.no')],
 			cancelId: 2, // Index of 'No' button
-		});
+		};
+		const parent = this.dialogParent();
+		const { response } = parent
+			? await dialog.showMessageBox(parent, options)
+			: await dialog.showMessageBox(options);
 
 		return response;
 	}
@@ -230,10 +241,16 @@ export class AutoUpdater implements UpdaterHandle {
 		try {
 			const hasUpdate = await this.checkForUpdates(true);
 			if (hasUpdate === false) {
-				dialog.showMessageBox(this.mainWindow, {
+				const options = {
 					title: t('update.no_updates'),
 					message: t('update.current_version_is_up-to-date'),
-				});
+				};
+				const parent = this.dialogParent();
+				if (parent) {
+					dialog.showMessageBox(parent, options);
+				} else {
+					dialog.showMessageBox(options);
+				}
 			}
 		} finally {
 			if (menuItem) {
