@@ -239,10 +239,14 @@ async function main() {
 	// The first cleanup aborts the in-flight send while it is still releasing resources.
 	abortSend(new Error('aborted by cleanup'));
 	await assert.rejects(() => overlapping, /overlap timed out/);
-	await new Promise<void>((resolve) => originalSetTimeout(resolve, 60));
 
 	assert.equal(overlapCleanupRuns, 2, 'cleanup should re-run after the aborted send settles');
 	assert.equal(maxConcurrentCleanups, 1, 'cleanup runs must never overlap');
+	assert.equal(
+		activeCleanups,
+		0,
+		'timeout should not reject while queued cleanup is still running'
+	);
 
 	console.log('raw-print tests passed');
 }
