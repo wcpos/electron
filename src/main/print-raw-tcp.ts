@@ -1,7 +1,6 @@
 import * as net from 'net';
 
-import { ipcMain } from 'electron';
-
+import { handleIpc } from './ipc';
 import { type Delivery, sendRawPrint } from './raw-print';
 
 const TCP_PRINT_TIMEOUT_MS = 10_000;
@@ -47,15 +46,11 @@ function createTcpDelivery(host: string, port: number): Delivery {
 	};
 }
 
-ipcMain.handle('print-raw-tcp', async (_event, args: unknown) => {
+handleIpc('print-raw-tcp', async (_event, args) => {
 	if (!args || typeof args !== 'object') {
 		throw new Error('Invalid arguments: expected an object');
 	}
-	const { host, port, data } = args as {
-		host: unknown;
-		port: unknown;
-		data: unknown;
-	};
+	const { host, port, data } = args;
 
 	if (!host || typeof host !== 'string') {
 		throw new Error('Invalid host: must be a non-empty string');

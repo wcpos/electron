@@ -6,12 +6,16 @@
 	"license": "MIT",
 	"main": "./src/index.ts",
 	"exports": {
-		"./transport/device-key": "./src/transport/device-key.ts"
+		"./transport/device-key": "./src/transport/device-key.ts",
+		"./ipc-channels": "./src/ipc/channels.cts"
 	},
 	"typesVersions": {
 		"*": {
 			"transport/device-key": [
 				"src/transport/device-key.ts"
+			],
+			"ipc-channels": [
+				"src/ipc/channels.cts"
 			]
 		}
 	},

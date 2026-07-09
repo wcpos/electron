@@ -1,3 +1,5 @@
+import path from 'path';
+
 import type { ModuleOptions } from 'webpack';
 
 export const rules: Required<ModuleOptions>['rules'] = [
@@ -19,11 +21,14 @@ export const rules: Required<ModuleOptions>['rules'] = [
 		},
 	},
 	{
-		test: /\.tsx?$/,
+		test: /\.[cm]?tsx?$/,
 		exclude: /(node_modules|\.webpack)/,
 		use: {
 			loader: 'ts-loader',
 			options: {
+				compilerOptions: {
+					rootDir: path.resolve(__dirname, '../..'),
+				},
 				transpileOnly: true,
 			},
 		},
