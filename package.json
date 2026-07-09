@@ -37,6 +37,7 @@
 	},
 	"dependencies": {
 		"@sentry/electron": "^7.13.0",
+		"@wcpos/printer": "workspace:*",
 		"axios": "^1.17.0",
 		"better-sqlite3": "12.10.0",
 		"bonjour-service": "1.4.1",
