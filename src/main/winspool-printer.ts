@@ -9,7 +9,7 @@ import {
 	WINSPOOL_PREFIX as DEVICE_KEY_WINSPOOL_PREFIX,
 } from '@wcpos/printer/transport/device-key';
 
-import { logger } from './log';
+import { type Delivery, sendRawBytes } from './raw-print';
 
 import type { WebContents } from 'electron';
 
@@ -154,70 +154,71 @@ export async function printRawToSpooler(printerName: string, data: Buffer): Prom
 	const tmpFile = path.join(os.tmpdir(), `wcpos-raw-print-${randomBytes(8).toString('hex')}.bin`);
 	await writeFile(tmpFile, data);
 	try {
-		await runRawPrintScript(printerName, tmpFile);
-		logger.info(`winspool sent ${data.length} bytes to "${printerName}"`);
+		await sendRawBytes(data, createWinspoolDelivery(printerName, tmpFile));
 	} finally {
 		await unlink(tmpFile).catch(() => {});
 	}
 }
 
-function runRawPrintScript(printerName: string, file: string): Promise<void> {
-	return new Promise<void>((resolve, reject) => {
-		const child = spawn(
-			'powershell.exe',
-			[
-				'-NoProfile',
-				'-NonInteractive',
-				'-ExecutionPolicy',
-				'Bypass',
-				'-EncodedCommand',
-				encodePsCommand(RAW_PRINT_PS_SCRIPT),
-			],
-			{
-				env: {
-					...process.env,
-					WCPOS_RAW_PRINT_PRINTER: printerName,
-					WCPOS_RAW_PRINT_FILE: file,
-				},
-				windowsHide: true,
-				stdio: ['ignore', 'ignore', 'pipe'],
-			}
-		);
+function createWinspoolDelivery(printerName: string, file: string): Delivery {
+	let child: ReturnType<typeof spawn> | undefined;
+	let stderr = '';
 
-		let settled = false;
-		let stderr = '';
-
-		const finish = (err?: Error) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timeout);
-			if (err) {
-				logger.error(`winspool print to "${printerName}" failed: ${err.message}`);
-				reject(err);
-			} else {
-				resolve();
-			}
-		};
-
-		const timeout = setTimeout(() => {
-			child.kill();
-			finish(new Error(`Spooler print to "${printerName}" timed out after ${PRINT_TIMEOUT_MS}ms`));
-		}, PRINT_TIMEOUT_MS);
-
-		child.stderr.on('data', (chunk: Buffer) => {
-			stderr += chunk.toString();
-		});
-		child.on('error', (err) => finish(err));
-		child.on('close', (code) => {
-			if (code === 0) finish();
-			else
-				finish(
-					new Error(
-						`Spooler print to "${printerName}" failed (exit ${code}): ${
-							stderr.trim().slice(0, 500) || 'no error output'
-						}`
-					)
+	return {
+		label: `"${printerName}"`,
+		operation: 'winspool',
+		timeoutMs: PRINT_TIMEOUT_MS,
+		timeoutMessage: `Spooler print to "${printerName}" timed out after ${PRINT_TIMEOUT_MS}ms`,
+		successMessage: (bytes) => `winspool sent ${bytes} bytes to "${printerName}"`,
+		failureMessage: (err) => `winspool print to "${printerName}" failed: ${err.message}`,
+		cleanup() {
+			child?.kill();
+		},
+		send(_bytes, ctx): Promise<void> {
+			return new Promise<void>((resolve, reject) => {
+				child = spawn(
+					'powershell.exe',
+					[
+						'-NoProfile',
+						'-NonInteractive',
+						'-ExecutionPolicy',
+						'Bypass',
+						'-EncodedCommand',
+						encodePsCommand(RAW_PRINT_PS_SCRIPT),
+					],
+					{
+						env: {
+							...process.env,
+							WCPOS_RAW_PRINT_PRINTER: printerName,
+							WCPOS_RAW_PRINT_FILE: file,
+						},
+						windowsHide: true,
+						stdio: ['ignore', 'ignore', 'pipe'],
+					}
 				);
-		});
-	});
+
+				child.stderr?.on('data', (chunk: Buffer) => {
+					stderr += chunk.toString();
+				});
+				child.on('error', reject);
+				child.on('close', (code) => {
+					if (ctx.settled()) {
+						resolve();
+						return;
+					}
+					if (code === 0) {
+						resolve();
+						return;
+					}
+					reject(
+						new Error(
+							`Spooler print to "${printerName}" failed (exit ${code}): ${
+								stderr.trim().slice(0, 500) || 'no error output'
+							}`
+						)
+					);
+				});
+			});
+		},
+	};
 }
