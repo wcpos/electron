@@ -306,3 +306,79 @@ jobs:
             echo "The non-blocking Flatpak build did not complete (runtime install: \`${{ steps.flatpak-runtime.outcome }}\`, make: \`${{ steps.make-flatpak.outcome }}\`)."
             echo ".deb/.rpm assets are unaffected."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Fill the (draft) release body once any platform has published assets.
+  # The desktop release notes mirror the WCPOS app release of the same version
+  # (created earlier in the release train on wcpos/monorepo), plus a desktop
+  # footer. A non-empty body is never overwritten, so hand-curated notes and
+  # re-runs of failed platform jobs are safe.
+  release-notes:
+    needs:
+      - publish-macos
+      - publish-macos-arm64
+      - publish-windows
+      - publish-linux
+    if: >-
+      ${{ !cancelled() && (
+        needs.publish-macos.result == 'success' ||
+        needs.publish-macos-arm64.result == 'success' ||
+        needs.publish-windows.result == 'success' ||
+        needs.publish-linux.result == 'success'
+      ) }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: 📝 Mirror app release notes onto the desktop release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+
+          body=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          if [ -n "$body" ]; then
+            echo "Release $tag already has notes; leaving them untouched."
+            exit 0
+          fi
+
+          # Fetch the app release body. Fall back to footer-only ONLY on a
+          # clean 404 (release genuinely missing); fail the job on auth,
+          # rate-limit, or other API errors so we never publish incomplete
+          # notes silently.
+          notes_file=$(mktemp)
+          set +e
+          resp=$(gh api "repos/wcpos/monorepo/releases/tags/$tag" 2>&1)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            printf '%s' "$resp" | jq -r '.body // ""' > "$notes_file"
+            if [ -s "$notes_file" ]; then
+              echo "" >> "$notes_file"
+            else
+              echo "::warning title=App notes empty::wcpos/monorepo release $tag exists but has an empty body; using the desktop footer only."
+            fi
+          elif printf '%s' "$resp" | grep -q "HTTP 404"; then
+            echo "::warning title=App notes missing::No wcpos/monorepo release $tag; using the desktop footer only."
+            : > "$notes_file"
+          else
+            echo "::error title=App notes lookup failed::gh api exited $rc: $resp"
+            exit 1
+          fi
+          echo "Desktop build of WCPOS app **$version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
+
+          # Re-check right before writing: GitHub has no conditional release
+          # update, so this narrows the window in which a concurrent manual
+          # edit (or a second publish run) could be clobbered.
+          body=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          if [ -n "$body" ]; then
+            echo "Release $tag gained notes while this job was running; leaving them untouched."
+            exit 0
+          fi
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$notes_file"
+          echo "Release notes set on $tag from wcpos/monorepo $tag."
