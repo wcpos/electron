@@ -4,7 +4,9 @@ import path from 'path';
 
 import axios from 'axios';
 import { app, protocol } from 'electron';
+import serve from 'electron-serve';
 
+import './window';
 import { logger } from './log';
 import { isDevelopment } from './util';
 
@@ -14,7 +16,27 @@ interface CacheMeta {
 	cachedAt: number;
 }
 
+/**
+ * The wcpos-image:// scheme must be fetchable from the renderer: the thermal
+ * receipt pipeline fetches cached logos and converts them to data URLs so
+ * canvas.getImageData() can rasterize them without tainting the canvas (see
+ * packages/printer thermal-print.ts). Without supportFetchAPI the renderer's
+ * fetch() throws, the <img> fallback taints the canvas, and logos are silently
+ * dropped from printed receipts.
+ *
+ * electron-serve batches synchronous serve() calls into Electron's single
+ * registerSchemesAsPrivileged call. Registering this scheme through the same
+ * API avoids a second direct registration. The explicit window import queues
+ * the packaged app-shell scheme first. Its static handler lives in an in-memory
+ * partition that no window uses; the real handler below stays in the default
+ * session.
+ */
+serve({ scheme: 'wcpos-image', partition: 'wcpos-image-registration' });
+
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const APP_ORIGIN = isDevelopment
+	? `http://localhost:${process.env.EXPO_PORT || '8088'}`
+	: 'wcpos://-';
 
 function getCacheDir(): string {
 	const base = isDevelopment
@@ -118,6 +140,10 @@ app.on('ready', () => {
 
 	protocol.handle('wcpos-image', async (request) => {
 		try {
+			if (request.headers.get('Origin') !== APP_ORIGIN) {
+				return new Response(null, { status: 403 });
+			}
+
 			const parsed = new URL(request.url);
 			const encodedUrl = parsed.pathname.replace(/^\//, '');
 			const originalUrl = Buffer.from(encodedUrl, 'base64url').toString('utf-8');
@@ -153,6 +179,7 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': meta.contentType,
 						'Cache-Control': 'max-age=31536000',
+						'Access-Control-Allow-Origin': APP_ORIGIN,
 					},
 				});
 			}
@@ -172,6 +199,7 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': contentType,
 						'Cache-Control': 'max-age=31536000',
+						'Access-Control-Allow-Origin': APP_ORIGIN,
 					},
 				}
 			);
