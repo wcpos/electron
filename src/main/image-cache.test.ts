@@ -8,7 +8,8 @@ import Module from 'module';
 const readyListeners: (() => void)[] = [];
 const privilegedSchemeCalls: { scheme: string; privileges: Record<string, boolean> }[][] = [];
 const schemeRegistrationOrder: string[] = [];
-let imageHandler: ((request: { url: string }) => Promise<Response>) | undefined;
+type ImageRequest = { url: string; headers: Headers };
+let imageHandler: ((request: ImageRequest) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
 let nextImageBytes = Buffer.from('image-bytes');
 const warnMessages: unknown[][] = [];
@@ -27,7 +28,7 @@ const electronMock = {
 		},
 	},
 	protocol: {
-		handle(scheme: string, handler: (request: { url: string }) => Promise<Response>) {
+		handle(scheme: string, handler: (request: ImageRequest) => Promise<Response>) {
 			assert.equal(scheme, 'wcpos-image');
 			imageHandler = handler;
 		},
@@ -41,6 +42,7 @@ const electronMock = {
 };
 
 const imageBytes = Buffer.from('image-bytes');
+const appOrigin = 'wcpos://-';
 
 const axiosMock = {
 	get(url: string) {
@@ -68,6 +70,11 @@ async function waitFor(condition: () => boolean, message: string) {
 
 	throw new Error(message);
 }
+
+const requestFromApp = (encodedUrl: string): ImageRequest => ({
+	url: `wcpos-image://cache/${encodedUrl}`,
+	headers: new Headers({ Origin: appOrigin }),
+});
 
 type ModuleWithMutableLoad = typeof Module & {
 	_load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
@@ -152,10 +159,19 @@ async function main() {
 	assert.ok(fs.existsSync(cacheDir), 'ready handler should create the cache directory');
 	fs.rmSync(cacheDir, { recursive: true, force: true });
 
+	const blockedUrl = 'http://127.0.0.1/private.jpg';
+	const blockedEncoded = Buffer.from(blockedUrl, 'utf-8').toString('base64url');
+	const blockedResponse = await imageHandler!({
+		url: `wcpos-image://cache/${blockedEncoded}`,
+		headers: new Headers({ Origin: 'https://login.example.com' }),
+	});
+	assert.equal(blockedResponse.status, 403, 'handler should reject requests outside the app shell');
+	assert.equal(requestedUrl, undefined, 'rejected origins should not reach the network');
+
 	const originalUrl = 'https://demo.wcpos.com/wp-content/uploads/example.jpg';
 	const encoded = Buffer.from(originalUrl, 'utf-8').toString('base64url');
 	nextImageBytes = imageBytes;
-	const response = await imageHandler!({ url: `wcpos-image://cache/${encoded}` });
+	const response = await imageHandler!(requestFromApp(encoded));
 
 	assert.equal(response.status, 200, 'handler should recreate a deleted cache directory');
 	assert.deepEqual(
@@ -166,8 +182,8 @@ async function main() {
 	assert.equal(requestedUrl, originalUrl, 'handler should download the decoded URL');
 	assert.equal(
 		response.headers.get('Access-Control-Allow-Origin'),
-		'*',
-		'download response should allow cross-origin renderer fetch()'
+		appOrigin,
+		'download response should allow only the app-shell origin'
 	);
 	assert.ok(fs.existsSync(cacheDir), 'handler should leave the cache directory on disk');
 
@@ -221,12 +237,12 @@ async function main() {
 
 	try {
 		const staleEncoded = Buffer.from(staleUrl, 'utf-8').toString('base64url');
-		const staleResponse = await imageHandler!({ url: `wcpos-image://cache/${staleEncoded}` });
+		const staleResponse = await imageHandler!(requestFromApp(staleEncoded));
 		assert.equal(staleResponse.status, 200, 'stale cache response should still be served');
 		assert.equal(
 			staleResponse.headers.get('Access-Control-Allow-Origin'),
-			'*',
-			'cached response should allow cross-origin renderer fetch()'
+			appOrigin,
+			'cached response should allow only the app-shell origin'
 		);
 		assert.deepEqual(
 			Buffer.from(await staleResponse.arrayBuffer()),
@@ -266,9 +282,7 @@ async function main() {
 
 	try {
 		const failedMetaEncoded = Buffer.from(failedMetaUrl, 'utf-8').toString('base64url');
-		const failedMetaResponse = await imageHandler!({
-			url: `wcpos-image://cache/${failedMetaEncoded}`,
-		});
+		const failedMetaResponse = await imageHandler!(requestFromApp(failedMetaEncoded));
 		assert.equal(
 			failedMetaResponse.status,
 			404,

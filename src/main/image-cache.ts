@@ -57,6 +57,9 @@ queueMicrotask(() => {
 });
 
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const APP_ORIGIN = isDevelopment
+	? `http://localhost:${process.env.EXPO_PORT || '8088'}`
+	: 'wcpos://-';
 
 function getCacheDir(): string {
 	const base = isDevelopment
@@ -160,6 +163,10 @@ app.on('ready', () => {
 
 	protocol.handle('wcpos-image', async (request) => {
 		try {
+			if (request.headers.get('Origin') !== APP_ORIGIN) {
+				return new Response(null, { status: 403 });
+			}
+
 			const parsed = new URL(request.url);
 			const encodedUrl = parsed.pathname.replace(/^\//, '');
 			const originalUrl = Buffer.from(encodedUrl, 'base64url').toString('utf-8');
@@ -195,9 +202,7 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': meta.contentType,
 						'Cache-Control': 'max-age=31536000',
-						// Renderer fetch() of thermal print assets is cross-origin
-						// (app shell origin → wcpos-image://), so CORS must be allowed.
-						'Access-Control-Allow-Origin': '*',
+						'Access-Control-Allow-Origin': APP_ORIGIN,
 					},
 				});
 			}
@@ -217,7 +222,7 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': contentType,
 						'Cache-Control': 'max-age=31536000',
-						'Access-Control-Allow-Origin': '*',
+						'Access-Control-Allow-Origin': APP_ORIGIN,
 					},
 				}
 			);
