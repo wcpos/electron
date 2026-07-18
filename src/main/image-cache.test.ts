@@ -7,6 +7,7 @@ import Module from 'module';
 
 const readyListeners: (() => void)[] = [];
 const privilegedSchemeCalls: { scheme: string; privileges: Record<string, boolean> }[][] = [];
+const schemeRegistrationOrder: string[] = [];
 let imageHandler: ((request: { url: string }) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
 let nextImageBytes = Buffer.from('image-bytes');
@@ -33,6 +34,7 @@ const electronMock = {
 		registerSchemesAsPrivileged(
 			schemes: { scheme: string; privileges: Record<string, boolean> }[]
 		) {
+			schemeRegistrationOrder.push('image-cache');
 			privilegedSchemeCalls.push(schemes);
 		},
 	},
@@ -81,6 +83,12 @@ mutableModule._load = function patchedLoad(
 	if (request === 'electron') return electronMock;
 	if (request === 'axios') return axiosMock;
 	if (request === './log') return { logger: loggerMock };
+	if (request === './window') {
+		queueMicrotask(() => {
+			schemeRegistrationOrder.push('electron-serve');
+		});
+		return {};
+	}
 	return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -96,12 +104,12 @@ async function main() {
 	// after electron-serve's own registration — Electron honours only the last
 	// registerSchemesAsPrivileged call). Flush microtasks before asserting.
 	await new Promise((resolve) => setImmediate(resolve));
-	assert.equal(
-		privilegedSchemeCalls.length,
-		1,
-		'image cache should register scheme privileges exactly once'
+	assert.deepEqual(
+		schemeRegistrationOrder,
+		['electron-serve', 'image-cache'],
+		'image cache should explicitly load window.ts so its merged registration is queued last'
 	);
-	const privilegedSchemes = privilegedSchemeCalls[0]!;
+	const privilegedSchemes = privilegedSchemeCalls[privilegedSchemeCalls.length - 1]!;
 	const imageScheme = privilegedSchemes.find((entry) => entry.scheme === 'wcpos-image');
 	assert.ok(imageScheme, 'wcpos-image scheme should be privileged');
 	for (const privilege of ['standard', 'secure', 'supportFetchAPI', 'corsEnabled'] as const) {

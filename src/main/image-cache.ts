@@ -5,6 +5,7 @@ import path from 'path';
 import axios from 'axios';
 import { app, protocol } from 'electron';
 
+import './window';
 import { logger } from './log';
 import { isDevelopment } from './util';
 
@@ -41,8 +42,9 @@ const WCPOS_SERVE_SCHEME_PRIVILEGES = {
  * app ready — later calls replace earlier ones entirely. electron-serve (used
  * by window.ts in production) queues its own registration in a microtask, so
  * this one must be queued too and must include electron-serve's scheme.
- * src/index.ts imports window.ts before this module, which makes
- * electron-serve's microtask run first and this merged registration win.
+ * Importing window.ts above makes that dependency explicit, so its
+ * electron-serve microtask is queued before this merged registration even
+ * when Webpack packages the main-process module graph.
  */
 queueMicrotask(() => {
 	protocol.registerSchemesAsPrivileged([
