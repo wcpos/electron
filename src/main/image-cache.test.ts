@@ -6,7 +6,11 @@ import path from 'path';
 import Module from 'module';
 
 const readyListeners: (() => void)[] = [];
-let imageHandler: ((request: { url: string }) => Promise<Response>) | undefined;
+const privilegedSchemeCalls: { scheme: string; privileges: Record<string, boolean> }[][] = [];
+const serveCalls: { scheme?: string; partition?: string }[] = [];
+const moduleLoadOrder: string[] = [];
+type ImageRequest = { url: string; headers: Headers };
+let imageHandler: ((request: ImageRequest) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
 let nextImageBytes = Buffer.from('image-bytes');
 const warnMessages: unknown[][] = [];
@@ -25,14 +29,26 @@ const electronMock = {
 		},
 	},
 	protocol: {
-		handle(scheme: string, handler: (request: { url: string }) => Promise<Response>) {
+		handle(scheme: string, handler: (request: ImageRequest) => Promise<Response>) {
 			assert.equal(scheme, 'wcpos-image');
 			imageHandler = handler;
+		},
+		registerSchemesAsPrivileged(
+			schemes: { scheme: string; privileges: Record<string, boolean> }[]
+		) {
+			privilegedSchemeCalls.push(schemes);
 		},
 	},
 };
 
+const electronServeMock = (options: { scheme?: string; partition?: string }) => {
+	moduleLoadOrder.push(options.scheme || 'app');
+	serveCalls.push(options);
+	return async () => {};
+};
+
 const imageBytes = Buffer.from('image-bytes');
+const appOrigin = 'wcpos://-';
 
 const axiosMock = {
 	get(url: string) {
@@ -61,6 +77,11 @@ async function waitFor(condition: () => boolean, message: string) {
 	throw new Error(message);
 }
 
+const requestFromApp = (encodedUrl: string): ImageRequest => ({
+	url: `wcpos-image://cache/${encodedUrl}`,
+	headers: new Headers({ Origin: appOrigin }),
+});
+
 type ModuleWithMutableLoad = typeof Module & {
 	_load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
 };
@@ -73,8 +94,13 @@ mutableModule._load = function patchedLoad(
 	isMain: boolean
 ) {
 	if (request === 'electron') return electronMock;
+	if (request === 'electron-serve') return electronServeMock;
 	if (request === 'axios') return axiosMock;
 	if (request === './log') return { logger: loggerMock };
+	if (request === './window') {
+		moduleLoadOrder.push('window');
+		return {};
+	}
 	return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -86,6 +112,22 @@ async function main() {
 		mutableModule._load = originalLoad;
 	}
 
+	assert.equal(
+		privilegedSchemeCalls.length,
+		0,
+		'image cache must not make a second direct scheme privilege registration'
+	);
+	assert.deepEqual(
+		serveCalls,
+		[{ scheme: 'wcpos-image', partition: 'wcpos-image-registration' }],
+		'wcpos-image should join electron-serve batching in an isolated registration-only session'
+	);
+	assert.deepEqual(
+		moduleLoadOrder,
+		['window', 'wcpos-image'],
+		'the packaged app-shell registration must be queued before the image scheme'
+	);
+
 	assert.equal(readyListeners.length, 1, 'image cache should register a ready listener');
 	readyListeners[0]!();
 	assert.ok(imageHandler, 'image cache should register the wcpos-image handler');
@@ -94,10 +136,19 @@ async function main() {
 	assert.ok(fs.existsSync(cacheDir), 'ready handler should create the cache directory');
 	fs.rmSync(cacheDir, { recursive: true, force: true });
 
+	const blockedUrl = 'http://127.0.0.1/private.jpg';
+	const blockedEncoded = Buffer.from(blockedUrl, 'utf-8').toString('base64url');
+	const blockedResponse = await imageHandler!({
+		url: `wcpos-image://cache/${blockedEncoded}`,
+		headers: new Headers({ Origin: 'https://login.example.com' }),
+	});
+	assert.equal(blockedResponse.status, 403, 'handler should reject requests outside the app shell');
+	assert.equal(requestedUrl, undefined, 'rejected origins should not reach the network');
+
 	const originalUrl = 'https://demo.wcpos.com/wp-content/uploads/example.jpg';
 	const encoded = Buffer.from(originalUrl, 'utf-8').toString('base64url');
 	nextImageBytes = imageBytes;
-	const response = await imageHandler!({ url: `wcpos-image://cache/${encoded}` });
+	const response = await imageHandler!(requestFromApp(encoded));
 
 	assert.equal(response.status, 200, 'handler should recreate a deleted cache directory');
 	assert.deepEqual(
@@ -106,6 +157,11 @@ async function main() {
 		'handler should respond with the downloaded image bytes'
 	);
 	assert.equal(requestedUrl, originalUrl, 'handler should download the decoded URL');
+	assert.equal(
+		response.headers.get('Access-Control-Allow-Origin'),
+		appOrigin,
+		'download response should allow only the app-shell origin'
+	);
 	assert.ok(fs.existsSync(cacheDir), 'handler should leave the cache directory on disk');
 
 	const hash = crypto.createHash('sha256').update(originalUrl).digest('hex');
@@ -158,8 +214,13 @@ async function main() {
 
 	try {
 		const staleEncoded = Buffer.from(staleUrl, 'utf-8').toString('base64url');
-		const staleResponse = await imageHandler!({ url: `wcpos-image://cache/${staleEncoded}` });
+		const staleResponse = await imageHandler!(requestFromApp(staleEncoded));
 		assert.equal(staleResponse.status, 200, 'stale cache response should still be served');
+		assert.equal(
+			staleResponse.headers.get('Access-Control-Allow-Origin'),
+			appOrigin,
+			'cached response should allow only the app-shell origin'
+		);
 		assert.deepEqual(
 			Buffer.from(await staleResponse.arrayBuffer()),
 			staleBytes,
@@ -198,9 +259,7 @@ async function main() {
 
 	try {
 		const failedMetaEncoded = Buffer.from(failedMetaUrl, 'utf-8').toString('base64url');
-		const failedMetaResponse = await imageHandler!({
-			url: `wcpos-image://cache/${failedMetaEncoded}`,
-		});
+		const failedMetaResponse = await imageHandler!(requestFromApp(failedMetaEncoded));
 		assert.equal(
 			failedMetaResponse.status,
 			404,
