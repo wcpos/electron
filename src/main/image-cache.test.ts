@@ -6,6 +6,7 @@ import path from 'path';
 import Module from 'module';
 
 const readyListeners: (() => void)[] = [];
+const privilegedSchemeCalls: { scheme: string; privileges: Record<string, boolean> }[][] = [];
 let imageHandler: ((request: { url: string }) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
 let nextImageBytes = Buffer.from('image-bytes');
@@ -28,6 +29,11 @@ const electronMock = {
 		handle(scheme: string, handler: (request: { url: string }) => Promise<Response>) {
 			assert.equal(scheme, 'wcpos-image');
 			imageHandler = handler;
+		},
+		registerSchemesAsPrivileged(
+			schemes: { scheme: string; privileges: Record<string, boolean> }[]
+		) {
+			privilegedSchemeCalls.push(schemes);
 		},
 	},
 };
@@ -86,6 +92,36 @@ async function main() {
 		mutableModule._load = originalLoad;
 	}
 
+	// The scheme privilege registration is queued in a microtask (it must run
+	// after electron-serve's own registration — Electron honours only the last
+	// registerSchemesAsPrivileged call). Flush microtasks before asserting.
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(
+		privilegedSchemeCalls.length,
+		1,
+		'image cache should register scheme privileges exactly once'
+	);
+	const privilegedSchemes = privilegedSchemeCalls[0]!;
+	const imageScheme = privilegedSchemes.find((entry) => entry.scheme === 'wcpos-image');
+	assert.ok(imageScheme, 'wcpos-image scheme should be privileged');
+	for (const privilege of ['standard', 'secure', 'supportFetchAPI', 'corsEnabled'] as const) {
+		assert.equal(
+			imageScheme!.privileges[privilege],
+			true,
+			`wcpos-image scheme should have the ${privilege} privilege so renderer fetch() works`
+		);
+	}
+	const serveScheme = privilegedSchemes.find((entry) => entry.scheme === 'wcpos');
+	assert.ok(
+		serveScheme,
+		'the electron-serve app-shell scheme must be included: the last registerSchemesAsPrivileged call replaces earlier ones'
+	);
+	assert.equal(
+		serveScheme!.privileges.supportFetchAPI,
+		true,
+		'wcpos scheme should keep electron-serve privileges'
+	);
+
 	assert.equal(readyListeners.length, 1, 'image cache should register a ready listener');
 	readyListeners[0]!();
 	assert.ok(imageHandler, 'image cache should register the wcpos-image handler');
@@ -106,6 +142,11 @@ async function main() {
 		'handler should respond with the downloaded image bytes'
 	);
 	assert.equal(requestedUrl, originalUrl, 'handler should download the decoded URL');
+	assert.equal(
+		response.headers.get('Access-Control-Allow-Origin'),
+		'*',
+		'download response should allow cross-origin renderer fetch()'
+	);
 	assert.ok(fs.existsSync(cacheDir), 'handler should leave the cache directory on disk');
 
 	const hash = crypto.createHash('sha256').update(originalUrl).digest('hex');
@@ -160,6 +201,11 @@ async function main() {
 		const staleEncoded = Buffer.from(staleUrl, 'utf-8').toString('base64url');
 		const staleResponse = await imageHandler!({ url: `wcpos-image://cache/${staleEncoded}` });
 		assert.equal(staleResponse.status, 200, 'stale cache response should still be served');
+		assert.equal(
+			staleResponse.headers.get('Access-Control-Allow-Origin'),
+			'*',
+			'cached response should allow cross-origin renderer fetch()'
+		);
 		assert.deepEqual(
 			Buffer.from(await staleResponse.arrayBuffer()),
 			staleBytes,

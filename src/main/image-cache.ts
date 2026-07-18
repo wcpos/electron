@@ -14,6 +14,46 @@ interface CacheMeta {
 	cachedAt: number;
 }
 
+/**
+ * Mirror of electron-serve@3's privileges for the production app-shell scheme
+ * registered by window.ts (`serve({ scheme: 'wcpos' })`). Keep in sync with
+ * electron-serve if it is upgraded.
+ */
+const WCPOS_SERVE_SCHEME_PRIVILEGES = {
+	standard: true,
+	secure: true,
+	allowServiceWorkers: true,
+	supportFetchAPI: true,
+	corsEnabled: true,
+	stream: true,
+	codeCache: true,
+};
+
+/**
+ * The wcpos-image:// scheme must be fetchable from the renderer: the thermal
+ * receipt pipeline fetches cached logos and converts them to data URLs so
+ * canvas.getImageData() can rasterize them without tainting the canvas (see
+ * packages/printer thermal-print.ts). Without supportFetchAPI the renderer's
+ * fetch() throws, the <img> fallback taints the canvas, and logos are silently
+ * dropped from printed receipts.
+ *
+ * Electron honours only the LAST registerSchemesAsPrivileged call made before
+ * app ready — later calls replace earlier ones entirely. electron-serve (used
+ * by window.ts in production) queues its own registration in a microtask, so
+ * this one must be queued too and must include electron-serve's scheme.
+ * src/index.ts imports window.ts before this module, which makes
+ * electron-serve's microtask run first and this merged registration win.
+ */
+queueMicrotask(() => {
+	protocol.registerSchemesAsPrivileged([
+		{ scheme: 'wcpos', privileges: WCPOS_SERVE_SCHEME_PRIVILEGES },
+		{
+			scheme: 'wcpos-image',
+			privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+		},
+	]);
+});
+
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function getCacheDir(): string {
@@ -153,6 +193,9 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': meta.contentType,
 						'Cache-Control': 'max-age=31536000',
+						// Renderer fetch() of thermal print assets is cross-origin
+						// (app shell origin → wcpos-image://), so CORS must be allowed.
+						'Access-Control-Allow-Origin': '*',
 					},
 				});
 			}
@@ -172,6 +215,7 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': contentType,
 						'Cache-Control': 'max-age=31536000',
+						'Access-Control-Allow-Origin': '*',
 					},
 				}
 			);
