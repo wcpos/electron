@@ -4,8 +4,8 @@ import path from 'path';
 
 import axios from 'axios';
 import { app, protocol } from 'electron';
+import serve from 'electron-serve';
 
-import './window';
 import { logger } from './log';
 import { isDevelopment } from './util';
 
@@ -16,21 +16,6 @@ interface CacheMeta {
 }
 
 /**
- * Mirror of electron-serve@3's privileges for the production app-shell scheme
- * registered by window.ts (`serve({ scheme: 'wcpos' })`). Keep in sync with
- * electron-serve if it is upgraded.
- */
-const WCPOS_SERVE_SCHEME_PRIVILEGES = {
-	standard: true,
-	secure: true,
-	allowServiceWorkers: true,
-	supportFetchAPI: true,
-	corsEnabled: true,
-	stream: true,
-	codeCache: true,
-};
-
-/**
  * The wcpos-image:// scheme must be fetchable from the renderer: the thermal
  * receipt pipeline fetches cached logos and converts them to data URLs so
  * canvas.getImageData() can rasterize them without tainting the canvas (see
@@ -38,23 +23,13 @@ const WCPOS_SERVE_SCHEME_PRIVILEGES = {
  * fetch() throws, the <img> fallback taints the canvas, and logos are silently
  * dropped from printed receipts.
  *
- * Electron honours only the LAST registerSchemesAsPrivileged call made before
- * app ready — later calls replace earlier ones entirely. electron-serve (used
- * by window.ts in production) queues its own registration in a microtask, so
- * this one must be queued too and must include electron-serve's scheme.
- * Importing window.ts above makes that dependency explicit, so its
- * electron-serve microtask is queued before this merged registration even
- * when Webpack packages the main-process module graph.
+ * electron-serve batches synchronous serve() calls into Electron's single
+ * registerSchemesAsPrivileged call. Registering this scheme through the same
+ * API avoids a second direct registration. Its static handler lives in an
+ * in-memory partition that no window uses; the real handler below stays in the
+ * default session.
  */
-queueMicrotask(() => {
-	protocol.registerSchemesAsPrivileged([
-		{ scheme: 'wcpos', privileges: WCPOS_SERVE_SCHEME_PRIVILEGES },
-		{
-			scheme: 'wcpos-image',
-			privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
-		},
-	]);
-});
+serve({ scheme: 'wcpos-image', partition: 'wcpos-image-registration' });
 
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const APP_ORIGIN = isDevelopment
