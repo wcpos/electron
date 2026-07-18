@@ -6,6 +6,7 @@ import axios from 'axios';
 import { app, protocol } from 'electron';
 import serve from 'electron-serve';
 
+import './window';
 import { logger } from './log';
 import { isDevelopment } from './util';
 
@@ -25,9 +26,10 @@ interface CacheMeta {
  *
  * electron-serve batches synchronous serve() calls into Electron's single
  * registerSchemesAsPrivileged call. Registering this scheme through the same
- * API avoids a second direct registration. Its static handler lives in an
- * in-memory partition that no window uses; the real handler below stays in the
- * default session.
+ * API avoids a second direct registration. The explicit window import queues
+ * the packaged app-shell scheme first. Its static handler lives in an in-memory
+ * partition that no window uses; the real handler below stays in the default
+ * session.
  */
 serve({ scheme: 'wcpos-image', partition: 'wcpos-image-registration' });
 

@@ -8,6 +8,7 @@ import Module from 'module';
 const readyListeners: (() => void)[] = [];
 const privilegedSchemeCalls: { scheme: string; privileges: Record<string, boolean> }[][] = [];
 const serveCalls: { scheme?: string; partition?: string }[] = [];
+const moduleLoadOrder: string[] = [];
 type ImageRequest = { url: string; headers: Headers };
 let imageHandler: ((request: ImageRequest) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
@@ -40,6 +41,12 @@ const electronMock = {
 	},
 };
 
+const electronServeMock = (options: { scheme?: string; partition?: string }) => {
+	moduleLoadOrder.push(options.scheme || 'app');
+	serveCalls.push(options);
+	return async () => {};
+};
+
 const imageBytes = Buffer.from('image-bytes');
 const appOrigin = 'wcpos://-';
 
@@ -59,11 +66,6 @@ const loggerMock = {
 		warnMessages.push(args);
 	},
 	error() {},
-};
-
-const electronServeMock = (options: { scheme?: string; partition?: string }) => {
-	serveCalls.push(options);
-	return async () => {};
 };
 
 async function waitFor(condition: () => boolean, message: string) {
@@ -95,6 +97,10 @@ mutableModule._load = function patchedLoad(
 	if (request === 'electron-serve') return electronServeMock;
 	if (request === 'axios') return axiosMock;
 	if (request === './log') return { logger: loggerMock };
+	if (request === './window') {
+		moduleLoadOrder.push('window');
+		return {};
+	}
 	return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -115,6 +121,11 @@ async function main() {
 		serveCalls,
 		[{ scheme: 'wcpos-image', partition: 'wcpos-image-registration' }],
 		'wcpos-image should join electron-serve batching in an isolated registration-only session'
+	);
+	assert.deepEqual(
+		moduleLoadOrder,
+		['window', 'wcpos-image'],
+		'the packaged app-shell registration must be queued before the image scheme'
 	);
 
 	assert.equal(readyListeners.length, 1, 'image cache should register a ready listener');
