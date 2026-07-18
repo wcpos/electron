@@ -116,6 +116,20 @@ async function main() {
 		serveScheme,
 		'the electron-serve app-shell scheme must be included: the last registerSchemesAsPrivileged call replaces earlier ones'
 	);
+	for (const privilege of [
+		'standard',
+		'secure',
+		'allowServiceWorkers',
+		'corsEnabled',
+		'stream',
+		'codeCache',
+	] as const) {
+		assert.equal(
+			serveScheme!.privileges[privilege],
+			true,
+			`wcpos scheme should keep the ${privilege} electron-serve privilege`
+		);
+	}
 	assert.equal(
 		serveScheme!.privileges.supportFetchAPI,
 		true,
