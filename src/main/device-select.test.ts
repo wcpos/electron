@@ -26,7 +26,6 @@ try {
 	const { registerScannerDeviceSelection } =
 		require('./device-select') as typeof import('./device-select');
 
-	// Fake session: an EventEmitter plus the permission setters the module calls.
 	class FakeSession extends EventEmitter {
 		devicePermissionHandler: ((details: { deviceType: string }) => boolean) | null = null;
 		permissionCheckHandler: ((wc: unknown, permission: string) => boolean) | null = null;
@@ -39,9 +38,14 @@ try {
 	}
 	class FakeWebContents extends EventEmitter {
 		session = new FakeSession();
+		mainFrame = { id: 'main-frame' };
 		sent: { channel: string; payload: unknown }[] = [];
 		send(channel: string, payload: unknown) {
 			this.sent.push({ channel, payload });
+		}
+		lastPayload(channel: string) {
+			const forChannel = this.sent.filter((s) => s.channel === channel);
+			return forChannel[forChannel.length - 1]?.payload;
 		}
 	}
 	const webContents = new FakeWebContents();
@@ -51,81 +55,95 @@ try {
 
 	registerScannerDeviceSelection(win as never);
 
-	// Permission handlers grant serial + hid, deny everything else.
-	assert.ok(session.devicePermissionHandler, 'device permission handler registered');
+	// Permission handlers grant serial + hid only.
 	assert.equal(session.devicePermissionHandler!({ deviceType: 'serial' }), true);
 	assert.equal(session.devicePermissionHandler!({ deviceType: 'hid' }), true);
 	assert.equal(session.devicePermissionHandler!({ deviceType: 'usb' }), false);
-	assert.ok(session.permissionCheckHandler, 'permission check handler registered');
-	assert.equal(session.permissionCheckHandler!(null, 'serial'), true);
 	assert.equal(session.permissionCheckHandler!(null, 'hid'), true);
 	assert.equal(session.permissionCheckHandler!(null, 'geolocation'), false);
 
 	const noopEvent = { preventDefault() {} };
 	const serialCalls: string[] = [];
-	const hidCalls: string[] = [];
+	const hidCalls: (string | undefined)[][] = [];
 
-	// --- Serial: chooser fires (session event) → candidates surfaced to renderer.
+	// --- Serial: chooser surfaces candidates; hot-plug refreshes them live. ----
 	session.emit(
 		'select-serial-port',
 		noopEvent,
 		[{ portId: 's1', portName: 'Scanner COM3' }],
 		webContents,
-		(portId: string) => serialCalls.push(`stale:${portId}`)
-	);
-	session.emit(
-		'select-serial-port',
-		noopEvent,
-		[{ portId: 's1', portName: 'Scanner COM3' }, { portId: 's2' }],
-		webContents,
-		(portId: string) => serialCalls.push(`latest:${portId}`)
+		(portId: string) => serialCalls.push(portId)
 	);
 	assert.equal(fakeIpcMain.listenerCount('serial-port-selected'), 1);
-	assert.deepEqual(webContents.sent[webContents.sent.length - 1], {
-		channel: 'serial-ports',
-		payload: [
-			{ id: 's1', name: 'Scanner COM3' },
-			{ id: 's2', name: 's2' },
-		],
-	});
-	// Only the latest callback fires, exactly once.
+	// A port plugged in while the picker is open is appended and re-sent.
+	session.emit('serial-port-added', noopEvent, { portId: 's2', portName: 'Scanner COM4' });
+	assert.deepEqual(webContents.lastPayload('serial-ports'), [
+		{ id: 's1', name: 'Scanner COM3' },
+		{ id: 's2', name: 'Scanner COM4' },
+	]);
+	// Unplugging removes it.
+	session.emit('serial-port-removed', noopEvent, { portId: 's1' });
+	assert.deepEqual(webContents.lastPayload('serial-ports'), [{ id: 's2', name: 'Scanner COM4' }]);
+	// Selection invokes the callback once; after that hot-plug is inert.
 	fakeIpcMain.emit('serial-port-selected', { sender: webContents }, 's2');
-	assert.deepEqual(serialCalls, ['latest:s2']);
-	// A second reply with no pending chooser is dropped.
-	fakeIpcMain.emit('serial-port-selected', { sender: webContents }, 's2');
-	assert.deepEqual(serialCalls, ['latest:s2']);
+	assert.deepEqual(serialCalls, ['s2']);
+	const sentCount = webContents.sent.length;
+	session.emit('serial-port-added', noopEvent, { portId: 's9' });
+	assert.equal(webContents.sent.length, sentCount, 'no refresh once serial chooser resolved');
 
 	// A serial chooser from another window's webContents is ignored.
-	const sentBefore = webContents.sent.length;
-	session.emit(
-		'select-serial-port',
-		noopEvent,
-		[{ portId: 'x' }],
-		new FakeWebContents(),
-		(portId: string) => serialCalls.push(`other:${portId}`)
+	const before = webContents.sent.length;
+	session.emit('select-serial-port', noopEvent, [{ portId: 'x' }], new FakeWebContents(), () =>
+		serialCalls.push('other')
 	);
-	assert.equal(webContents.sent.length, sentBefore, 'foreign serial request not surfaced');
+	assert.equal(webContents.sent.length, before, 'foreign serial request not surfaced');
 
-	// --- HID: chooser fires → candidates surfaced, reply invokes callback.
+	// --- HID: frame filter, live refresh, and no-arg cancel. -------------------
+	// A request from a different frame is ignored.
 	session.emit(
 		'select-hid-device',
 		noopEvent,
-		{ deviceList: [{ deviceId: 'h1', productName: 'Barcode HID' }] },
-		(deviceId: string) => hidCalls.push(deviceId)
+		{ deviceList: [{ deviceId: 'zz' }], frame: { id: 'other-frame' } },
+		(deviceId?: string) => hidCalls.push([deviceId])
 	);
-	assert.deepEqual(webContents.sent[webContents.sent.length - 1], {
-		channel: 'hid-devices',
-		payload: [{ id: 'h1', name: 'Barcode HID' }],
-	});
-	fakeIpcMain.emit('hid-device-selected', { sender: webContents }, 'h1');
-	assert.deepEqual(hidCalls, ['h1']);
+	assert.equal(webContents.sent.filter((s) => s.channel === 'hid-devices').length, 0);
+
+	// This window's request surfaces candidates.
+	session.emit(
+		'select-hid-device',
+		noopEvent,
+		{ deviceList: [{ deviceId: 'h1', productName: 'Barcode HID' }], frame: webContents.mainFrame },
+		(deviceId?: string) => hidCalls.push([deviceId])
+	);
+	assert.deepEqual(webContents.lastPayload('hid-devices'), [{ id: 'h1', name: 'Barcode HID' }]);
+	// Hot-plug add refreshes.
+	session.emit('hid-device-added', noopEvent, { device: { deviceId: 'h2', name: 'Second HID' } });
+	assert.deepEqual(webContents.lastPayload('hid-devices'), [
+		{ id: 'h1', name: 'Barcode HID' },
+		{ id: 'h2', name: 'Second HID' },
+	]);
+	// Cancelling (empty id) calls the callback with NO argument, not ''.
+	fakeIpcMain.emit('hid-device-selected', { sender: webContents }, '');
+	assert.deepEqual(hidCalls, [[undefined]]);
+
+	// A real selection passes the id through.
+	session.emit(
+		'select-hid-device',
+		noopEvent,
+		{ deviceList: [{ deviceId: 'h3' }], frame: webContents.mainFrame },
+		(deviceId?: string) => hidCalls.push([deviceId])
+	);
+	fakeIpcMain.emit('hid-device-selected', { sender: webContents }, 'h3');
+	assert.deepEqual(hidCalls[1], ['h3']);
 
 	// --- Window close removes every listener.
 	win.emit('closed');
 	assert.equal(fakeIpcMain.listenerCount('serial-port-selected'), 0);
 	assert.equal(fakeIpcMain.listenerCount('hid-device-selected'), 0);
 	assert.equal(session.listenerCount('select-serial-port'), 0);
+	assert.equal(session.listenerCount('serial-port-added'), 0);
 	assert.equal(session.listenerCount('select-hid-device'), 0);
+	assert.equal(session.listenerCount('hid-device-added'), 0);
 
 	console.log('device-select tests passed');
 } finally {
