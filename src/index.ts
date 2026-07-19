@@ -4,6 +4,7 @@ import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
 import { registerBluetoothSelection } from './main/bluetooth-select';
+import { registerScannerDeviceSelection } from './main/device-select';
 import { logger } from './main/log';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
 import { registerMenu } from './main/menu';
@@ -48,6 +49,7 @@ app
 		createWindow();
 		const mainWindow = getMainWindow();
 		if (mainWindow) registerBluetoothSelection(mainWindow);
+		if (mainWindow) registerScannerDeviceSelection(mainWindow);
 		initAuthHandler();
 		if (process.env.NODE_ENV === 'development') {
 			// force protocol handling in development
@@ -78,6 +80,7 @@ app.on('activate', () => {
 		createWindow();
 		const mainWindow = getMainWindow();
 		if (mainWindow) registerBluetoothSelection(mainWindow);
+		if (mainWindow) registerScannerDeviceSelection(mainWindow);
 	}
 });
 
