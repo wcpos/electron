@@ -91,9 +91,11 @@ const ipc = {
 			'print-external-url',
 			'open-external-url',
 			'bluetooth-device-selected',
+			'serial-port-selected',
+			'hid-device-selected',
 		] as string[],
 		// From main to render.
-		on: ['system-resume', 'bluetooth-devices'] as string[], // System events from main process
+		on: ['system-resume', 'bluetooth-devices', 'serial-ports', 'hid-devices'] as string[], // System events from main process
 		// From render to main and back again.
 		invoke: [
 			'sqlite',
