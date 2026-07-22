@@ -24,7 +24,7 @@
 		"publish-app": "electron-forge publish",
 		"lint": "eslint src --ext .js,.jsx,.ts,.tsx",
 		"lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
-		"test": "pnpm run test:preload && pnpm run test:printer-discovery && pnpm run test:winspool-printer && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache && pnpm run test:external-window-isolation && pnpm run test:package-runtime-externals && pnpm run test:bluetooth-select && pnpm run test:device-select && pnpm run test:serial-printer && pnpm run test:raw-print && pnpm run test:boot",
+		"test": "pnpm run test:preload && pnpm run test:printer-discovery && pnpm run test:winspool-printer && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache && pnpm run test:external-window-isolation && pnpm run test:package-runtime-externals && pnpm run test:bluetooth-select && pnpm run test:device-select && pnpm run test:serial-printer && pnpm run test:raw-print && pnpm run test:boot && pnpm run test:opfs-recovery",
 		"ts:check": "tsc --noEmit",
 		"test:preload": "ts-node src/preload.test.ts",
 		"test:rxdb-ipc-attachments": "ts-node src/rxdb-ipc-attachments.test.ts",
@@ -37,7 +37,8 @@
 		"test:device-select": "ts-node src/main/device-select.test.ts",
 		"test:serial-printer": "ts-node src/main/serial-printer.test.ts",
 		"test:raw-print": "ts-node src/main/raw-print.test.ts",
-		"test:boot": "ts-node src/main/boot.test.ts"
+		"test:boot": "ts-node src/main/boot.test.ts",
+		"test:opfs-recovery": "node --test src/main/opfs-targeted-recovery.test.mjs"
 	},
 	"dependencies": {
 		"@sentry/electron": "^7.13.0",
@@ -48,8 +49,8 @@
 		"electron-log": "^5.4.4",
 		"electron-serve": "^3.0.1",
 		"i18next": "^26.3.1",
-		"rxdb": "17.2.0",
-		"rxdb-premium": "17.2.0",
+		"rxdb": "17.4.0",
+		"rxdb-premium": "17.4.0",
 		"rxjs": "7.8.2",
 		"semver": "^7.8.4",
 		"serialport": "13.0.0",

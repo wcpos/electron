@@ -15,6 +15,7 @@ import {
 	serializeRxdbIpcMessage,
 } from '../rxdb-ipc-attachments';
 import { logger } from './log';
+import { withTargetedOpfsRecovery } from './opfs-targeted-recovery.mjs';
 
 // rxdb-premium 17.0.0 is installed but rxdb is 17.1.0. storage-abstract-filesystem
 // (used by filesystem-node) calls checkVersion() on every createStorageInstance, which
@@ -117,7 +118,11 @@ export async function getMainRxdbStorage() {
 			try {
 				const basePath = await ensureFilesystemNodeBasePath();
 				logger.info('Initialising RxDB filesystem-node storage bridge', { basePath });
-				return getRxStorageFilesystemNode({ basePath });
+				// filesystem-node shares the abstract-filesystem on-disk format with the
+				// web OPFS worker, so the same in-place corruption recovery wrapper
+				// applies. The module is a byte-identical copy of the monorepo's
+				// scripts/opfs-targeted-recovery.mjs, enforced by a sync test there.
+				return withTargetedOpfsRecovery(getRxStorageFilesystemNode({ basePath }));
 			} catch (error) {
 				storagePromise = undefined;
 				throw error;
