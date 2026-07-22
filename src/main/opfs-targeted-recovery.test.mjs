@@ -207,6 +207,42 @@ test("falls back to singleton writes when a combined write is malformed", async 
   );
 });
 
+test("refuses malformed-document read and write repair when multi-instance", async () => {
+  let writeAttempted = false;
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => "[{malformed",
+    bulkWrite: async () => {
+      writeAttempted = true;
+      return { error: [] };
+    },
+    query: async () => JSON.stringify({ documents: [] }),
+    getChangedDocumentsSince: async () => JSON.stringify({ documents: [] }),
+  };
+  const { withTargetedOpfsRecovery } =
+    await import("./opfs-targeted-recovery.mjs");
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance({
+    ...storageParams("multi-instance-document-repair"),
+    multiInstance: true,
+  });
+  const expectedRefusal = {
+    name: "SyntaxError",
+    message: /targeted recovery refused: multi-instance$/,
+  };
+
+  await assert.rejects(
+    recovering.findDocumentsById(["cache:orders"], false),
+    expectedRefusal,
+  );
+  await assert.rejects(
+    recovering.bulkWrite([{ document: document("cache:orders", 0) }], "test"),
+    expectedRefusal,
+  );
+  assert.equal(writeAttempted, false);
+});
+
 test("repairs one malformed record without removing its collection siblings", async () => {
   const basePath = await mkdtemp(join(tmpdir(), "wcpos-targeted-recovery-"));
   const ids = ["product:111", "product:6660", "product:999"];

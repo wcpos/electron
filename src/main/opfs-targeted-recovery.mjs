@@ -311,6 +311,10 @@ export function withTargetedOpfsRecovery(storage) {
             return false;
           } catch (error) {
             if (!isMalformedJson(error)) throw error;
+            if (params.multiInstance) {
+              error.message += "; targeted recovery refused: multi-instance";
+              throw error;
+            }
             onMalformedBatch?.();
             if (batch.length === 1) {
               const failure = await repairDocument(instance, batch[0]);
