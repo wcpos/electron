@@ -275,8 +275,8 @@ async function reconcileSecondaryIndexes(instance) {
     // Emptying the changelog drops pending row operations for every index, so
     // every index must be persisted from its current in-memory rows — the same
     // pairing the storage's own cleanupChangelogOperations maintains. A failed
-    // commit restores the previous in-memory rows so memory never claims a
-    // repair the files don't hold.
+    // commit restores the previous in-memory rows and attempts every on-disk
+    // rollback, reporting any restoration failures with the commit failure.
     const persistedRebuilds = [];
     try {
       for (const indexState of state.indexStates) {
@@ -288,8 +288,19 @@ async function reconcileSecondaryIndexes(instance) {
       for (const [indexState, rows] of previousRows) {
         indexState.rows = rows;
       }
+      const rollbackErrors = [];
       for (let i = persistedRebuilds.length - 1; i >= 0; i -= 1) {
-        await persistedRebuilds[i].persistInMemoryRows(runState);
+        try {
+          await persistedRebuilds[i].persistInMemoryRows(runState);
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [persistError, ...rollbackErrors],
+          `index persistence failed: ${persistError?.message ?? persistError}; rollback incomplete: ${rollbackErrors.map((error) => error?.message ?? error).join("; ")}`,
+        );
       }
       throw persistError;
     }
@@ -344,7 +355,9 @@ export function withTargetedOpfsRecovery(storage) {
         } catch (error) {
           if (!isMalformedJson(error)) throw error;
           if (await repairMalformedIds(ids))
-            return findDocumentsById(ids, withDeleted);
+            return parseStorageResult(
+              await findDocumentsById(ids, withDeleted),
+            );
           if (ids.length > 1) {
             const batches = await Promise.all(
               ids.map((id) => findDocumentsById([id], withDeleted)),

@@ -254,7 +254,11 @@ test("refuses malformed-document read and write repair when multi-instance", asy
   assert.equal(writeAttempted, false);
 });
 
-for (const method of ["query", "getChangedDocumentsSince"]) {
+for (const method of [
+  "findDocumentsById",
+  "query",
+  "getChangedDocumentsSince",
+]) {
   test(`${method} validates the result returned after recovery`, async () => {
     const basePath = await mkdtemp(join(tmpdir(), "wcpos-retry-validation-"));
     const record = document(`retry:${method}`, 0);
@@ -282,7 +286,12 @@ for (const method of ["query", "getChangedDocumentsSince"]) {
       const recovering = await withTargetedOpfsRecovery(
         malformedStorage,
       ).createStorageInstance(storageParams(`${method}-recovering`));
-      const args = method === "query" ? [{}] : [10];
+      const args =
+        method === "findDocumentsById"
+          ? [[record.id], false]
+          : method === "query"
+            ? [{}]
+            : [10];
       try {
         await assert.rejects(recovering[method](...args), {
           name: "SyntaxError",
@@ -898,7 +907,7 @@ test("refuses a rebuild when the primary index is missing rows", async () => {
   }
 });
 
-test("rebuilds when several secondary indexes are stale in different ways", async () => {
+test("reports an incomplete index rollback and recovers on retry", async () => {
   const basePath = await mkdtemp(join(tmpdir(), "wcpos-index-scattered-"));
   const ids = ["lane:aaa", "lane:bbb", "lane:ccc"];
 
@@ -932,6 +941,17 @@ test("rebuilds when several secondary indexes are stale in different ways", asyn
       getRxStorageFilesystemNode({ basePath }),
     ).createStorageInstance(laneStorageParams("scattered-recovering"));
     const state = await recovering.internals.statePromise;
+    const rollbackIndex = state.indexStates.at(-2);
+    const persistRollbackIndex =
+      rollbackIndex.persistInMemoryRows.bind(rollbackIndex);
+    let rollbackWrites = 0;
+    rollbackIndex.persistInMemoryRows = async (...args) => {
+      rollbackWrites += 1;
+      if (rollbackWrites === 2) {
+        throw new Error("injected rollback persistence failure");
+      }
+      return persistRollbackIndex(...args);
+    };
     const laterIndex = state.indexStates.at(-1);
     const persistLaterIndex = laterIndex.persistInMemoryRows.bind(laterIndex);
     let rejectOnce = true;
@@ -949,14 +969,18 @@ test("rebuilds when several secondary indexes are stale in different ways", asyn
         sort: [{ beta: "asc" }],
       }),
     );
-    await assert.rejects(recovering.query(betaQuery), {
-      name: "SyntaxError",
-      message: /injected later-index persistence failure/,
+    await assert.rejects(recovering.query(betaQuery), (error) => {
+      assert.equal(error.name, "SyntaxError");
+      assert.match(error.message, /injected later-index persistence failure/);
+      assert.match(error.message, /rollback incomplete/);
+      assert.match(error.message, /injected rollback persistence failure/);
+      return true;
     });
-    const after = await Promise.all(
+    assert.equal(rollbackWrites, 2);
+    const afterIncompleteRollback = await Promise.all(
       indexPaths.map((path) => readFile(path, "utf8")),
     );
-    assert.deepEqual(after, before);
+    assert.notDeepEqual(afterIncompleteRollback, before);
     const recovered = (await recovering.query(betaQuery)).documents;
     assert.deepEqual(
       recovered.map((item) => item.id),
