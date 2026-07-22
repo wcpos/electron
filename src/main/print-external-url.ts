@@ -8,6 +8,12 @@ function printExternalURL(externalURL: string, printJobId: string, event: IpcMai
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
+			// Isolated, non-persistent session: external receipt pages must not
+			// share the default session, where the wcpos-image:// handler is
+			// registered — a hostile page there could use it as an SSRF
+			// read-proxy through the main process. Receipt URLs are tokenized
+			// (?key=wc_order_...), so no shared cookies are needed.
+			partition: 'external-print',
 		},
 	});
 

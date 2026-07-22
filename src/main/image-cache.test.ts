@@ -48,7 +48,6 @@ const electronServeMock = (options: { scheme?: string; partition?: string }) => 
 };
 
 const imageBytes = Buffer.from('image-bytes');
-const appOrigin = 'wcpos://-';
 
 const axiosMock = {
 	get(url: string) {
@@ -77,9 +76,15 @@ async function waitFor(condition: () => boolean, message: string) {
 	throw new Error(message);
 }
 
-const requestFromApp = (encodedUrl: string): ImageRequest => ({
+/**
+ * Real Electron delivers protocol.handle requests WITHOUT the renderer's
+ * Origin/Referer headers (verified empirically on Electron 41: they arrive
+ * as null for both fetch() and <img> loads). Model that here so the tests
+ * cannot pass with header-based gating that would reject every real request.
+ */
+const requestFromRenderer = (encodedUrl: string): ImageRequest => ({
 	url: `wcpos-image://cache/${encodedUrl}`,
-	headers: new Headers({ Origin: appOrigin }),
+	headers: new Headers(),
 });
 
 type ModuleWithMutableLoad = typeof Module & {
@@ -136,20 +141,16 @@ async function main() {
 	assert.ok(fs.existsSync(cacheDir), 'ready handler should create the cache directory');
 	fs.rmSync(cacheDir, { recursive: true, force: true });
 
-	const blockedUrl = 'http://127.0.0.1/private.jpg';
-	const blockedEncoded = Buffer.from(blockedUrl, 'utf-8').toString('base64url');
-	const blockedResponse = await imageHandler!({
-		url: `wcpos-image://cache/${blockedEncoded}`,
-		headers: new Headers({ Origin: 'https://login.example.com' }),
-	});
-	assert.equal(blockedResponse.status, 403, 'handler should reject requests outside the app shell');
-	assert.equal(requestedUrl, undefined, 'rejected origins should not reach the network');
-
 	const originalUrl = 'https://demo.wcpos.com/wp-content/uploads/example.jpg';
 	const encoded = Buffer.from(originalUrl, 'utf-8').toString('base64url');
 	nextImageBytes = imageBytes;
-	const response = await imageHandler!(requestFromApp(encoded));
+	const response = await imageHandler!(requestFromRenderer(encoded));
 
+	assert.notEqual(
+		response.status,
+		403,
+		'handler must not reject headerless requests — Electron never forwards Origin, so real <img>/fetch requests all look like this'
+	);
 	assert.equal(response.status, 200, 'handler should recreate a deleted cache directory');
 	assert.deepEqual(
 		Buffer.from(await response.arrayBuffer()),
@@ -159,8 +160,8 @@ async function main() {
 	assert.equal(requestedUrl, originalUrl, 'handler should download the decoded URL');
 	assert.equal(
 		response.headers.get('Access-Control-Allow-Origin'),
-		appOrigin,
-		'download response should allow only the app-shell origin'
+		'*',
+		'download response must allow cross-origin renderer fetch() (the print pipeline relies on it)'
 	);
 	assert.ok(fs.existsSync(cacheDir), 'handler should leave the cache directory on disk');
 
@@ -214,12 +215,12 @@ async function main() {
 
 	try {
 		const staleEncoded = Buffer.from(staleUrl, 'utf-8').toString('base64url');
-		const staleResponse = await imageHandler!(requestFromApp(staleEncoded));
+		const staleResponse = await imageHandler!(requestFromRenderer(staleEncoded));
 		assert.equal(staleResponse.status, 200, 'stale cache response should still be served');
 		assert.equal(
 			staleResponse.headers.get('Access-Control-Allow-Origin'),
-			appOrigin,
-			'cached response should allow only the app-shell origin'
+			'*',
+			'cached response must allow cross-origin renderer fetch()'
 		);
 		assert.deepEqual(
 			Buffer.from(await staleResponse.arrayBuffer()),
@@ -259,7 +260,7 @@ async function main() {
 
 	try {
 		const failedMetaEncoded = Buffer.from(failedMetaUrl, 'utf-8').toString('base64url');
-		const failedMetaResponse = await imageHandler!(requestFromApp(failedMetaEncoded));
+		const failedMetaResponse = await imageHandler!(requestFromRenderer(failedMetaEncoded));
 		assert.equal(
 			failedMetaResponse.status,
 			404,
