@@ -34,6 +34,15 @@ jobs:
           echo "Updating translation version to $VERSION"
           sed -i "s/TRANSLATION_VERSION = '.*'/TRANSLATION_VERSION = '${VERSION}'/" src/main/translations/index.ts
 
+      - name: Wait for translation CDN
+        env:
+          VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          url="https://cdn.jsdelivr.net/gh/wcpos/translations@${VERSION}/translations/js/en/electron/electron.json"
+          curl --fail --silent --show-error --location \
+            --max-time 20 --retry 30 --retry-delay 10 --retry-all-errors --retry-max-time 300 \
+            --output /dev/null "$url"
+
       - name: Create PR
         env:
           VERSION: ${{ github.event.client_payload.version }}
