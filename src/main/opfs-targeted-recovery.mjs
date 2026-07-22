@@ -277,14 +277,19 @@ async function reconcileSecondaryIndexes(instance) {
     // pairing the storage's own cleanupChangelogOperations maintains. A failed
     // commit restores the previous in-memory rows so memory never claims a
     // repair the files don't hold.
+    const persistedRebuilds = [];
     try {
       for (const indexState of state.indexStates) {
         await indexState.persistInMemoryRows(runState);
+        if (previousRows.has(indexState)) persistedRebuilds.push(indexState);
       }
       await state.changelog.empty(runState);
     } catch (persistError) {
       for (const [indexState, rows] of previousRows) {
         indexState.rows = rows;
+      }
+      for (let i = persistedRebuilds.length - 1; i >= 0; i -= 1) {
+        await persistedRebuilds[i].persistInMemoryRows(runState);
       }
       throw persistError;
     }
@@ -364,9 +369,10 @@ export function withTargetedOpfsRecovery(storage) {
           malformedBatch = true;
         });
         if (malformedBatch && documentWrites.length > 1) {
-          const results = await Promise.all(
-            documentWrites.map((row) => bulkWrite([row], context)),
-          );
+          const results = [];
+          for (const row of documentWrites) {
+            results.push(await bulkWrite([row], context));
+          }
           await instance.taskQueue?.awaitIdle?.();
           return {
             error: results.flatMap((result) => result.error),
@@ -437,7 +443,7 @@ export function withTargetedOpfsRecovery(storage) {
           ) {
             throw error;
           }
-          return query(preparedQuery);
+          return parseStorageResult(await query(preparedQuery));
         }
       };
 
@@ -454,7 +460,9 @@ export function withTargetedOpfsRecovery(storage) {
           ) {
             throw error;
           }
-          return getChangedDocumentsSince(limit, checkpoint);
+          return parseStorageResult(
+            await getChangedDocumentsSince(limit, checkpoint),
+          );
         }
       };
 

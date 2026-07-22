@@ -164,8 +164,14 @@ test("falls back to singleton reads when only a combined response is malformed",
 });
 
 test("falls back to singleton writes when a combined write is malformed", async () => {
-  const records = [document("cache:orders", 0), document("cache:products", 1)];
+  const records = [
+    document("cache:orders", 0),
+    { ...document("cache:orders", 1), _rev: "2-recovery1" },
+    document("cache:products", 2),
+  ];
   const written = [];
+  let activeWrites = 0;
+  let maxActiveWrites = 0;
   let combinedWriteAttempted = false;
   let idleAwaited = false;
   const instance = {
@@ -181,7 +187,11 @@ test("falls back to singleton writes when a combined write is malformed", async 
         combinedWriteAttempted = true;
         throw new SyntaxError("malformed combined write");
       }
-      written.push(rows[0].document.id);
+      activeWrites += 1;
+      maxActiveWrites = Math.max(maxActiveWrites, activeWrites);
+      await new Promise((resolve) => setImmediate(resolve));
+      written.push(rows[0].document._rev);
+      activeWrites -= 1;
       return { error: [] };
     },
     query: async () => JSON.stringify({ documents: [] }),
@@ -201,9 +211,10 @@ test("falls back to singleton writes when a combined write is malformed", async 
   assert.deepEqual(result, { error: [] });
   assert.equal(combinedWriteAttempted, false);
   assert.equal(idleAwaited, true);
+  assert.equal(maxActiveWrites, 1);
   assert.deepEqual(
     written,
-    records.map(({ id }) => id),
+    records.map(({ _rev }) => _rev),
   );
 });
 
@@ -242,6 +253,48 @@ test("refuses malformed-document read and write repair when multi-instance", asy
   );
   assert.equal(writeAttempted, false);
 });
+
+for (const method of ["query", "getChangedDocumentsSince"]) {
+  test(`${method} validates the result returned after recovery`, async () => {
+    const basePath = await mkdtemp(join(tmpdir(), "wcpos-retry-validation-"));
+    const record = document(`retry:${method}`, 0);
+
+    try {
+      const rawStorage = getRxStorageFilesystemNode({ basePath });
+      const initial = await rawStorage.createStorageInstance(
+        storageParams(`${method}-initial`),
+      );
+      await initial.bulkWrite([{ document: record }], "seed");
+      await initial.cleanup(0);
+      await initial.close();
+      await corruptRecord(basePath, record.id);
+
+      const malformedStorage = {
+        ...rawStorage,
+        async createStorageInstance(params) {
+          const instance = await rawStorage.createStorageInstance(params);
+          instance[method] = async () => "[{malformed";
+          return instance;
+        },
+      };
+      const { withTargetedOpfsRecovery } =
+        await import("./opfs-targeted-recovery.mjs");
+      const recovering = await withTargetedOpfsRecovery(
+        malformedStorage,
+      ).createStorageInstance(storageParams(`${method}-recovering`));
+      const args = method === "query" ? [{}] : [10];
+      try {
+        await assert.rejects(recovering[method](...args), {
+          name: "SyntaxError",
+        });
+      } finally {
+        await recovering.close();
+      }
+    } finally {
+      await rm(basePath, { recursive: true, force: true });
+    }
+  });
+}
 
 test("repairs one malformed record without removing its collection siblings", async () => {
   const basePath = await mkdtemp(join(tmpdir(), "wcpos-targeted-recovery-"));
@@ -864,11 +917,31 @@ test("rebuilds when several secondary indexes are stale in different ways", asyn
     await shiftSecondaryIndexOffsets(basePath, "lane:bbb", -2, 1);
     await shiftSecondaryIndexOffsets(basePath, "lane:bbb", -4, 2);
 
+    const directory = join(basePath, (await readdir(basePath))[0]);
+    const indexPaths = (await readdir(directory))
+      .filter((name) => name.startsWith("index-"))
+      .sort()
+      .map((name) => join(directory, name));
+    const before = await Promise.all(
+      indexPaths.map((path) => readFile(path, "utf8")),
+    );
+
     const { withTargetedOpfsRecovery } =
       await import("./opfs-targeted-recovery.mjs");
     const recovering = await withTargetedOpfsRecovery(
       getRxStorageFilesystemNode({ basePath }),
     ).createStorageInstance(laneStorageParams("scattered-recovering"));
+    const state = await recovering.internals.statePromise;
+    const laterIndex = state.indexStates.at(-1);
+    const persistLaterIndex = laterIndex.persistInMemoryRows.bind(laterIndex);
+    let rejectOnce = true;
+    laterIndex.persistInMemoryRows = async (...args) => {
+      if (rejectOnce) {
+        rejectOnce = false;
+        throw new Error("injected later-index persistence failure");
+      }
+      return persistLaterIndex(...args);
+    };
     const betaQuery = prepareQuery(
       laneSchema,
       normalizeMangoQuery(laneSchema, {
@@ -876,6 +949,14 @@ test("rebuilds when several secondary indexes are stale in different ways", asyn
         sort: [{ beta: "asc" }],
       }),
     );
+    await assert.rejects(recovering.query(betaQuery), {
+      name: "SyntaxError",
+      message: /injected later-index persistence failure/,
+    });
+    const after = await Promise.all(
+      indexPaths.map((path) => readFile(path, "utf8")),
+    );
+    assert.deepEqual(after, before);
     const recovered = (await recovering.query(betaQuery)).documents;
     assert.deepEqual(
       recovered.map((item) => item.id),
