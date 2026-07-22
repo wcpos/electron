@@ -76,11 +76,15 @@ export interface IpcSendChannels {
 	'print-external-url': { externalURL: string; printJobId: string };
 	'open-external-url': string;
 	'bluetooth-device-selected': string;
+	'serial-port-selected': string;
+	'hid-device-selected': string;
 }
 
 export interface IpcOnChannels {
 	'system-resume': [];
 	'bluetooth-devices': [Array<{ id: string; name: string }>];
+	'serial-ports': [Array<{ id: string; name: string }>];
+	'hid-devices': [Array<{ id: string; name: string }>];
 }
 
 export const INVOKE_CHANNELS = [
@@ -100,11 +104,15 @@ export const SEND_CHANNELS = [
 	'print-external-url',
 	'open-external-url',
 	'bluetooth-device-selected',
+	'serial-port-selected',
+	'hid-device-selected',
 ] as const satisfies readonly (keyof IpcSendChannels)[];
 
 export const ON_CHANNELS = [
 	'system-resume',
 	'bluetooth-devices',
+	'serial-ports',
+	'hid-devices',
 ] as const satisfies readonly (keyof IpcOnChannels)[];
 
 type ExactChannelKeys<RegistryKeys extends string, ArrayKeys extends string> =

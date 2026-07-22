@@ -80,6 +80,14 @@ export function initAuthHandler(): void {
 					nodeIntegration: false,
 					contextIsolation: true,
 					// No preload needed - just loading external auth page
+					// Isolated session: external login pages must not share the
+					// default session, where the wcpos-image:// handler is
+					// registered — a hostile page there could use it as an SSRF
+					// read-proxy through the main process. Auth tokens come back
+					// via redirect interception (will-navigate/will-redirect),
+					// not cookies, so isolation does not affect the auth flow.
+					// persist: keeps the user's WP login for future prompts.
+					partition: 'persist:external-auth',
 				},
 			});
 
