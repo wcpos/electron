@@ -21,6 +21,7 @@ export interface BootDeps {
 	createWindow: () => BrowserWindow | null | void;
 	getMainWindow: () => BrowserWindow | null;
 	registerBluetoothSelection: (window: BrowserWindow) => void;
+	registerScannerDeviceSelection: (window: BrowserWindow) => void;
 	initAuthHandler: () => void;
 	initProtocolHandling: () => void;
 	registerMenu: () => void;
@@ -60,11 +61,12 @@ export function createMainWindowContext(
 }
 
 export function wireMainWindowConsumers(
-	deps: Pick<BootDeps, 'registerBluetoothSelection'>,
+	deps: Pick<BootDeps, 'registerBluetoothSelection' | 'registerScannerDeviceSelection'>,
 	ctx: Partial<AppContext>
 ): void {
 	if (ctx.mainWindow) {
 		deps.registerBluetoothSelection(ctx.mainWindow);
+		deps.registerScannerDeviceSelection(ctx.mainWindow);
 	}
 }
 

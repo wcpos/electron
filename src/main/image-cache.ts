@@ -34,9 +34,6 @@ interface CacheMeta {
 serve({ scheme: 'wcpos-image', partition: 'wcpos-image-registration' });
 
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const APP_ORIGIN = isDevelopment
-	? `http://localhost:${process.env.EXPO_PORT || '8088'}`
-	: 'wcpos://-';
 
 function getCacheDir(): string {
 	const base = isDevelopment
@@ -138,12 +135,13 @@ function refreshInBackground(url: string, imagePath: string, metaPath: string): 
 app.on('ready', () => {
 	getCacheDir();
 
+	// Do NOT gate on request headers here: Electron does not forward the
+	// renderer's Origin/Referer headers to protocol.handle handlers (they
+	// arrive as null), so header-based origin checks reject every real
+	// request. Plain <img> loads are no-cors and would never send Origin
+	// even if headers were forwarded. See wcpos/electron#298 follow-up.
 	protocol.handle('wcpos-image', async (request) => {
 		try {
-			if (request.headers.get('Origin') !== APP_ORIGIN) {
-				return new Response(null, { status: 403 });
-			}
-
 			const parsed = new URL(request.url);
 			const encodedUrl = parsed.pathname.replace(/^\//, '');
 			const originalUrl = Buffer.from(encodedUrl, 'base64url').toString('utf-8');
@@ -179,7 +177,7 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': meta.contentType,
 						'Cache-Control': 'max-age=31536000',
-						'Access-Control-Allow-Origin': APP_ORIGIN,
+						'Access-Control-Allow-Origin': '*',
 					},
 				});
 			}
@@ -199,7 +197,7 @@ app.on('ready', () => {
 					headers: {
 						'Content-Type': contentType,
 						'Cache-Control': 'max-age=31536000',
-						'Access-Control-Allow-Origin': APP_ORIGIN,
+						'Access-Control-Allow-Origin': '*',
 					},
 				}
 			);

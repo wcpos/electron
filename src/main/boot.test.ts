@@ -51,6 +51,7 @@ mutableModule._load = function patchedLoad(
 			},
 			getMainWindow: () => fakeWindow as never,
 			registerBluetoothSelection: mark('bluetooth-selection'),
+			registerScannerDeviceSelection: mark('scanner-device-selection'),
 			initAuthHandler: mark('auth-handler'),
 			initProtocolHandling: mark('protocol-handling'),
 			registerMenu: mark('menu'),
@@ -102,7 +103,11 @@ mutableModule._load = function patchedLoad(
 		assert.equal(context.mainWindow, fakeWindow);
 		assert.equal(context.updater, fakeUpdater);
 		assert.deepEqual(updaterWindows, [fakeWindow]);
-		assert.deepEqual(calls, phaseNames);
+		assert.deepEqual(calls, [
+			...phaseNames.slice(0, 6),
+			'scanner-device-selection',
+			...phaseNames.slice(6),
+		]);
 		console.log('boot tests passed');
 	} finally {
 		mutableModule._load = originalLoad;

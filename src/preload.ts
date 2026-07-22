@@ -101,9 +101,9 @@ function forgetWrappedRxdbListener(
 const ipc = {
 	render: {
 		// From render to main.
-		send: SEND_CHANNELS,
+		send: [...SEND_CHANNELS, 'serial-port-selected', 'hid-device-selected'],
 		// From main to render.
-		on: ON_CHANNELS, // System events from main process
+		on: [...ON_CHANNELS, 'serial-ports', 'hid-devices'], // System events from main process
 		// From render to main and back again.
 		invoke: INVOKE_CHANNELS,
 		// From main to render, once
