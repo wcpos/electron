@@ -1,14 +1,20 @@
-import { ipcMain } from 'electron';
 import { SerialPort } from 'serialport';
 
+import type { DiscoveredSerialPrinter, SerialPrinterInfo } from '@wcpos/printer/ipc-channels';
+import {
+	buildSerialKey,
+	connectionTypeForTarget,
+	parseTarget,
+	SERIAL_PREFIX,
+} from '@wcpos/printer/transport/device-key';
+
+import { handleIpc } from './ipc';
 import { logger } from './log';
+import { type Delivery, sendRawPrint } from './raw-print';
 
-export const SERIAL_PREFIX = 'serial:';
+export { SERIAL_PREFIX };
 
-export interface SerialPrinterInfo {
-	id: string; // `serial:<path>` — stored as the profile address
-	name: string;
-}
+export type { DiscoveredSerialPrinter, SerialPrinterInfo } from '@wcpos/printer/ipc-channels';
 
 // macOS ships virtual ports that can never be a printer; /dev/tty.* are the
 // blocking call-in devices — we only offer the call-out /dev/cu.* counterparts.
@@ -29,16 +35,86 @@ export function filterSerialPorts(ports: { path: string }[]): SerialPrinterInfo[
 			const name =
 				stripped === '' || /^\d+$/.test(stripped) ? basename : stripped.replace(/[-_]/g, ' ');
 			return {
-				id: `${SERIAL_PREFIX}${p.path}`,
+				id: buildSerialKey(p.path),
 				name,
 			};
 		});
 }
 
+function toDiscoveredSerialPrinter(port: SerialPrinterInfo): DiscoveredSerialPrinter {
+	const connectionType = connectionTypeForTarget(port.id);
+	if (connectionType !== 'bluetooth') {
+		throw new Error(`Unsupported serial discovery device key: ${port.id}`);
+	}
+	return {
+		...port,
+		connectionType,
+		address: port.id,
+		vendor: 'generic',
+	};
+}
+
 // Exported as a mutable object so tests can override timeoutMs without a module reload.
 export const printConfig = { timeoutMs: 20_000 }; // renderer gives up at 30s — fail first with a real error
 
-ipcMain.handle('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
+function createSerialDelivery(portPath: string): Delivery {
+	// SPP (Bluetooth Classic) virtual serial ports ignore baud rate — 9600 is the
+	// conventional default and what most receipt printer SDKs use.
+	const port = new SerialPort({ path: portPath, baudRate: 9600, autoOpen: false });
+	const cleanup = (): Promise<void> =>
+		new Promise((res) => {
+			if (!port.isOpen) {
+				res();
+				return;
+			}
+			port.close(() => res());
+		});
+
+	return {
+		label: portPath,
+		operation: 'print-raw-serial',
+		timeoutMs: printConfig.timeoutMs,
+		timeoutMessage: `Serial print to "${portPath}" timed out after ${printConfig.timeoutMs}ms`,
+		successMessage: (bytes) => `print-raw-serial sent ${bytes} bytes to ${portPath}`,
+		failureMessage: (err) => `print-raw-serial to ${portPath} failed: ${err.message}`,
+		cleanup,
+		send(bytes, ctx): Promise<void> {
+			return new Promise<void>((resolve, reject) => {
+				port.open((openErr) => {
+					if (openErr) {
+						reject(openErr);
+						return;
+					}
+
+					// The timeout may have fired while open() was still pending.
+					// If already settled, bail out before write; withTimeout will run cleanup
+					// again after this late-open send() settles, closing the now-open port.
+					if (ctx.settled()) {
+						resolve();
+						return;
+					}
+
+					port.write(bytes, (writeErr) => {
+						if (writeErr) {
+							reject(writeErr);
+							return;
+						}
+
+						port.drain((drainErr) => {
+							if (drainErr) {
+								reject(drainErr);
+								return;
+							}
+							resolve();
+						});
+					});
+				});
+			});
+		},
+	};
+}
+
+handleIpc('serial-discovery', async (): Promise<DiscoveredSerialPrinter[]> => {
 	// Windows: OS-paired Bluetooth Classic printers are enumerated and printed via the
 	// spooler (winspool path). Offering serial ports here would list COM ports that are
 	// already covered, leading to duplicate entries or permission conflicts.
@@ -47,105 +123,23 @@ ipcMain.handle('serial-discovery', async (): Promise<SerialPrinterInfo[]> => {
 	}
 	try {
 		const ports = await SerialPort.list();
-		return filterSerialPorts(ports);
+		return filterSerialPorts(ports).map(toDiscoveredSerialPrinter);
 	} catch (err) {
 		logger.error(`serial-discovery failed: ${err instanceof Error ? err.message : String(err)}`);
 		throw err;
 	}
 });
 
-ipcMain.handle(
+handleIpc(
 	'print-raw-serial',
 	async (_event, args: { device: string; data: number[] }): Promise<void> => {
 		if (!args || typeof args.device !== 'string') {
 			throw new Error('Invalid arguments: expected { device: string, data: number[] }');
 		}
-		if (
-			!Array.isArray(args.data) ||
-			!args.data.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)
-		) {
-			throw new Error('Invalid data: must be an array of byte values (0-255)');
-		}
-		if (!args.device.startsWith(SERIAL_PREFIX)) {
+		const target = parseTarget(args.device);
+		if (target.kind !== 'serial') {
 			throw new Error(`Invalid serial device key: ${args.device}`);
 		}
-
-		const portPath = args.device.slice(SERIAL_PREFIX.length);
-		if (portPath === '') {
-			throw new Error(`Invalid serial device key: ${args.device}`);
-		}
-		// SPP (Bluetooth Classic) virtual serial ports ignore baud rate — 9600 is the
-		// conventional default and what most receipt printer SDKs use.
-		const port = new SerialPort({ path: portPath, baudRate: 9600, autoOpen: false });
-
-		let settled = false;
-		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-		const cleanup = (): Promise<void> =>
-			new Promise((res) => {
-				if (!port.isOpen) {
-					res();
-					return;
-				}
-				port.close(() => res());
-			});
-
-		const printPromise = new Promise<void>((resolve, reject) => {
-			const finish = (err?: Error) => {
-				if (settled) return;
-				settled = true;
-				if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-				if (err) {
-					logger.error(`print-raw-serial to ${portPath} failed: ${err.message}`);
-					reject(err);
-				} else {
-					resolve();
-				}
-			};
-
-			timeoutHandle = setTimeout(() => {
-				void cleanup().finally(() =>
-					finish(
-						new Error(`Serial print to "${portPath}" timed out after ${printConfig.timeoutMs}ms`)
-					)
-				);
-			}, printConfig.timeoutMs);
-
-			port.open((openErr) => {
-				if (openErr) {
-					void cleanup().finally(() => finish(openErr));
-					return;
-				}
-
-				// The timeout may have fired while open() was still pending.
-				// If already settled, close the now-open port and bail out to
-				// prevent a ghost print after the renderer has already seen a failure.
-				if (settled) {
-					void cleanup();
-					return;
-				}
-
-				port.write(Buffer.from(args.data), (writeErr) => {
-					if (writeErr) {
-						void cleanup().finally(() => finish(writeErr));
-						return;
-					}
-
-					port.drain((drainErr) => {
-						if (drainErr) {
-							void cleanup().finally(() => finish(drainErr));
-							return;
-						}
-
-						void cleanup().finally(() => {
-							logger.info(`print-raw-serial sent ${args.data.length} bytes to ${portPath}`);
-							finish();
-						});
-					});
-				});
-			});
-		});
-
-		return printPromise;
+		return sendRawPrint(args, createSerialDelivery(target.path));
 	}
 );
