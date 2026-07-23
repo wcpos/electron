@@ -586,7 +586,7 @@ export function withTargetedOpfsRecovery(storage) {
             .then(() => cleanup(minimumDeletedTime))
             .catch((retryError) => {
               console.error("[cleanup-recovery]", retryError);
-              return false;
+              throw retryError;
             });
         }
       };
