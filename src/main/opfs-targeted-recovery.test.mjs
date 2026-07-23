@@ -620,6 +620,90 @@ test("repairs one malformed record without removing its collection siblings", as
   }
 });
 
+test("drops whitespace-only index rows after cleanup fails", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-cleanup-recovery-"));
+  const oldLwt = Date.now() - 10_000;
+  const deleted = {
+    ...document("product:deleted", 0),
+    _meta: { lwt: oldLwt },
+  };
+  const dead = {
+    ...document("product:dead", 1),
+    _meta: { lwt: oldLwt + 1 },
+  };
+  const survivor = {
+    ...document("product:survivor", 2),
+    _meta: { lwt: oldLwt + 2 },
+  };
+
+  try {
+    const initial = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("cleanup-initial"));
+    await initial.bulkWrite(
+      [deleted, dead, survivor].map((item) => ({ document: item })),
+      "seed",
+    );
+    while (!(await initial.cleanup(0))) {}
+    await initial.bulkWrite(
+      [
+        {
+          previous: deleted,
+          document: {
+            ...deleted,
+            _deleted: true,
+            _rev: "2-deleted",
+            _meta: { lwt: oldLwt + 100 },
+          },
+        },
+      ],
+      "delete",
+    );
+    assert.equal(await initial.cleanup(0), false);
+    assert.equal(await initial.cleanup(0), false);
+    await initial.close();
+
+    await corruptRecordInPlace(basePath, dead.id, () => Buffer.alloc(0));
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("cleanup-recovering"));
+    assert.equal(await recovering.cleanup(0), false);
+    assert.equal(typeof (await recovering.cleanup(0)), "boolean");
+
+    const state = await recovering.internals.statePromise;
+    assert.equal(state.firstIdx.metaIdMap.has(dead.id), false);
+    assert.ok(
+      state.indexStates.every((indexState) =>
+        indexState.rows.every((row) => !row[0].includes(dead.id)),
+      ),
+    );
+    assert.deepEqual(
+      (await recovering.findDocumentsById([dead.id, survivor.id], false)).map(
+        (item) => item.id,
+      ),
+      [survivor.id],
+    );
+    const query = prepareQuery(
+      schema,
+      normalizeMangoQuery(schema, {
+        selector: {},
+        sort: [{ id: "asc" }],
+      }),
+    );
+    assert.deepEqual(
+      (await recovering.query(query)).documents.map((item) => item.id),
+      [survivor.id],
+    );
+    assert.equal(typeof (await recovering.cleanup(0)), "boolean");
+    await recovering.close();
+  } finally {
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
 test("repairs a malformed record before retrying its pending write", async () => {
   const basePath = await mkdtemp(
     join(tmpdir(), "wcpos-targeted-write-recovery-"),

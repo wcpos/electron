@@ -103,6 +103,28 @@ async function repairDocument(instance, documentId) {
   });
 }
 
+async function dropWhitespaceRows(instance) {
+  const state = await instance.internals.statePromise;
+  return instance.taskQueue.runCleanup(async (runState) => {
+    const accessHandlePromise =
+      runState.accessHandlers.get(state.documentFileHandle) ??
+      state.documentFileHandle.createAccessHandle();
+    runState.accessHandlers.set(state.documentFileHandle, accessHandlePromise);
+    const accessHandle = await accessHandlePromise;
+    const isWhitespace = (bytes) => instance._decode(bytes).trim() === "";
+    for (const indexState of state.indexStates) {
+      let position = indexState.rows.length;
+      while (position--) {
+        const row = indexState.rows[position];
+        if (!isWhitespace(await accessHandle.read(row[1], row[2]))) continue;
+        const operation = [indexState.indexId, position, "D", row];
+        indexState.runChangelogOperation(operation);
+        await state.changelog.addChangelogOperations(runState, [operation]);
+      }
+    }
+  });
+}
+
 async function reconcileSecondaryIndexes(instance) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
@@ -320,6 +342,7 @@ export function withTargetedOpfsRecovery(storage) {
       const count = instance.count?.bind(instance);
       const getChangedDocumentsSince =
         instance.getChangedDocumentsSince.bind(instance);
+      const cleanup = instance.cleanup?.bind(instance);
 
       // The write preflight exists so the storage's write path never parses
       // unverified stored bytes (a parse failure there poisons the task
@@ -547,6 +570,24 @@ export function withTargetedOpfsRecovery(storage) {
           return parseStorageResult(
             await getChangedDocumentsSince(limit, checkpoint),
           );
+        }
+      };
+
+      if (!cleanup) return instance;
+      instance.cleanup = async (minimumDeletedTime) => {
+        try {
+          return await cleanup(minimumDeletedTime);
+        } catch (error) {
+          if (params.multiInstance) {
+            error.message += "; targeted recovery refused: multi-instance";
+            throw error;
+          }
+          return dropWhitespaceRows(instance)
+            .then(() => cleanup(minimumDeletedTime))
+            .catch((retryError) => {
+              console.error("[cleanup-recovery]", retryError);
+              return false;
+            });
         }
       };
 
