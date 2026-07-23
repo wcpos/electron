@@ -133,6 +133,48 @@ test("exports a targeted OPFS recovery storage wrapper", async () => {
   assert.equal(typeof recoveryModule.withTargetedOpfsRecovery, "function");
 });
 
+test("derives an invalid count result and passes through a valid result", async () => {
+  const records = [document("cache:orders", 0), document("cache:products", 1)];
+  const validResult = { count: 7, mode: "fast" };
+  const countResults = [undefined, validResult];
+  const errors = [];
+  let queriedPreparedQuery;
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => "[]",
+    bulkWrite: async () => ({ error: [] }),
+    query: async (preparedQuery) => {
+      queriedPreparedQuery = preparedQuery;
+      return JSON.stringify({ documents: records });
+    },
+    count: async () => countResults.shift(),
+    getChangedDocumentsSince: async () => JSON.stringify({ documents: [] }),
+  };
+  const { withTargetedOpfsRecovery } =
+    await import("./opfs-targeted-recovery.mjs");
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance(storageParams("count-result"));
+  const preparedQuery = { query: { selector: { value: "probe" } } };
+  const originalConsoleError = console.error;
+  console.error = (...args) => errors.push(args);
+  let derivedResult;
+  try {
+    derivedResult = await recovering.count(preparedQuery);
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.deepEqual(derivedResult, {
+    count: records.length,
+    mode: "fast",
+  });
+  assert.strictEqual(queriedPreparedQuery, preparedQuery);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0][0], /^\[count-recovery\].*collection=products$/);
+  assert.strictEqual(await recovering.count(preparedQuery), validResult);
+});
+
 test("falls back to singleton reads when only a combined response is malformed", async () => {
   const records = [document("cache:orders", 0), document("cache:products", 1)];
   const instance = {
@@ -143,6 +185,7 @@ test("falls back to singleton reads when only a combined response is malformed",
         : JSON.stringify(records.filter(({ id }) => ids.includes(id))),
     bulkWrite: async () => ({ error: [] }),
     query: async () => JSON.stringify({ documents: records }),
+    count: async () => ({ count: records.length, mode: "fast" }),
     getChangedDocumentsSince: async () =>
       JSON.stringify({ documents: records }),
   };
@@ -195,6 +238,7 @@ test("falls back to singleton writes when a combined write is malformed", async 
       return { error: [] };
     },
     query: async () => JSON.stringify({ documents: [] }),
+    count: async () => ({ count: 0, mode: "fast" }),
     getChangedDocumentsSince: async () => JSON.stringify({ documents: [] }),
   };
   const { withTargetedOpfsRecovery } =
