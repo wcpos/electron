@@ -66,9 +66,10 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 			return false;
 		}
 	};
-	const mainFrame = window.webContents.mainFrame;
-	const isTrustedFrame = (frame: unknown) =>
-		!!mainFrame && frame === mainFrame && isTrustedUrl(mainFrame.url);
+	const isTrustedFrame = (frame: unknown) => {
+		const mainFrame = window.webContents.mainFrame;
+		return !!mainFrame && frame === mainFrame && isTrustedUrl(mainFrame.url);
+	};
 
 	session.setDevicePermissionHandler(
 		(details) =>
@@ -102,7 +103,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		webContents: WebContents,
 		callback: (portId: string) => void
 	) => {
-		if (!isThisWindow(webContents) || !isTrustedFrame(mainFrame)) return;
+		if (!isThisWindow(webContents) || !isTrustedFrame(window.webContents.mainFrame)) return;
 		event.preventDefault();
 		logger.debug(`[device-select] select-serial-port fired with ${portList.length} port(s)`);
 		pendingSerial = callback;

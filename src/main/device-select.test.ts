@@ -48,7 +48,7 @@ try {
 	}
 	class FakeWebContents extends EventEmitter {
 		session = new FakeSession();
-		mainFrame = { id: 'main-frame', url: 'wcpos://-/index.html' };
+		mainFrame = { id: 'initial-main-frame', url: 'about:blank' };
 		sent: { channel: string; payload: unknown }[] = [];
 		send(channel: string, payload: unknown) {
 			this.sent.push({ channel, payload });
@@ -66,6 +66,8 @@ try {
 	const session = webContents.session;
 
 	registerScannerDeviceSelection(win as never);
+	// Initial navigation replaces the frame that existed when the handlers were registered.
+	webContents.mainFrame = { id: 'main-frame-after-navigation', url: 'wcpos://-/index.html' };
 
 	// Permission handlers grant serial + hid only.
 	assert.equal(
@@ -127,6 +129,7 @@ try {
 		(portId: string) => serialCalls.push(portId)
 	);
 	assert.equal(fakeIpcMain.listenerCount('serial-port-selected'), 1);
+	assert.deepEqual(webContents.lastPayload('serial-ports'), [{ id: 's1', name: 'Scanner COM3' }]);
 	// A port plugged in while the picker is open is appended and re-sent.
 	session.emit('serial-port-added', noopEvent, {
 		portId: 's2',
