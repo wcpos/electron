@@ -7,6 +7,7 @@ import {
 } from 'electron';
 
 import { logger } from './log';
+import { isDevelopment } from './util';
 
 /**
  * Wire Web Serial / WebHID device selection for a window so barcode scanners can
@@ -53,14 +54,33 @@ interface HidDeviceDetails {
 export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	const { session } = window.webContents;
 	const isThisWindow = (webContents: WebContents | undefined) => webContents === window.webContents;
+	const trustedPort = process.env.EXPO_PORT || '8088';
+	const isTrustedUrl = (value: string | undefined) => {
+		if (!value) return false;
+		try {
+			const url = new URL(value);
+			return isDevelopment
+				? url.protocol === 'http:' && url.hostname === 'localhost' && url.port === trustedPort
+				: url.protocol === 'wcpos:' && url.hostname === '-';
+		} catch {
+			return false;
+		}
+	};
+	const mainFrame = window.webContents.mainFrame;
+	const isTrustedFrame = (frame: unknown) =>
+		!!mainFrame && frame === mainFrame && isTrustedUrl(mainFrame.url);
 
-	// Grant serial + HID device access (one handler per session; the logic is
-	// identical per window, so re-registering across windows is harmless).
 	session.setDevicePermissionHandler(
-		(details) => details.deviceType === 'serial' || details.deviceType === 'hid'
+		(details) =>
+			(details.deviceType === 'serial' || details.deviceType === 'hid') &&
+			isTrustedUrl(details.origin)
 	);
 	session.setPermissionCheckHandler(
-		(_webContents, permission) => permission === 'serial' || permission === 'hid'
+		(webContents, permission, requestingOrigin, details) =>
+			isThisWindow(webContents || undefined) &&
+			(permission === 'serial' || permission === 'hid') &&
+			details.isMainFrame &&
+			isTrustedUrl(requestingOrigin)
 	);
 
 	// --- Serial ---------------------------------------------------------------
@@ -82,7 +102,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		webContents: WebContents,
 		callback: (portId: string) => void
 	) => {
-		if (!isThisWindow(webContents)) return;
+		if (!isThisWindow(webContents) || !isTrustedFrame(mainFrame)) return;
 		event.preventDefault();
 		logger.debug(`[device-select] select-serial-port fired with ${portList.length} port(s)`);
 		pendingSerial = callback;
@@ -104,7 +124,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	session.on('serial-port-removed', onSerialRemoved);
 
 	const onSerialSelected = (event: IpcMainEvent, portId: string) => {
-		if (!isThisWindow(event.sender)) return;
+		if (!isThisWindow(event.sender) || !isTrustedFrame(event.senderFrame)) return;
 		if (!pendingSerial) {
 			logger.info('[device-select] serial selection received with no pending chooser — ignored');
 			return;
@@ -129,15 +149,12 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 			}))
 		);
 	};
-	const isThisFrame = (frame: unknown) =>
-		!frame || frame === (window.webContents as unknown as { mainFrame?: unknown }).mainFrame;
-
 	const onSelectHidDevice = (
 		event: Event,
 		details: HidSelectDetails,
 		callback: (deviceId?: string) => void
 	) => {
-		if (!isThisFrame(details.frame)) return;
+		if (!isTrustedFrame(details.frame)) return;
 		event.preventDefault();
 		logger.debug(
 			`[device-select] select-hid-device fired with ${details.deviceList.length} device(s)`
@@ -162,7 +179,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	session.on('hid-device-removed', onHidRemoved);
 
 	const onHidSelected = (event: IpcMainEvent, deviceId: string) => {
-		if (!isThisWindow(event.sender)) return;
+		if (!isThisWindow(event.sender) || !isTrustedFrame(event.senderFrame)) return;
 		if (!pendingHid) {
 			logger.info('[device-select] hid selection received with no pending chooser — ignored');
 			return;

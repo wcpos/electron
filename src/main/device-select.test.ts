@@ -27,18 +27,28 @@ try {
 		require('./device-select') as typeof import('./device-select');
 
 	class FakeSession extends EventEmitter {
-		devicePermissionHandler: ((details: { deviceType: string }) => boolean) | null = null;
-		permissionCheckHandler: ((wc: unknown, permission: string) => boolean) | null = null;
-		setDevicePermissionHandler(handler: (details: { deviceType: string }) => boolean) {
+		devicePermissionHandler: ((details: { deviceType: string; origin: string }) => boolean) | null =
+			null;
+		permissionCheckHandler:
+			| ((
+					wc: unknown,
+					permission: string,
+					origin: string,
+					details: { isMainFrame: boolean }
+			  ) => boolean)
+			| null = null;
+		setDevicePermissionHandler(
+			handler: (details: { deviceType: string; origin: string }) => boolean
+		) {
 			this.devicePermissionHandler = handler;
 		}
-		setPermissionCheckHandler(handler: (wc: unknown, permission: string) => boolean) {
+		setPermissionCheckHandler(handler: typeof this.permissionCheckHandler) {
 			this.permissionCheckHandler = handler;
 		}
 	}
 	class FakeWebContents extends EventEmitter {
 		session = new FakeSession();
-		mainFrame = { id: 'main-frame' };
+		mainFrame = { id: 'main-frame', url: 'wcpos://-/index.html' };
 		sent: { channel: string; payload: unknown }[] = [];
 		send(channel: string, payload: unknown) {
 			this.sent.push({ channel, payload });
@@ -49,18 +59,60 @@ try {
 		}
 	}
 	const webContents = new FakeWebContents();
-	const win = new EventEmitter() as EventEmitter & { webContents: FakeWebContents };
+	const win = new EventEmitter() as EventEmitter & {
+		webContents: FakeWebContents;
+	};
 	win.webContents = webContents;
 	const session = webContents.session;
 
 	registerScannerDeviceSelection(win as never);
 
 	// Permission handlers grant serial + hid only.
-	assert.equal(session.devicePermissionHandler!({ deviceType: 'serial' }), true);
-	assert.equal(session.devicePermissionHandler!({ deviceType: 'hid' }), true);
-	assert.equal(session.devicePermissionHandler!({ deviceType: 'usb' }), false);
-	assert.equal(session.permissionCheckHandler!(null, 'hid'), true);
-	assert.equal(session.permissionCheckHandler!(null, 'geolocation'), false);
+	assert.equal(
+		session.devicePermissionHandler!({
+			deviceType: 'serial',
+			origin: 'wcpos://-',
+		}),
+		true
+	);
+	assert.equal(
+		session.devicePermissionHandler!({
+			deviceType: 'hid',
+			origin: 'https://evil.example',
+		}),
+		false
+	);
+	assert.equal(
+		session.devicePermissionHandler!({
+			deviceType: 'usb',
+			origin: 'wcpos://-',
+		}),
+		false
+	);
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'wcpos://-', {
+			isMainFrame: true,
+		}),
+		true
+	);
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'https://evil.example', {
+			isMainFrame: true,
+		}),
+		false
+	);
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'wcpos://-', {
+			isMainFrame: false,
+		}),
+		false
+	);
+	assert.equal(
+		session.permissionCheckHandler!(null, 'hid', 'wcpos://-', {
+			isMainFrame: true,
+		}),
+		false
+	);
 
 	const noopEvent = { preventDefault() {} };
 	const serialCalls: string[] = [];
@@ -76,7 +128,10 @@ try {
 	);
 	assert.equal(fakeIpcMain.listenerCount('serial-port-selected'), 1);
 	// A port plugged in while the picker is open is appended and re-sent.
-	session.emit('serial-port-added', noopEvent, { portId: 's2', portName: 'Scanner COM4' });
+	session.emit('serial-port-added', noopEvent, {
+		portId: 's2',
+		portName: 'Scanner COM4',
+	});
 	assert.deepEqual(webContents.lastPayload('serial-ports'), [
 		{ id: 's1', name: 'Scanner COM3' },
 		{ id: 's2', name: 'Scanner COM4' },
@@ -85,7 +140,18 @@ try {
 	session.emit('serial-port-removed', noopEvent, { portId: 's1' });
 	assert.deepEqual(webContents.lastPayload('serial-ports'), [{ id: 's2', name: 'Scanner COM4' }]);
 	// Selection invokes the callback once; after that hot-plug is inert.
-	fakeIpcMain.emit('serial-port-selected', { sender: webContents }, 's2');
+	// A reply from an untrusted/sub frame cannot complete the chooser.
+	fakeIpcMain.emit(
+		'serial-port-selected',
+		{ sender: webContents, senderFrame: { url: 'https://evil.example' } },
+		's1'
+	);
+	assert.deepEqual(serialCalls, []);
+	fakeIpcMain.emit(
+		'serial-port-selected',
+		{ sender: webContents, senderFrame: webContents.mainFrame },
+		's2'
+	);
 	assert.deepEqual(serialCalls, ['s2']);
 	const sentCount = webContents.sent.length;
 	session.emit('serial-port-added', noopEvent, { portId: 's9' });
@@ -112,18 +178,27 @@ try {
 	session.emit(
 		'select-hid-device',
 		noopEvent,
-		{ deviceList: [{ deviceId: 'h1', productName: 'Barcode HID' }], frame: webContents.mainFrame },
+		{
+			deviceList: [{ deviceId: 'h1', productName: 'Barcode HID' }],
+			frame: webContents.mainFrame,
+		},
 		(deviceId?: string) => hidCalls.push([deviceId])
 	);
 	assert.deepEqual(webContents.lastPayload('hid-devices'), [{ id: 'h1', name: 'Barcode HID' }]);
 	// Hot-plug add refreshes.
-	session.emit('hid-device-added', noopEvent, { device: { deviceId: 'h2', name: 'Second HID' } });
+	session.emit('hid-device-added', noopEvent, {
+		device: { deviceId: 'h2', name: 'Second HID' },
+	});
 	assert.deepEqual(webContents.lastPayload('hid-devices'), [
 		{ id: 'h1', name: 'Barcode HID' },
 		{ id: 'h2', name: 'Second HID' },
 	]);
 	// Cancelling (empty id) calls the callback with NO argument, not ''.
-	fakeIpcMain.emit('hid-device-selected', { sender: webContents }, '');
+	fakeIpcMain.emit(
+		'hid-device-selected',
+		{ sender: webContents, senderFrame: webContents.mainFrame },
+		''
+	);
 	assert.deepEqual(hidCalls, [[undefined]]);
 
 	// A real selection passes the id through.
@@ -133,7 +208,11 @@ try {
 		{ deviceList: [{ deviceId: 'h3' }], frame: webContents.mainFrame },
 		(deviceId?: string) => hidCalls.push([deviceId])
 	);
-	fakeIpcMain.emit('hid-device-selected', { sender: webContents }, 'h3');
+	fakeIpcMain.emit(
+		'hid-device-selected',
+		{ sender: webContents, senderFrame: webContents.mainFrame },
+		'h3'
+	);
 	assert.deepEqual(hidCalls[1], ['h3']);
 
 	// --- Window close removes every listener.
