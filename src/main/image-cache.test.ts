@@ -165,6 +165,21 @@ async function main() {
 	);
 	assert.ok(fs.existsSync(cacheDir), 'handler should leave the cache directory on disk');
 
+	requestedUrl = undefined;
+	const localhostUrl = 'http://127.0.0.1/admin/secret';
+	const localhostResponse = await imageHandler!(
+		requestFromRenderer(Buffer.from(localhostUrl).toString('base64url'))
+	);
+	assert.equal(localhostResponse.status, 403, 'handler must reject localhost image targets');
+	assert.equal(requestedUrl, undefined, 'handler must not fetch rejected localhost targets');
+
+	const lanUrl = 'http://192.168.1.10/private';
+	const lanResponse = await imageHandler!(
+		requestFromRenderer(Buffer.from(lanUrl).toString('base64url'))
+	);
+	assert.equal(lanResponse.status, 403, 'handler must reject private-network image targets');
+	assert.equal(requestedUrl, undefined, 'handler must not fetch rejected private-network targets');
+
 	const hash = crypto.createHash('sha256').update(originalUrl).digest('hex');
 	const imagePath = path.join(cacheDir, hash);
 	const metaPath = path.join(cacheDir, `${hash}.json`);

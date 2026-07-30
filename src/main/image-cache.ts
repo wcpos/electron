@@ -1,5 +1,9 @@
 import crypto from 'crypto';
+import dns from 'dns';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
+import net from 'net';
 import path from 'path';
 
 import axios from 'axios';
@@ -104,12 +108,75 @@ function writeCacheEntry(
  */
 const inFlight = new Map<string, Promise<{ buffer: Buffer; contentType: string }>>();
 
+function isPublicIp(address: string): boolean {
+	if (net.isIPv4(address)) {
+		const [a, b] = address.split('.').map(Number);
+		return !(
+			a === 0 ||
+			a === 10 ||
+			a === 127 ||
+			(a === 100 && b >= 64 && b <= 127) ||
+			(a === 169 && b === 254) ||
+			(a === 172 && b >= 16 && b <= 31) ||
+			(a === 192 && (b === 0 || b === 168)) ||
+			(a === 198 && (b === 18 || b === 19)) ||
+			a >= 224
+		);
+	}
+
+	if (!net.isIPv6(address)) return false;
+	const normalized = address.toLowerCase().split('%')[0];
+	if (normalized.startsWith('::ffff:')) {
+		const mapped = normalized.slice('::ffff:'.length);
+		if (net.isIPv4(mapped)) return isPublicIp(mapped);
+		const groups = mapped.split(':');
+		if (groups.length === 2) {
+			const high = Number.parseInt(groups[0], 16);
+			const low = Number.parseInt(groups[1], 16);
+			if (Number.isFinite(high) && Number.isFinite(low)) {
+				return isPublicIp(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
+			}
+		}
+		return false;
+	}
+	return !(
+		normalized === '::' ||
+		normalized === '::1' ||
+		normalized.startsWith('fc') ||
+		normalized.startsWith('fd') ||
+		/^fe[89ab]/.test(normalized) ||
+		normalized.startsWith('ff')
+	);
+}
+
+const publicNetworkLookup: net.LookupFunction = (hostname, options, callback): void => {
+	dns.lookup(hostname, { ...options, all: false }, (err, address, family) => {
+		if (err) return callback(err, address, family);
+		if (!isPublicIp(address)) {
+			const blocked = new Error(`Refusing to connect to non-public address for ${hostname}`);
+			return callback(blocked, address, family);
+		}
+		callback(null, address, family);
+	});
+};
+
+// Resolve through a validating lookup on every connection (including redirects).
+// This prevents DNS rebinding from turning the image fetcher into a localhost/LAN proxy.
+const publicHttpAgent = new http.Agent({ lookup: publicNetworkLookup });
+const publicHttpsAgent = new https.Agent({ lookup: publicNetworkLookup });
+
 async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType: string }> {
 	const existing = inFlight.get(url);
 	if (existing) return existing;
 
 	const promise = axios
-		.get(url, { responseType: 'arraybuffer', timeout: 30000 })
+		.get(url, {
+			responseType: 'arraybuffer',
+			timeout: 30000,
+			httpAgent: publicHttpAgent,
+			httpsAgent: publicHttpsAgent,
+			proxy: false,
+		})
 		.then((response) => {
 			const contentType = (response.headers['content-type'] as string) || 'image/jpeg';
 			return { buffer: Buffer.from(response.data), contentType };
@@ -155,6 +222,10 @@ app.on('ready', () => {
 			}
 			if (validatedUrl.protocol !== 'http:' && validatedUrl.protocol !== 'https:') {
 				return new Response(null, { status: 400 });
+			}
+			const hostname = validatedUrl.hostname.replace(/^\[|\]$/g, '');
+			if (net.isIP(hostname) && !isPublicIp(hostname)) {
+				return new Response(null, { status: 403 });
 			}
 
 			const cacheDir = getCacheDir();
