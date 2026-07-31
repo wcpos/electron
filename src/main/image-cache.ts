@@ -145,14 +145,18 @@ function isPublicIp(address: string): boolean {
 		normalized.startsWith('fc') ||
 		normalized.startsWith('fd') ||
 		/^fe[89ab]/.test(normalized) ||
+		/^fe[c-f]/.test(normalized) ||
 		normalized.startsWith('ff')
 	);
 }
 
 const publicNetworkLookup: net.LookupFunction = (hostname, options, callback): void => {
-	dns.lookup(hostname, { ...options, all: false }, (err, address, family) => {
+	dns.lookup(hostname, options, (err, address, family) => {
 		if (err) return callback(err, address, family);
-		if (!isPublicIp(address)) {
+		const resolvedAddresses = Array.isArray(address)
+			? address.map((result) => result.address)
+			: [address];
+		if (resolvedAddresses.some((result) => !isPublicIp(result))) {
 			const blocked = new Error(`Refusing to connect to non-public address for ${hostname}`);
 			return callback(blocked, address, family);
 		}
@@ -165,6 +169,12 @@ const publicNetworkLookup: net.LookupFunction = (hostname, options, callback): v
 const publicHttpAgent = new http.Agent({ lookup: publicNetworkLookup });
 const publicHttpsAgent = new https.Agent({ lookup: publicNetworkLookup });
 
+function hostnameResolvesToPublicNetwork(hostname: string): Promise<boolean> {
+	return new Promise((resolve) => {
+		publicNetworkLookup(hostname, { all: true }, (err) => resolve(!err));
+	});
+}
+
 async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType: string }> {
 	const existing = inFlight.get(url);
 	if (existing) return existing;
@@ -176,6 +186,12 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType
 			httpAgent: publicHttpAgent,
 			httpsAgent: publicHttpsAgent,
 			proxy: false,
+			beforeRedirect: (options) => {
+				const hostname = options.hostname.replace(/^\[|\]$/g, '');
+				if (net.isIP(hostname) && !isPublicIp(hostname)) {
+					throw new Error(`Refusing to connect to non-public address for ${hostname}`);
+				}
+			},
 		})
 		.then((response) => {
 			const contentType = (response.headers['content-type'] as string) || 'image/jpeg';
@@ -235,6 +251,9 @@ app.on('ready', () => {
 
 			// Serve from cache if exists
 			if (fs.existsSync(imagePath) && fs.existsSync(metaPath)) {
+				if (!net.isIP(hostname) && !(await hostnameResolvesToPublicNetwork(hostname))) {
+					return new Response(null, { status: 403 });
+				}
 				const meta: CacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
 				const body = fs.readFileSync(imagePath);
 

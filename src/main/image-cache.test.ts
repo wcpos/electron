@@ -1,17 +1,25 @@
 import assert from 'assert/strict';
 import crypto from 'crypto';
+import dns from 'dns';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Module from 'module';
+
+import type { LookupFunction } from 'net';
 
 const readyListeners: (() => void)[] = [];
 const privilegedSchemeCalls: { scheme: string; privileges: Record<string, boolean> }[][] = [];
 const serveCalls: { scheme?: string; partition?: string }[] = [];
 const moduleLoadOrder: string[] = [];
 type ImageRequest = { url: string; headers: Headers };
+type AxiosRequestOptions = {
+	httpAgent?: { options: { lookup?: LookupFunction } };
+	beforeRedirect?: (options: { hostname: string }) => void;
+};
 let imageHandler: ((request: ImageRequest) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
+let requestedOptions: AxiosRequestOptions | undefined;
 let nextImageBytes = Buffer.from('image-bytes');
 const warnMessages: unknown[][] = [];
 const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-image-cache-test-'));
@@ -50,8 +58,9 @@ const electronServeMock = (options: { scheme?: string; partition?: string }) => 
 const imageBytes = Buffer.from('image-bytes');
 
 const axiosMock = {
-	get(url: string) {
+	get(url: string, options: AxiosRequestOptions) {
 		requestedUrl = url;
+		requestedOptions = options;
 		return Promise.resolve({
 			data: nextImageBytes,
 			headers: { 'content-type': 'image/jpeg' },
@@ -165,6 +174,59 @@ async function main() {
 	);
 	assert.ok(fs.existsSync(cacheDir), 'handler should leave the cache directory on disk');
 
+	const lookup = requestedOptions?.httpAgent?.options.lookup;
+	assert.equal(typeof lookup, 'function', 'download agent should provide a validating lookup');
+	const allAddresses = await new Promise((resolve, reject) => {
+		lookup!('8.8.8.8', { all: true }, (error, addresses) => {
+			if (error) reject(error);
+			else resolve(addresses);
+		});
+	});
+	assert.deepEqual(
+		allAddresses,
+		[{ address: '8.8.8.8', family: 4 }],
+		'validating lookup must preserve the all-address callback shape'
+	);
+
+	const originalLookup = dns.lookup;
+	dns.lookup = ((
+		_hostname: string,
+		options: dns.LookupOptions,
+		callback: (error: NodeJS.ErrnoException | null, addresses: dns.LookupAddress[]) => void
+	) => {
+		assert.equal(options.all, true, 'validating lookup must preserve the all-address option');
+		callback(null, [
+			{ address: '8.8.8.8', family: 4 },
+			{ address: '127.0.0.1', family: 4 },
+		]);
+	}) as typeof dns.lookup;
+	try {
+		await assert.rejects(
+			new Promise((resolve, reject) => {
+				lookup!('mixed.example', { all: true }, (error) => {
+					if (error) reject(error);
+					else resolve(undefined);
+				});
+			}),
+			/Refusing to connect to non-public address/,
+			'validating lookup must reject a hostname when any resolved address is private'
+		);
+	} finally {
+		dns.lookup = originalLookup;
+	}
+
+	const beforeRedirect = requestedOptions?.beforeRedirect;
+	assert.equal(typeof beforeRedirect, 'function', 'download must validate each redirect target');
+	assert.doesNotThrow(
+		() => beforeRedirect!({ hostname: '8.8.8.8' }),
+		'redirect validation should allow public literal targets'
+	);
+	assert.throws(
+		() => beforeRedirect!({ hostname: '127.0.0.1' }),
+		/Refusing to connect to non-public address/,
+		'redirect validation must reject private literal targets'
+	);
+
 	requestedUrl = undefined;
 	const localhostUrl = 'http://127.0.0.1/admin/secret';
 	const localhostResponse = await imageHandler!(
@@ -179,6 +241,38 @@ async function main() {
 	);
 	assert.equal(lanResponse.status, 403, 'handler must reject private-network image targets');
 	assert.equal(requestedUrl, undefined, 'handler must not fetch rejected private-network targets');
+
+	const siteLocalUrl = 'http://[fec0::1]/private';
+	const siteLocalResponse = await imageHandler!(
+		requestFromRenderer(Buffer.from(siteLocalUrl).toString('base64url'))
+	);
+	assert.equal(siteLocalResponse.status, 403, 'handler must reject IPv6 site-local targets');
+	assert.equal(requestedUrl, undefined, 'handler must not fetch rejected IPv6 site-local targets');
+
+	const legacyLocalhostUrl = 'http://localhost/admin/legacy';
+	const legacyLocalhostHash = crypto.createHash('sha256').update(legacyLocalhostUrl).digest('hex');
+	fs.writeFileSync(path.join(cacheDir, legacyLocalhostHash), Buffer.from('private-cache-bytes'));
+	fs.writeFileSync(
+		path.join(cacheDir, `${legacyLocalhostHash}.json`),
+		JSON.stringify({
+			url: legacyLocalhostUrl,
+			contentType: 'image/jpeg',
+			cachedAt: Date.now(),
+		})
+	);
+	const legacyLocalhostResponse = await imageHandler!(
+		requestFromRenderer(Buffer.from(legacyLocalhostUrl).toString('base64url'))
+	);
+	assert.equal(
+		legacyLocalhostResponse.status,
+		403,
+		'handler must reject private hostname entries left in the persistent cache'
+	);
+	assert.equal(
+		requestedUrl,
+		undefined,
+		'handler must not fetch a rejected private hostname cache entry'
+	);
 
 	const hash = crypto.createHash('sha256').update(originalUrl).digest('hex');
 	const imagePath = path.join(cacheDir, hash);
