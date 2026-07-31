@@ -127,18 +127,22 @@ function isPublicIp(address: string): boolean {
 	if (!net.isIPv6(address)) return false;
 	const unscoped = address.toLowerCase().split('%')[0];
 	const normalized = new URL(`http://[${unscoped}]`).hostname.slice(1, -1);
-	if (normalized.startsWith('::ffff:')) {
-		const mapped = normalized.slice('::ffff:'.length);
-		if (net.isIPv4(mapped)) return isPublicIp(mapped);
-		const groups = mapped.split(':');
-		if (groups.length === 2) {
-			const high = Number.parseInt(groups[0], 16);
-			const low = Number.parseInt(groups[1], 16);
-			if (Number.isFinite(high) && Number.isFinite(low)) {
-				return isPublicIp(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
-			}
-		}
-		return false;
+	const [head = '', tail = ''] = normalized.split('::');
+	const headGroups = head ? head.split(':') : [];
+	const tailGroups = tail ? tail.split(':') : [];
+	const groups = [
+		...headGroups,
+		...Array(8 - headGroups.length - tailGroups.length).fill('0'),
+		...tailGroups,
+	].map((group) => Number.parseInt(group, 16));
+	if (
+		groups.length === 8 &&
+		groups.slice(0, 5).every((group) => group === 0) &&
+		groups[5] === 0xffff
+	) {
+		const high = groups[6];
+		const low = groups[7];
+		return isPublicIp(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
 	}
 	return !(
 		normalized === '::' ||
@@ -170,9 +174,29 @@ const publicNetworkLookup: net.LookupFunction = (hostname, options, callback): v
 const publicHttpAgent = new http.Agent({ lookup: publicNetworkLookup });
 const publicHttpsAgent = new https.Agent({ lookup: publicNetworkLookup });
 
+const PUBLIC_HOST_TTL_MS = 60_000;
+const PUBLIC_HOST_CACHE_LIMIT = 100;
+const publicHostCache = new Map<string, number>();
+
 function hostnameResolvesToPublicNetwork(hostname: string): Promise<boolean> {
+	const cacheKey = hostname.toLowerCase();
+	const expiresAt = publicHostCache.get(cacheKey);
+	if (expiresAt !== undefined && expiresAt > Date.now()) {
+		return Promise.resolve(true);
+	}
+	publicHostCache.delete(cacheKey);
+
 	return new Promise((resolve) => {
-		publicNetworkLookup(hostname, { all: true }, (err) => resolve(!err));
+		publicNetworkLookup(hostname, { all: true }, (err) => {
+			if (!err) {
+				if (publicHostCache.size >= PUBLIC_HOST_CACHE_LIMIT) {
+					const oldestKey = publicHostCache.keys().next().value;
+					if (oldestKey !== undefined) publicHostCache.delete(oldestKey);
+				}
+				publicHostCache.set(cacheKey, Date.now() + PUBLIC_HOST_TTL_MS);
+			}
+			resolve(!err);
+		});
 	});
 }
 

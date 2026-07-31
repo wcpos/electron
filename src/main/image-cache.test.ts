@@ -215,6 +215,39 @@ async function main() {
 		dns.lookup = originalLookup;
 	}
 
+	let publicCacheLookupCount = 0;
+	const originalNow = Date.now;
+	let now = originalNow();
+	Date.now = () => now;
+	dns.lookup = ((
+		_hostname: string,
+		_options: dns.LookupOptions,
+		callback: (error: NodeJS.ErrnoException | null, addresses: dns.LookupAddress[]) => void
+	) => {
+		publicCacheLookupCount += 1;
+		callback(null, [{ address: '8.8.8.8', family: 4 }]);
+	}) as typeof dns.lookup;
+	try {
+		await imageHandler!(requestFromRenderer(encoded));
+		await imageHandler!(requestFromRenderer(encoded));
+		assert.equal(
+			publicCacheLookupCount,
+			1,
+			'repeated cache hits for the same public hostname should reuse a recent DNS validation'
+		);
+
+		now += 60_001;
+		await imageHandler!(requestFromRenderer(encoded));
+		assert.equal(
+			publicCacheLookupCount,
+			2,
+			'expired public-host validation results should be resolved again'
+		);
+	} finally {
+		dns.lookup = originalLookup;
+		Date.now = originalNow;
+	}
+
 	const beforeRedirect = requestedOptions?.beforeRedirect;
 	assert.equal(typeof beforeRedirect, 'function', 'download must validate each redirect target');
 	assert.doesNotThrow(
