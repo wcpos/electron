@@ -226,6 +226,11 @@ async function main() {
 		/Refusing to connect to non-public address/,
 		'redirect validation must reject private literal targets'
 	);
+	assert.throws(
+		() => beforeRedirect!({ hostname: '0:0:0:0:0:ffff:7f00:1' }),
+		/Refusing to connect to non-public address/,
+		'redirect validation must reject expanded IPv4-mapped loopback targets'
+	);
 
 	requestedUrl = undefined;
 	const localhostUrl = 'http://127.0.0.1/admin/secret';
@@ -248,6 +253,21 @@ async function main() {
 	);
 	assert.equal(siteLocalResponse.status, 403, 'handler must reject IPv6 site-local targets');
 	assert.equal(requestedUrl, undefined, 'handler must not fetch rejected IPv6 site-local targets');
+
+	const mappedLoopbackUrl = 'http://[::ffff:127.0.0.1]/private';
+	const mappedLoopbackResponse = await imageHandler!(
+		requestFromRenderer(Buffer.from(mappedLoopbackUrl).toString('base64url'))
+	);
+	assert.equal(
+		mappedLoopbackResponse.status,
+		403,
+		'handler must reject IPv4-mapped loopback targets'
+	);
+	assert.equal(
+		requestedUrl,
+		undefined,
+		'handler must not fetch rejected IPv4-mapped loopback targets'
+	);
 
 	const legacyLocalhostUrl = 'http://localhost/admin/legacy';
 	const legacyLocalhostHash = crypto.createHash('sha256').update(legacyLocalhostUrl).digest('hex');

@@ -125,7 +125,8 @@ function isPublicIp(address: string): boolean {
 	}
 
 	if (!net.isIPv6(address)) return false;
-	const normalized = address.toLowerCase().split('%')[0];
+	const unscoped = address.toLowerCase().split('%')[0];
+	const normalized = new URL(`http://[${unscoped}]`).hostname.slice(1, -1);
 	if (normalized.startsWith('::ffff:')) {
 		const mapped = normalized.slice('::ffff:'.length);
 		if (net.isIPv4(mapped)) return isPublicIp(mapped);
