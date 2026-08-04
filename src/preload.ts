@@ -1,5 +1,3 @@
-import path from 'path';
-
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 import {
@@ -23,7 +21,9 @@ const versionArg = process.argv.find((arg) => arg.startsWith(APP_VERSION_ARG_PRE
 const version = versionArg ? versionArg.slice(APP_VERSION_ARG_PREFIX.length) : '0.0.0';
 
 // No trailing slash: the Expo bundle puts the slash at the start of split asset paths.
-const basePath = `file://${path.join(process.resourcesPath, 'dist')}`;
+// No `path` import here: the sandboxed preload webpack build only externalizes
+// electron/events, so node builtins fail to resolve (see 45176cb).
+const basePath = `file://${process.resourcesPath}/dist`;
 
 /**
  * Expose app info to the renderer process.

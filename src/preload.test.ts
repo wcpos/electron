@@ -89,7 +89,7 @@ async function main() {
 	assert.ok(exposedElectron, 'preload should expose window.electron');
 	assert.equal(
 		exposedElectron.basePath,
-		`file://${path.join(mockResourcesPath, 'dist')}`,
+		`file://${mockResourcesPath}/dist`,
 		'preload should expose the resources dist base path without a trailing slash'
 	);
 	assert.equal(
