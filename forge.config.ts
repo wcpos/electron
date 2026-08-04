@@ -233,6 +233,20 @@ const config: ForgeConfig = {
 		// new AutoUnpackNativesPlugin({}),
 		new WebpackPlugin({
 			mainConfig,
+			// The dev-server client rides along in the preload bundle and turns any
+			// window error into a full-screen overlay. "ResizeObserver loop completed
+			// with undelivered notifications" is a benign browser warning (layout
+			// settled a frame late) — don't block the whole POS UI for it.
+			devServer: {
+				client: {
+					overlay: {
+						runtimeErrors: (error: Error) =>
+							!/ResizeObserver loop (completed with undelivered notifications|limit exceeded)/.test(
+								error?.message ?? ''
+							),
+					},
+				},
+			},
 			// devContentSecurityPolicy: "connect-src 'self' * 'unsafe-eval'",
 			renderer: {
 				config: rendererConfig,
