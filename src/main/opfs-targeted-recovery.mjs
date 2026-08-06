@@ -103,9 +103,36 @@ async function repairDocument(instance, documentId) {
   });
 }
 
-async function dropWhitespaceRows(instance) {
+// Rebuild in-memory index rows from disk: the persisted base plus the pending
+// changelog, exactly as premium's own init does (initRead + replay). Used under
+// multiInstance so a recovering tab sees a peer's already-persisted repair
+// rather than trusting its own possibly-stale rows.
+async function resyncIndexRowsFromDisk(state, runState) {
+  const pending = await state.changelog.getChangelogOperations(runState);
+  for (const indexState of state.indexStates) {
+    await indexState.initRead(runState);
+    for (const operation of pending.get(indexState.indexId) ?? []) {
+      indexState.runChangelogOperation(operation);
+    }
+  }
+}
+
+async function dropWhitespaceRows(instance, params) {
   const state = await instance.internals.statePromise;
+  // Under multiInstance every tab has its OWN worker and its own in-memory index
+  // rows; tabs share only the on-disk files. Recovery must be idempotent against
+  // a peer that already repaired the shared base, because premium's cleanup
+  // persists the repaired rows and EMPTIES the changelog — so the changelog
+  // cannot be used as the "already dropped" evidence (it is erased before the
+  // next tab looks). Instead, rebuild this tab's rows from the persisted base +
+  // pending changelog first: a peer's repair is already folded into the base, so
+  // the dangling row is simply absent and nothing is dropped twice. A duplicate
+  // position-based "D" is exactly what would delete a healthy neighbour if a
+  // crash replayed it over the already-repaired base. Single-instance storage
+  // (native, Electron) has no peers, so it keeps the original path byte-for-byte.
+  const resyncFromDisk = !!params?.multiInstance;
   return instance.taskQueue.runCleanup(async (runState) => {
+    if (resyncFromDisk) await resyncIndexRowsFromDisk(state, runState);
     const accessHandlePromise =
       runState.accessHandlers.get(state.documentFileHandle) ??
       state.documentFileHandle.createAccessHandle();
@@ -574,20 +601,40 @@ export function withTargetedOpfsRecovery(storage) {
       };
 
       if (!cleanup) return instance;
+      // One storage worker serves every tab, so recovery — which mutates index
+      // rows outside the write path — must run on exactly one tab at a time and
+      // publish its result. The Web Locks API is that single-owner gate: it is
+      // present in the worker, scoped per database+collection here, and released
+      // automatically if the holder tab dies mid-recovery (so a crash cannot
+      // wedge the others). The drop itself is idempotent against the shared
+      // changelog, so a waiter that takes the lock after the winner finishes
+      // finds nothing left to do and its retry simply succeeds. Single-instance
+      // storage (native, Electron) has no peers, no Web Locks, and multiInstance
+      // is false there, so it recovers directly exactly as before. multiInstance
+      // without Web Locks cannot occur (it is only ever true on web) — refuse
+      // rather than run an unguarded cross-tab repair.
+      const webLocks = globalThis.navigator?.locks;
+      const recoveryLockName = `wcpos-opfs-recovery:${params.databaseName}:${params.collectionName}`;
       instance.cleanup = async (minimumDeletedTime) => {
         try {
           return await cleanup(minimumDeletedTime);
         } catch (error) {
-          if (params.multiInstance) {
+          if (params.multiInstance && !webLocks) {
             error.message += "; targeted recovery refused: multi-instance";
             throw error;
           }
-          return dropWhitespaceRows(instance)
-            .then(() => cleanup(minimumDeletedTime))
-            .catch((retryError) => {
-              console.error("[cleanup-recovery]", retryError);
-              throw retryError;
-            });
+          const recover = () =>
+            dropWhitespaceRows(instance, params).then(() =>
+              cleanup(minimumDeletedTime),
+            );
+          const recovery =
+            params.multiInstance && webLocks
+              ? webLocks.request(recoveryLockName, recover)
+              : recover();
+          return recovery.catch((retryError) => {
+            console.error("[cleanup-recovery]", retryError);
+            throw retryError;
+          });
         }
       };
 
