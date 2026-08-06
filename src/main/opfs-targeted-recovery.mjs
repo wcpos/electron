@@ -120,6 +120,15 @@ async function dropWhitespaceRows(instance) {
         const operation = [indexState.indexId, position, "D", row];
         indexState.runChangelogOperation(operation);
         await state.changelog.addChangelogOperations(runState, [operation]);
+        state.broadcastChannel?.postMessage({
+          type: "event",
+          eventBulks: [],
+          changelogOperations: [operation],
+          info: {
+            db: state.params.databaseName,
+            col: state.params.collectionName,
+          },
+        });
       }
     }
   });
@@ -577,11 +586,7 @@ export function withTargetedOpfsRecovery(storage) {
       instance.cleanup = async (minimumDeletedTime) => {
         try {
           return await cleanup(minimumDeletedTime);
-        } catch (error) {
-          if (params.multiInstance) {
-            error.message += "; targeted recovery refused: multi-instance";
-            throw error;
-          }
+        } catch (_error) {
           return dropWhitespaceRows(instance)
             .then(() => cleanup(minimumDeletedTime))
             .catch((retryError) => {
