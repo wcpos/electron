@@ -248,6 +248,31 @@ async function main() {
 		});
 		assert.equal(client.disconnectCalls, 1);
 		assert.equal(client.unsubscribeCalls, 4);
+
+		// Overlapping lifecycle calls must serialize: a duplicate init arriving
+		// before the first finishes must not create a second client, and a
+		// subscriber switch mid-flight must dispose the superseded client.
+		const instancesBefore = FakeNovu.instances.length;
+		const [duplicateFirst, duplicateSecond] = await Promise.all([
+			invoke(null, { ...initRequest, subscriberId: 'subscriber-c' }),
+			invoke(null, { ...initRequest, subscriberId: 'subscriber-c' }),
+		]);
+		assert.deepEqual(duplicateFirst, { success: true, result: true });
+		assert.deepEqual(duplicateSecond, { success: true, result: true });
+		assert.equal(
+			FakeNovu.instances.length,
+			instancesBefore + 1,
+			'concurrent duplicate init created an extra client'
+		);
+		await Promise.all([
+			invoke(null, { ...initRequest, subscriberId: 'subscriber-d' }),
+			invoke(null, { ...initRequest, subscriberId: 'subscriber-e' }),
+		]);
+		assert.equal(FakeNovu.instances.length, instancesBefore + 3);
+		const supersededC = FakeNovu.instances[instancesBefore]!;
+		const supersededD = FakeNovu.instances[instancesBefore + 1]!;
+		assert.equal(supersededC.disconnectCalls, 1, 'superseded client c was not disposed');
+		assert.equal(supersededD.disconnectCalls, 1, 'superseded client d was not disposed');
 	} finally {
 		mutableModule._load = originalLoad;
 	}

@@ -18,6 +18,21 @@ let activeSubscriberId: string | null = null;
 let listenerUnsubscribes: Unsubscribe[] = [];
 let readyPromise: Promise<void> | null = null;
 let resolveReady: (() => void) | null = null;
+let lifecycleChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * init/disconnect run strictly in arrival order. Two overlapping inits would
+ * otherwise both pass the subscriber check before either assigns `client`,
+ * leaving the first client's socket connected with no owner.
+ */
+function enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+	const run = lifecycleChain.then(operation, operation);
+	lifecycleChain = run.then(
+		(): undefined => undefined,
+		(): undefined => undefined
+	);
+	return run;
+}
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -75,53 +90,26 @@ function requireClient(): Novu {
 
 async function handleRequest(request: NovuBridgeRequest): Promise<unknown> {
 	switch (request.type) {
-		case 'init': {
-			if (client && activeSubscriberId === request.subscriberId) {
-				return true;
-			}
-			await disposeClient();
-			readyPromise = new Promise<void>((resolve) => {
-				resolveReady = resolve;
-			});
-			client = new Novu({
-				applicationIdentifier: request.applicationIdentifier,
-				apiUrl: request.apiUrl,
-				socketUrl: request.socketUrl,
-				subscriber: { subscriberId: request.subscriberId, locale: request.locale },
-			});
-			activeSubscriberId = request.subscriberId;
-			listenerUnsubscribes = [
-				client.on('session.initialize.resolved', () => {
-					resolveReady?.();
-					pushEvent({ kind: 'session_ready' });
-				}),
-				client.on('notifications.notification_received', (data) => {
-					pushEvent({
-						kind: 'notification_received',
-						notification: jsonPlain(data.result),
-					});
-				}),
-				client.on('notifications.unread_count_changed', (data) => {
-					const result = data.result as { total?: number } | undefined;
-					pushEvent({ kind: 'unread_count_changed', count: result?.total ?? 0 });
-				}),
-				client.on('notifications.unseen_count_changed', (data) => {
-					pushEvent({ kind: 'unseen_count_changed', count: (data.result as number) ?? 0 });
-				}),
-			];
-			return true;
-		}
+		case 'init':
+			return enqueueLifecycle(() => initClient(request));
 		case 'disconnect':
-			await disposeClient();
-			return true;
+			return enqueueLifecycle(async () => {
+				await disposeClient();
+				return true;
+			});
 		case 'waitReady': {
 			if (!readyPromise) return false;
-			return Promise.race([
-				readyPromise.then(() => true),
-				new Promise<boolean>((resolve) =>
-					setTimeout(() => resolve(false), request.timeoutMs ?? 5000)
-				),
-			]);
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			try {
+				return await Promise.race([
+					readyPromise.then(() => true),
+					new Promise<boolean>((resolve) => {
+						timer = setTimeout(() => resolve(false), request.timeoutMs ?? 5000);
+					}),
+				]);
+			} finally {
+				clearTimeout(timer);
+			}
 		}
 		case 'fetchNotifications': {
 			const response = await requireClient().notifications.list({ limit: request.limit ?? 50 });
@@ -144,6 +132,43 @@ async function handleRequest(request: NovuBridgeRequest): Promise<unknown> {
 			return sdkData(response).count;
 		}
 	}
+}
+
+async function initClient(request: Extract<NovuBridgeRequest, { type: 'init' }>): Promise<boolean> {
+	if (client && activeSubscriberId === request.subscriberId) {
+		return true;
+	}
+	await disposeClient();
+	readyPromise = new Promise<void>((resolve) => {
+		resolveReady = resolve;
+	});
+	client = new Novu({
+		applicationIdentifier: request.applicationIdentifier,
+		apiUrl: request.apiUrl,
+		socketUrl: request.socketUrl,
+		subscriber: { subscriberId: request.subscriberId, locale: request.locale },
+	});
+	activeSubscriberId = request.subscriberId;
+	listenerUnsubscribes = [
+		client.on('session.initialize.resolved', () => {
+			resolveReady?.();
+			pushEvent({ kind: 'session_ready' });
+		}),
+		client.on('notifications.notification_received', (data) => {
+			pushEvent({
+				kind: 'notification_received',
+				notification: jsonPlain(data.result),
+			});
+		}),
+		client.on('notifications.unread_count_changed', (data) => {
+			const result = data.result as { total?: number } | undefined;
+			pushEvent({ kind: 'unread_count_changed', count: result?.total ?? 0 });
+		}),
+		client.on('notifications.unseen_count_changed', (data) => {
+			pushEvent({ kind: 'unseen_count_changed', count: (data.result as number) ?? 0 });
+		}),
+	];
+	return true;
 }
 
 export function registerNovuBridge(): void {
