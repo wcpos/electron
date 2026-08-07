@@ -13,6 +13,7 @@ import { installExtensions } from './main/extensions';
 import { registerBluetoothSelection } from './main/bluetooth-select';
 import { registerScannerDeviceSelection } from './main/device-select';
 import { logger } from './main/log';
+import { registerNovuBridge } from './main/novu';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
@@ -28,6 +29,8 @@ import './main/serial-printer';
 import './main/usb-printer';
 import './main/printer-discovery';
 import './main/open-external-url';
+
+registerNovuBridge();
 
 // enabled logging when in development
 // if (process.env.NODE_ENV === 'development') {
