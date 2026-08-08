@@ -66,7 +66,10 @@ async function main() {
 		);
 
 		assert.deepEqual(
-			await measureStorage(path.join(fixture, 'missing-fsdbs'), path.join(fixture, 'missing-legacy')),
+			await measureStorage(
+				path.join(fixture, 'missing-fsdbs'),
+				path.join(fixture, 'missing-legacy')
+			),
 			{ entries: [] }
 		);
 	} finally {
