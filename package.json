@@ -8,7 +8,6 @@
 	"packageManager": "pnpm@10.31.0",
 	"pnpm": {
 		"onlyBuiltDependencies": [
-			"better-sqlite3",
 			"electron",
 			"rxdb-premium"
 		]
@@ -18,7 +17,7 @@
 		"dev": "concurrently \"pnpm run dev:expo\" \"pnpm run dev:electron\"",
 		"dev:expo": "ELECTRON=true EXPO_NO_METRO_LAZY=true BROWSER=none pnpm --filter @wcpos/main dev --web --port ${EXPO_PORT:-8088} --clear",
 		"dev:electron": "NODE_ENV=\"development\" electron-forge start --enable-logging",
-		"rebuild:all": "electron-rebuild -f -o better-sqlite3 && electron-rebuild -f -o usb",
+		"rebuild:all": "electron-rebuild -f -o usb",
 		"package": "DEBUG=electron-osx-sign* electron-forge package",
 		"make": "electron-forge make",
 		"publish-app": "electron-forge publish",
@@ -46,7 +45,6 @@
 		"@sentry/electron": "^7.13.0",
 		"@wcpos/printer": "workspace:*",
 		"axios": "^1.17.0",
-		"better-sqlite3": "12.10.0",
 		"bonjour-service": "1.4.1",
 		"electron-log": "^5.4.4",
 		"electron-serve": "^3.0.1",
@@ -71,7 +69,6 @@
 		"@electron-forge/publisher-github": "^7.11.2",
 		"@electron-forge/shared-types": "^7.11.2",
 		"@electron/rebuild": "^4.0.4",
-		"@types/better-sqlite3": "^7.6.13",
 		"@types/fs-extra": "^11.0.4",
 		"@types/webpack-node-externals": "^3.0.4",
 		"@typescript-eslint/eslint-plugin": "^8.61.0",
