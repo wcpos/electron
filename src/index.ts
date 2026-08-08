@@ -20,7 +20,6 @@ import { initProtocolHandling } from './main/protocol';
 import { loadTranslations } from './main/translations';
 import { AutoUpdater, setUpdater } from './main/update';
 import { createWindow, getMainWindow } from './main/window';
-import './main/database';
 import './main/axios';
 import './main/image-cache';
 import './main/print-external-url';

@@ -11,12 +11,9 @@ async function main() {
 		fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-package-runtime-'))
 	);
 	const webpackMainPath = path.join(buildPath, '.webpack', 'main');
-	const sqliteBuildPath = path.join(buildPath, 'node_modules', 'better-sqlite3', 'build');
 
 	fs.mkdirSync(webpackMainPath, { recursive: true });
-	fs.mkdirSync(sqliteBuildPath, { recursive: true });
 	fs.writeFileSync(path.join(webpackMainPath, 'index.js'), '// packaged main entry');
-	fs.writeFileSync(path.join(sqliteBuildPath, 'placeholder.txt'), 'remove me');
 
 	try {
 		assert.ok(
@@ -30,12 +27,6 @@ async function main() {
 			'41.7.1',
 			'darwin',
 			'arm64'
-		);
-
-		assert.equal(
-			fs.existsSync(sqliteBuildPath),
-			false,
-			'packageAfterPrune should still remove better-sqlite3 build artifacts before signing'
 		);
 
 		const packagedRequire = createRequire(path.join(webpackMainPath, 'index.js'));

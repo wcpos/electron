@@ -38,7 +38,7 @@
 
 - **Receipt printing** to USB, serial and network (ESC/POS) printers, plus the system print dialog.
 - **Printer discovery** on the local network via Bonjour/mDNS.
-- **Local-first data** backed by SQLite through an RxDB storage bridge.
+- **Local-first data** stored on disk by RxDB's filesystem-node storage in the main process, exposed to the renderer over an IPC storage bridge.
 - **OAuth deep-linking** via a custom `wcpos://` protocol handler.
 - **Auto-updates** delivered straight from GitHub releases.
 
@@ -59,7 +59,7 @@ flowchart LR
       IPC["whitelisted ipcRenderer\nsend / invoke / on"]
     end
     subgraph Main["Main process (src/index.ts)"]
-      DB["RxDB ⇄ SQLite\n(better-sqlite3)"]
+      DB["RxDB storage bridge\n(filesystem-node)"]
       PRINT["Printing\nUSB · Serial · TCP/ESC-POS · system"]
       DISCO["Printer discovery\n(Bonjour / mDNS)"]
       PROTO["wcpos:// protocol\n(OAuth deep links)"]
@@ -70,14 +70,14 @@ flowchart LR
     IPC <--> DB & PRINT & DISCO & PROTO & UPD & HTTP
 ```
 
-Communication is locked down for security: `contextIsolation` is on, `nodeIntegration` is off, and [`src/preload.ts`](./src/preload.ts) only forwards an explicit allow-list of IPC channels (e.g. `sqlite`, `rxStorage`, `axios`, `print-raw-tcp`, `printer-discovery`, `auth:prompt`).
+Communication is locked down for security: `contextIsolation` is on, `nodeIntegration` is off, and [`src/preload.ts`](./src/preload.ts) only forwards an explicit allow-list of IPC channels (e.g. `rxStorage`, `axios`, `print-raw-tcp`, `printer-discovery`, `auth:prompt`).
 
 ### Key native services
 
 | Area | Files | Notes |
 | --- | --- | --- |
 | App bootstrap | [`src/index.ts`](./src/index.ts) | Window lifecycle, power-monitor events, startup sequence |
-| Storage | [`src/main/rxdb-storage.ts`](./src/main/rxdb-storage.ts), [`src/main/database.ts`](./src/main/database.ts) | RxDB v17 over `better-sqlite3`, with an IPC attachment bridge |
+| Storage | [`src/main/rxdb-storage.ts`](./src/main/rxdb-storage.ts) | RxDB v17 over `getRxStorageFilesystemNode`, served to the renderer via the RxDB remote IPC bridge (with attachment serialization and targeted corruption recovery) |
 | Printing | [`src/main/print-raw-tcp.ts`](./src/main/print-raw-tcp.ts), [`src/main/usb-printer.ts`](./src/main/usb-printer.ts), [`src/main/serial-printer.ts`](./src/main/serial-printer.ts), [`src/main/winspool-printer.ts`](./src/main/winspool-printer.ts), [`src/main/print-external-url.ts`](./src/main/print-external-url.ts) | Raw ESC/POS over TCP, USB and serial; Windows USB routes through the print spooler |
 | Discovery | [`src/main/printer-discovery.ts`](./src/main/printer-discovery.ts), [`src/main/bluetooth-select.ts`](./src/main/bluetooth-select.ts) | mDNS network printer discovery and Bluetooth device selection |
 | Networking | [`src/main/axios.ts`](./src/main/axios.ts), [`src/main/image-cache.ts`](./src/main/image-cache.ts) | Main-process HTTP proxy and image caching |
@@ -109,7 +109,7 @@ The renderer (`@wcpos/main`) lives in the [WCPOS monorepo](https://github.com/wc
 
 - [Node.js](https://nodejs.org) 22+
 - [pnpm](https://pnpm.io) (the version is pinned via `packageManager` in `package.json`)
-- Platform build tools for native modules (`better-sqlite3`, `usb`, `serialport`) — Xcode CLT on macOS, build-essential/libudev on Linux, the relevant MSVC toolchain on Windows
+- Platform build tools for native modules (`usb`, `serialport`) — Xcode CLT on macOS, build-essential/libudev on Linux, the relevant MSVC toolchain on Windows
 - An [RxDB Premium](https://rxdb.info/premium.html) license token (the app depends on `rxdb-premium`). CI injects it into `package.json` under `accessTokens["rxdb-premium"]`; do the same locally for installs to succeed.
 
 **Run the app**
@@ -139,7 +139,7 @@ pnpm dev
 | `pnpm lint` / `pnpm lint:fix` | Lint the `src/` tree |
 | `pnpm ts:check` | Type-check with `tsc --noEmit` |
 | `pnpm test` | Run the main/preload test suite (see below) |
-| `pnpm rebuild:all` | Rebuild `better-sqlite3` and `usb` for Electron |
+| `pnpm rebuild:all` | Rebuild `usb` for Electron |
 | `pnpm package` | Package the app without producing installers |
 | `pnpm make` | Build platform installers |
 | `pnpm publish-app` | Build and publish a release to GitHub |
