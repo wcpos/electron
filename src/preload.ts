@@ -108,6 +108,7 @@ const ipc = {
 			'print-raw-usb',
 			'serial-discovery',
 			'print-raw-serial',
+			'storage:measure',
 		] as string[],
 		// From main to render, once
 		once: [] as string[], // We'll handle dynamic channels separately

@@ -96,6 +96,12 @@ async function main() {
 		{ channel: 'printer-discovery', args: { action: 'start' } },
 		'preload should allow printer discovery IPC invocations'
 	);
+	await exposedIpcRenderer.invoke('storage:measure');
+	assert.deepEqual(
+		invokeCalls[invokeCalls.length - 1],
+		{ channel: 'storage:measure', args: undefined },
+		'preload should allow storage measurement IPC invocations'
+	);
 	assert.equal(typeof exposedIpcRenderer.on, 'function', 'preload should expose ipcRenderer.on');
 	assert.equal(
 		typeof exposedIpcRenderer.removeListener,
