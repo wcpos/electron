@@ -60,6 +60,9 @@ try {
 	assert.equal(session.devicePermissionHandler!({ deviceType: 'hid' }), true);
 	assert.equal(session.devicePermissionHandler!({ deviceType: 'usb' }), false);
 	assert.equal(session.permissionCheckHandler!(null, 'hid'), true);
+	// media checks must pass, or navigator.permissions.query({name:'camera'})
+	// reports "denied" and the POS camera scanner re-asks on every open.
+	assert.equal(session.permissionCheckHandler!(null, 'media'), true);
 	assert.equal(session.permissionCheckHandler!(null, 'geolocation'), false);
 
 	const noopEvent = { preventDefault() {} };
