@@ -41,9 +41,13 @@ function shim({ state, ctx, docHandle, events, getDocumentsJson }) {
     // (apps/main/public/opfs.worker.js) can be audited for the patch.
     `globalThis.WCPOS_RESURRECTION_LEAK_PATCH=1;` +
     `var ${MARKER}=${events};` +
+    // Failures are contained PER EVENT: a read/parse failure for one event
+    // leaves only that event unbackfilled (it leaks, the pre-patch status
+    // quo) while completed backfills for the rest of the batch are kept.
     `try{var __wcposMim=${state}.firstIdx&&${state}.firstIdx.metaIdMap;` +
     `if(__wcposMim){` +
     `for(var __wcposQ=0;__wcposQ<${events}.length;__wcposQ++){` +
+    `try{` +
     `var __wcposEv=${events}[__wcposQ];` +
     `if(__wcposEv.previousDocumentData||!__wcposMim.has(__wcposEv.documentId))continue;` +
     `var __wcposOldRow=__wcposMim.get(__wcposEv.documentId);` +
@@ -51,7 +55,8 @@ function shim({ state, ctx, docHandle, events, getDocumentsJson }) {
     `if(!__wcposOldDocs||!__wcposOldDocs[0])continue;` +
     `if(${MARKER}===${events})${MARKER}=${events}.slice(0);` +
     `${MARKER}[__wcposQ]=Object.assign({},__wcposEv,{previousDocumentData:__wcposOldDocs[0]});` +
-    `}}}catch(__wcposErr){${MARKER}=${events};}`
+    `}catch(__wcposEvErr){}` +
+    `}}}catch(__wcposErr){}`
   );
 }
 
