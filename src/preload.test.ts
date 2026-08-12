@@ -29,7 +29,7 @@ const electronMock = {
 		send() {},
 		invoke(channel: string, args: unknown) {
 			invokeCalls.push({ channel, args });
-			return Promise.resolve(undefined);
+			return Promise.resolve(channel === 'storage:measure' ? { entries: [] } : undefined);
 		},
 		on(channel: string, listener: (...args: unknown[]) => void) {
 			onCalls.push({ channel, listener });
@@ -110,6 +110,17 @@ async function main() {
 		invokeCalls[invokeCalls.length - 1],
 		{ channel: 'printer-discovery', args: { action: 'start' } },
 		'preload should allow printer discovery IPC invocations'
+	);
+	const storageMeasurement = await exposedIpcRenderer.invoke('storage:measure');
+	assert.deepEqual(
+		invokeCalls[invokeCalls.length - 1],
+		{ channel: 'storage:measure', args: undefined },
+		'preload should allow storage measurement IPC invocations'
+	);
+	assert.deepEqual(
+		storageMeasurement,
+		{ entries: [] },
+		'preload should return storage measurement results'
 	);
 	assert.equal(typeof exposedIpcRenderer.on, 'function', 'preload should expose ipcRenderer.on');
 	assert.equal(

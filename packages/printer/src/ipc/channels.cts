@@ -98,6 +98,12 @@ export interface IpcInvokeChannels {
 	'axios': { req: unknown; res: unknown };
 	'novu': { req: NovuBridgeRequest; res: NovuBridgeResponse };
 	'auth:prompt': { req: AuthPromptParams; res: AuthResult };
+	'storage:measure': {
+		req: undefined;
+		res: {
+			entries: { name: string; bytes: number; root: 'fsdbs' | 'legacy-sqlite' | 'image-cache' }[];
+		};
+	};
 }
 
 export interface IpcSendChannels {
@@ -128,6 +134,7 @@ export const INVOKE_CHANNELS = [
 	'axios',
 	'novu',
 	'auth:prompt',
+	'storage:measure',
 ] as const satisfies readonly (keyof IpcInvokeChannels)[];
 
 export const SEND_CHANNELS = [

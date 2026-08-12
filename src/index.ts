@@ -22,6 +22,7 @@ import { AutoUpdater, setUpdater } from './main/update';
 import { createWindow, getMainWindow } from './main/window';
 import './main/axios';
 import './main/image-cache';
+import './main/storage-measure';
 import './main/print-external-url';
 import './main/print-raw-tcp';
 import './main/serial-printer';
