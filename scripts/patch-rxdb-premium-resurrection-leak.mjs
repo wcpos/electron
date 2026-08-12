@@ -60,9 +60,15 @@ function shim({ state, ctx, docHandle, events, getDocumentsJson }) {
   );
 }
 
-function patchFile(path, { importBefore, importAfter, loopBefore, loopAfter }) {
+/**
+ * Validate-only phase: returns the patched content without writing, so all
+ * dists are checked before any of them is touched — a missing anchor in one
+ * dist must not leave the other half-patched (a retry would then start from
+ * an inconsistent tree).
+ */
+function preparePatch(path, { importBefore, importAfter, loopBefore, loopAfter }) {
   const source = readFileSync(path, "utf8");
-  if (source.includes(MARKER)) return "already patched";
+  if (source.includes(MARKER)) return { path, status: "already patched" };
   if (importBefore) {
     if (!source.includes(importBefore)) {
       throw new Error(`anchor missing in ${path}: import site`);
@@ -73,8 +79,14 @@ function patchFile(path, { importBefore, importAfter, loopBefore, loopAfter }) {
   }
   let next = importBefore ? source.replace(importBefore, importAfter) : source;
   next = next.replace(loopBefore, loopAfter);
-  writeFileSync(path, next);
-  return "patched";
+  return { path, next, status: "patched" };
+}
+
+/** Write phase: only reached when every dist validated. */
+function commitPatches(prepared) {
+  for (const { path, next } of prepared) {
+    if (next !== undefined) writeFileSync(path, next);
+  }
 }
 
 const packageRoot = dirname(require.resolve("rxdb-premium/package.json"));
@@ -101,7 +113,7 @@ const esmShim = shim({
   events: "u",
   getDocumentsJson: "__wcposGDJ",
 });
-const esmResult = patchFile(esm, {
+const esmPrepared = preparePatch(esm, {
   importBefore: 'import{writeDocumentRows as r}from"./documents-file.js"',
   importAfter:
     'import{writeDocumentRows as r,getDocumentsJson as __wcposGDJ}from"./documents-file.js"',
@@ -119,7 +131,7 @@ const cjsShim = shim({
   events: "g",
   getDocumentsJson: "(0,n.getDocumentsJson)",
 });
-const cjsResult = patchFile(cjs, {
+const cjsPrepared = preparePatch(cjs, {
   importBefore: 'n=require("./documents-file.js")',
   importAfter: 'n=require("./documents-file.js")',
   loopBefore:
@@ -129,6 +141,8 @@ const cjsResult = patchFile(cjs, {
     "for(var f=[],I=0;I<c.indexStates.length;I++){c.indexStates[I].appendWriteOperations(__wcposIdxEvents,p.documentPositions,f)}",
 });
 
+commitPatches([esmPrepared, cjsPrepared]);
+
 console.log(
-  `[patch-rxdb-premium-resurrection-leak] esm: ${esmResult}, cjs: ${cjsResult}`,
+  `[patch-rxdb-premium-resurrection-leak] esm: ${esmPrepared.status}, cjs: ${cjsPrepared.status}`,
 );
