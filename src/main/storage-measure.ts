@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { ipcMain } from 'electron';
 
-import { getImageCachePath } from './image-cache';
+import { getImageCachePath } from './image-cache-path';
 import { logger } from './log';
 import { getFilesystemNodeBasePath, getLegacySqliteBasePath } from './rxdb-storage';
 

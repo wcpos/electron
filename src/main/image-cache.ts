@@ -7,8 +7,8 @@ import { app, protocol } from 'electron';
 import serve from 'electron-serve';
 
 import './window';
+import { getImageCachePath } from './image-cache-path';
 import { logger } from './log';
-import { isDevelopment } from './util';
 
 interface CacheMeta {
 	url: string;
@@ -34,12 +34,6 @@ interface CacheMeta {
 serve({ scheme: 'wcpos-image', partition: 'wcpos-image-registration' });
 
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-export function getImageCachePath(): string {
-	return isDevelopment
-		? path.resolve('databases', 'image-cache')
-		: path.resolve(app.getPath('userData'), 'wcpos_dbs', 'image-cache');
-}
 
 function getCacheDir(): string {
 	const base = getImageCachePath();

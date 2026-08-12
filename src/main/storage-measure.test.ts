@@ -23,7 +23,7 @@ mutableModule._load = function patchedLoad(
 			getLegacySqliteBasePath() {},
 		};
 	}
-	if (request === './image-cache') return { getImageCachePath() {} };
+	if (request === './image-cache-path') return { getImageCachePath() {} };
 	return originalLoad.call(this, request, parent, isMain);
 };
 
