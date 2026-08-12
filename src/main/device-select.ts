@@ -59,8 +59,14 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	session.setDevicePermissionHandler(
 		(details) => details.deviceType === 'serial' || details.deviceType === 'hid'
 	);
+	// 'media' must stay grantable: once a check handler is registered it answers
+	// EVERY navigator.permissions.query(), and Electron's default request handler
+	// already grants getUserMedia — denying the check here made the POS camera
+	// scanner re-show its "Allow camera" gate on every open (the app could never
+	// observe the granted state), while the camera itself worked fine.
 	session.setPermissionCheckHandler(
-		(_webContents, permission) => permission === 'serial' || permission === 'hid'
+		(_webContents, permission) =>
+			permission === 'serial' || permission === 'hid' || permission === 'media'
 	);
 
 	// --- Serial ---------------------------------------------------------------

@@ -7,8 +7,8 @@ import { app, protocol } from 'electron';
 import serve from 'electron-serve';
 
 import './window';
+import { getImageCachePath } from './image-cache-path';
 import { logger } from './log';
-import { isDevelopment } from './util';
 
 interface CacheMeta {
 	url: string;
@@ -36,9 +36,7 @@ serve({ scheme: 'wcpos-image', partition: 'wcpos-image-registration' });
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function getCacheDir(): string {
-	const base = isDevelopment
-		? path.resolve('databases', 'image-cache')
-		: path.resolve(app.getPath('userData'), 'wcpos_dbs', 'image-cache');
+	const base = getImageCachePath();
 	if (!fs.existsSync(base)) {
 		fs.mkdirSync(base, { recursive: true });
 	}
