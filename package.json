@@ -21,9 +21,9 @@
 		"dev:expo": "ELECTRON=true EXPO_NO_METRO_LAZY=true BROWSER=none pnpm --filter @wcpos/main dev --web --port ${EXPO_PORT:-8088} --clear",
 		"dev:electron": "NODE_ENV=\"development\" electron-forge start --enable-logging",
 		"rebuild:all": "electron-rebuild -f -o better-sqlite3 && electron-rebuild -f -o usb",
-		"package": "DEBUG=electron-osx-sign* electron-forge package",
-		"make": "electron-forge make",
-		"publish-app": "electron-forge publish",
+		"package": "node scripts/patch-rxdb-premium-resurrection-leak.mjs && DEBUG=electron-osx-sign* electron-forge package",
+		"make": "node scripts/patch-rxdb-premium-resurrection-leak.mjs && electron-forge make",
+		"publish-app": "node scripts/patch-rxdb-premium-resurrection-leak.mjs && electron-forge publish",
 		"lint": "eslint src --ext .js,.jsx,.ts,.tsx",
 		"lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
 		"test": "pnpm run test:resurrection-patch && pnpm run test:preload && pnpm run test:printer-discovery && pnpm run test:winspool-printer && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache && pnpm run test:external-window-isolation && pnpm run test:package-runtime-externals && pnpm run test:bluetooth-select && pnpm run test:device-select && pnpm run test:serial-printer && pnpm run test:storage-measure",
@@ -37,7 +37,7 @@
 		"test:winspool-printer": "ts-node src/main/winspool-printer.test.ts",
 		"test:package-runtime-externals": "ts-node --transpile-only test/package-runtime-externals.test.ts",
 		"test:bluetooth-select": "ts-node src/main/bluetooth-select.test.ts",
-    "test:device-select": "ts-node src/main/device-select.test.ts",
+		"test:device-select": "ts-node src/main/device-select.test.ts",
 		"test:serial-printer": "ts-node src/main/serial-printer.test.ts"
 	},
 	"dependencies": {
