@@ -105,3 +105,5 @@ dist/
 
 # Electron dev filesystem-backed databases
 filesystem-databases/
+
+pnpm-lock.yaml
