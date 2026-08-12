@@ -35,10 +35,14 @@ serve({ scheme: 'wcpos-image', partition: 'wcpos-image-registration' });
 
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-function getCacheDir(): string {
-	const base = isDevelopment
+export function getImageCachePath(): string {
+	return isDevelopment
 		? path.resolve('databases', 'image-cache')
 		: path.resolve(app.getPath('userData'), 'wcpos_dbs', 'image-cache');
+}
+
+function getCacheDir(): string {
+	const base = getImageCachePath();
 	if (!fs.existsSync(base)) {
 		fs.mkdirSync(base, { recursive: true });
 	}

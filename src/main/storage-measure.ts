@@ -3,13 +3,14 @@ import path from 'node:path';
 
 import { ipcMain } from 'electron';
 
+import { getImageCachePath } from './image-cache';
 import { logger } from './log';
 import { getFilesystemNodeBasePath, getLegacySqliteBasePath } from './rxdb-storage';
 
 type StorageEntry = {
 	name: string;
 	bytes: number;
-	root: 'fsdbs' | 'legacy-sqlite';
+	root: 'fsdbs' | 'legacy-sqlite' | 'image-cache';
 };
 
 async function measurePath(entryPath: string): Promise<number | undefined> {
@@ -48,7 +49,11 @@ async function readBasePath(basePath: string) {
 	}
 }
 
-export async function measureStorage(filesystemPath: string, legacyPath: string) {
+export async function measureStorage(
+	filesystemPath: string,
+	legacyPath: string,
+	imageCachePath: string
+) {
 	const entries: StorageEntry[] = [];
 
 	for (const entry of await readBasePath(filesystemPath)) {
@@ -65,12 +70,21 @@ export async function measureStorage(filesystemPath: string, legacyPath: string)
 		}
 	}
 
+	const imageCacheBytes = await measurePath(imageCachePath);
+	if (imageCacheBytes !== undefined) {
+		entries.push({ name: 'image-cache', bytes: imageCacheBytes, root: 'image-cache' });
+	}
+
 	return { entries };
 }
 
 ipcMain.handle('storage:measure', async () => {
 	try {
-		return await measureStorage(getFilesystemNodeBasePath(), getLegacySqliteBasePath());
+		return await measureStorage(
+			getFilesystemNodeBasePath(),
+			getLegacySqliteBasePath(),
+			getImageCachePath()
+		);
 	} catch (error) {
 		logger.error('Failed to measure storage', error);
 		return { entries: [] };
