@@ -23,6 +23,7 @@ mutableModule._load = function patchedLoad(
 			getLegacySqliteBasePath() {},
 		};
 	}
+	if (request === './image-cache-path') return { getImageCachePath() {} };
 	return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -38,14 +39,18 @@ async function main() {
 	const fixture = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'storage-measure-test-'));
 	const filesystemPath = path.join(fixture, 'fsdbs');
 	const legacyPath = path.join(fixture, 'legacy-sqlite');
+	const imageCachePath = path.join(fixture, 'image-cache');
 
 	try {
 		await fs.promises.mkdir(path.join(filesystemPath, 'orders', 'nested'), { recursive: true });
 		await fs.promises.mkdir(path.join(legacyPath, 'ignored-directory'), { recursive: true });
+		await fs.promises.mkdir(path.join(imageCachePath, 'nested'), { recursive: true });
 		await fs.promises.writeFile(path.join(filesystemPath, 'orders', 'one.bin'), '1234');
 		await fs.promises.writeFile(path.join(filesystemPath, 'orders', 'nested', 'two.bin'), '123456');
 		await fs.promises.writeFile(path.join(filesystemPath, 'plain.bin'), '123');
 		await fs.promises.writeFile(path.join(legacyPath, 'store_v3.sqlite3'), '12345');
+		await fs.promises.writeFile(path.join(imageCachePath, 'image.bin'), '1234567');
+		await fs.promises.writeFile(path.join(imageCachePath, 'nested', 'meta.json'), '123');
 		await fs.promises.symlink(
 			path.join(filesystemPath, 'orders'),
 			path.join(filesystemPath, 'orders-link')
@@ -55,10 +60,11 @@ async function main() {
 			path.join(legacyPath, 'store-link.sqlite3')
 		);
 
-		const result = await measureStorage(filesystemPath, legacyPath);
+		const result = await measureStorage(filesystemPath, legacyPath, imageCachePath);
 		assert.deepEqual(
 			result.entries.sort((a, b) => a.name.localeCompare(b.name)),
 			[
+				{ name: 'image-cache', bytes: 10, root: 'image-cache' },
 				{ name: 'orders', bytes: 10, root: 'fsdbs' },
 				{ name: 'plain.bin', bytes: 3, root: 'fsdbs' },
 				{ name: 'store_v3.sqlite3', bytes: 5, root: 'legacy-sqlite' },
@@ -68,7 +74,8 @@ async function main() {
 		assert.deepEqual(
 			await measureStorage(
 				path.join(fixture, 'missing-fsdbs'),
-				path.join(fixture, 'missing-legacy')
+				path.join(fixture, 'missing-legacy'),
+				path.join(fixture, 'missing-image-cache')
 			),
 			{ entries: [] }
 		);
