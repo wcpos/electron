@@ -76,19 +76,19 @@
 		"@types/webpack-node-externals": "^3.0.4",
 		"@typescript-eslint/eslint-plugin": "^8.61.0",
 		"@typescript-eslint/parser": "^8.61.0",
-		"@vercel/webpack-asset-relocator-loader": "1.10.0",
+		"@vercel/webpack-asset-relocator-loader": "1.10.2",
 		"@wcpos/eslint-config": "^2.2.0",
-		"concurrently": "^9.2.1",
-		"electron": "41.10.3",
+		"concurrently": "^10.0.4",
+		"electron": "43.3.0",
 		"electron-debug": "^4.1.0",
 		"electron-devtools-installer": "4.0.0",
 		"electron-squirrel-startup": "^1.0.1",
 		"electron-store": "^11.0.2",
-		"eslint": "^9.39.4",
+		"eslint": "^10.8.1",
 		"fs-extra": "^11.3.5",
 		"node-loader": "^2.1.0",
 		"ts-loader": "^9.6.0",
 		"ts-node": "^10.9.2",
-		"typescript": "5.9.3"
+		"typescript": "7.0.2"
 	}
 }
