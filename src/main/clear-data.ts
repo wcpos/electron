@@ -1,7 +1,6 @@
 import { app, dialog, ipcMain } from 'electron';
 import fs from 'fs-extra';
 
-import { closeAll } from './database';
 import { logger } from './log';
 import { getFilesystemNodeBasePath, getLegacySqliteBasePath } from './rxdb-storage';
 import { t } from './translations';
@@ -18,7 +17,6 @@ const getRelaunchArgs = () => [
 const clearAppDataFolders = async () => {
 	const dbFolders = getDbFolders();
 
-	closeAll();
 	await Promise.all(dbFolders.map((folder) => fs.remove(folder)));
 	logger.info(`${t('app.cleared_app_data')} (${dbFolders.join(', ')})`);
 };
@@ -50,11 +48,10 @@ export const clearAppDataDialog = () => {
 		})
 		.then(({ response }) => {
 			if (response === 0) {
-				// Close legacy sqlite connections and relaunch before deleting all db folders.
-				// filesystem-node storage has no explicit close, so the relaunched process clears it
-				// before the storage bridge is initialised and opens filesystem handles.
+				// Relaunch before deleting the db folders: filesystem-node storage has no
+				// explicit close, so the relaunched process clears them before the storage
+				// bridge is initialised and opens filesystem handles.
 				try {
-					closeAll();
 					app.relaunch({ args: getRelaunchArgs() });
 					app.quit();
 				} catch (err) {

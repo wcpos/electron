@@ -2,6 +2,10 @@
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 
+interface Window {
+	ipcRenderer: import('@wcpos/printer/ipc-channels').TypedIpcRenderer;
+}
+
 // Type declarations for packages without @types
 declare module 'semver' {
 	export function gt(

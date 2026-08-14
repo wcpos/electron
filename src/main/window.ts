@@ -1,10 +1,13 @@
 import * as path from 'path';
 
-import { BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import serve from 'electron-serve';
 
 import { logger as log } from './log';
 import { isDevelopment } from './util';
+
+// Keep in sync with src/preload.ts.
+const APP_VERSION_ARG_PREFIX = '--wcpos-app-version=';
 
 // Set up electron-serve
 let loadURL: (window: BrowserWindow) => void;
@@ -21,9 +24,9 @@ if (isDevelopment) {
 	});
 }
 
-let mainWindow: BrowserWindow | null;
+let mainWindow: BrowserWindow | null = null;
 
-export const createWindow = (): void => {
+export const createWindow = (): BrowserWindow => {
 	// Create the browser window.
 	mainWindow = new BrowserWindow({
 		show: false,
@@ -35,6 +38,7 @@ export const createWindow = (): void => {
 			sandbox: false, // Required for preload script to work
 			nodeIntegration: false, // Prevent Node.js integration for security reasons
 			contextIsolation: true, // Protect against prototype pollution
+			additionalArguments: [`${APP_VERSION_ARG_PREFIX}${app.getVersion()}`],
 		},
 		backgroundColor: '#fff',
 	});
@@ -92,6 +96,8 @@ export const createWindow = (): void => {
 			log.error(`Load failed without retry: ${errorDescription}`);
 		}
 	});
+
+	return mainWindow;
 };
 
 export const getMainWindow = (): BrowserWindow | null => {

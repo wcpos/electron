@@ -1,6 +1,8 @@
-import { ipcMain } from 'electron';
 import Bonjour from 'bonjour-service';
 
+import type { DiscoveredNetworkPrinter, IpcInvokeChannels } from '@wcpos/printer/ipc-channels';
+
+import { handleIpc } from './ipc';
 import { logger } from './log';
 
 interface MdnsServiceLike {
@@ -12,19 +14,9 @@ interface MdnsServiceLike {
 	txt?: Record<string, unknown>;
 }
 
-interface DiscoveredNetworkPrinter {
-	id: string;
-	name: string;
-	connectionType: 'network';
-	address: string;
-	port: number;
-	vendor: 'epson' | 'star' | 'generic';
-}
+export type { DiscoveredNetworkPrinter } from '@wcpos/printer/ipc-channels';
 
-interface PrinterDiscoveryRequest {
-	action?: 'start' | 'stop';
-	timeoutMs?: number;
-}
+type PrinterDiscoveryRequest = IpcInvokeChannels['printer-discovery']['req'];
 
 const SERVICE_TYPES = ['printer', 'pdl-datastream', 'ipp', 'ipps', 'star'];
 const DEFAULT_SCAN_TIMEOUT_MS = 4000;
@@ -134,7 +126,7 @@ async function discoverPrinters(timeoutMs: number): Promise<DiscoveredNetworkPri
 	});
 }
 
-ipcMain.handle('printer-discovery', async (_event, args: unknown) => {
+handleIpc('printer-discovery', async (_event, args) => {
 	const request = parseRequest(args);
 	if (request.action === 'stop') {
 		stopActiveScan();

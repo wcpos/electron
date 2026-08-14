@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import Module from 'node:module';
+import path from 'node:path';
 
 const exposures: Record<string, any> = {};
 const onCalls: {
@@ -12,6 +13,8 @@ const removeListenerCalls: {
 	channel: string;
 	listener: (...args: unknown[]) => void;
 }[] = [];
+const APP_VERSION_ARG_PREFIX = '--wcpos-app-version=';
+const mockResourcesPath = path.join('/mock', 'resources');
 
 const electronMock = {
 	contextBridge: {
@@ -21,18 +24,12 @@ const electronMock = {
 	},
 	ipcRenderer: {
 		sendSync(channel: string) {
-			if (channel === 'getBasePathSync') {
-				return '/mock-base-path';
-			}
-			if (channel === 'getAppVersionSync') {
-				return '0.0.0-test';
-			}
 			throw new Error(`Unexpected sendSync channel: ${channel}`);
 		},
 		send() {},
 		invoke(channel: string, args: unknown) {
 			invokeCalls.push({ channel, args });
-			return Promise.resolve(undefined);
+			return Promise.resolve(channel === 'storage:measure' ? { entries: [] } : undefined);
 		},
 		on(channel: string, listener: (...args: unknown[]) => void) {
 			onCalls.push({ channel, listener });
@@ -77,11 +74,29 @@ async function waitFor(condition: () => boolean, message: string) {
 
 async function main() {
 	try {
+		Object.defineProperty(process, 'resourcesPath', {
+			value: mockResourcesPath,
+			configurable: true,
+		});
+		process.argv.push(`${APP_VERSION_ARG_PREFIX}0.0.0-test`);
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		require('./preload');
 	} finally {
 		mutableModule._load = originalLoad;
 	}
+
+	const exposedElectron = exposures.electron;
+	assert.ok(exposedElectron, 'preload should expose window.electron');
+	assert.equal(
+		exposedElectron.basePath,
+		`file://${mockResourcesPath}/dist`,
+		'preload should expose the resources dist base path without a trailing slash'
+	);
+	assert.equal(
+		exposedElectron.version,
+		'0.0.0-test',
+		'preload should expose the app version from Electron additionalArguments'
+	);
 
 	const exposedIpcRenderer = exposures.ipcRenderer;
 	assert.ok(exposedIpcRenderer, 'preload should expose window.ipcRenderer');
@@ -96,11 +111,16 @@ async function main() {
 		{ channel: 'printer-discovery', args: { action: 'start' } },
 		'preload should allow printer discovery IPC invocations'
 	);
-	await exposedIpcRenderer.invoke('storage:measure');
+	const storageMeasurement = await exposedIpcRenderer.invoke('storage:measure');
 	assert.deepEqual(
 		invokeCalls[invokeCalls.length - 1],
 		{ channel: 'storage:measure', args: undefined },
 		'preload should allow storage measurement IPC invocations'
+	);
+	assert.deepEqual(
+		storageMeasurement,
+		{ entries: [] },
+		'preload should return storage measurement results'
 	);
 	assert.equal(typeof exposedIpcRenderer.on, 'function', 'preload should expose ipcRenderer.on');
 	assert.equal(

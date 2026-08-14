@@ -1,18 +1,25 @@
 import { app, BrowserWindow, powerMonitor } from 'electron';
 
+import {
+	type AppContext,
+	boot,
+	type BootDeps,
+	createMainWindowContext,
+	wireMainWindowConsumers,
+} from './main/boot';
 import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
 import { registerBluetoothSelection } from './main/bluetooth-select';
 import { registerScannerDeviceSelection } from './main/device-select';
 import { logger } from './main/log';
+import { registerNovuBridge } from './main/novu';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
 import { loadTranslations } from './main/translations';
-import { updater } from './main/update';
+import { AutoUpdater, setUpdater } from './main/update';
 import { createWindow, getMainWindow } from './main/window';
-import './main/database';
 import './main/axios';
 import './main/image-cache';
 import './main/storage-measure';
@@ -21,9 +28,9 @@ import './main/print-raw-tcp';
 import './main/serial-printer';
 import './main/usb-printer';
 import './main/printer-discovery';
-import './main/basePath';
-import './main/appVersion';
 import './main/open-external-url';
+
+registerNovuBridge();
 
 // enabled logging when in development
 // if (process.env.NODE_ENV === 'development') {
@@ -36,29 +43,29 @@ if (require('electron-squirrel-startup')) {
 	app.quit();
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app
-	.whenReady()
-	.then(loadTranslations)
-	.then(clearPendingAppDataOnStartup)
-	.then(installExtensions)
-	.then(initializeRxdbStorageBridge)
-	.then(() => {
-		logger.info('Starting app');
-		createWindow();
-		const mainWindow = getMainWindow();
-		if (mainWindow) registerBluetoothSelection(mainWindow);
-		if (mainWindow) registerScannerDeviceSelection(mainWindow);
-		initAuthHandler();
-		if (process.env.NODE_ENV === 'development') {
-			// force protocol handling in development
-			// forge will handle this in production
-			initProtocolHandling();
-		}
-		registerMenu();
-		updater.init(); // must be after createWindow
+const bootDeps: BootDeps = {
+	whenReady: () => app.whenReady(),
+	loadTranslations,
+	clearPendingAppDataOnStartup,
+	installExtensions,
+	initializeRxdbStorageBridge,
+	createWindow,
+	getMainWindow,
+	registerBluetoothSelection,
+	registerScannerDeviceSelection,
+	initAuthHandler,
+	initProtocolHandling,
+	registerMenu,
+	createUpdater: (mainWindow) => setUpdater(new AutoUpdater(mainWindow)),
+	isDevelopment: process.env.NODE_ENV === 'development',
+	logger,
+};
+
+let appContext: AppContext | null = null;
+
+boot(bootDeps)
+	.then((context) => {
+		appContext = context;
 	})
 	.catch((err) => {
 		logger.error('Error starting app');
@@ -78,10 +85,9 @@ app.on('activate', () => {
 	// On OS X it's common to re-create a window in the app when the
 	// dock icon is clicked and there are no other windows open.
 	if (BrowserWindow.getAllWindows().length === 0) {
-		createWindow();
-		const mainWindow = getMainWindow();
-		if (mainWindow) registerBluetoothSelection(mainWindow);
-		if (mainWindow) registerScannerDeviceSelection(mainWindow);
+		const context = appContext ?? {};
+		createMainWindowContext(bootDeps, context);
+		wireMainWindowConsumers(bootDeps, context);
 	}
 });
 

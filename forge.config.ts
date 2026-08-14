@@ -1,4 +1,3 @@
-import { rmSync } from 'fs';
 import path from 'path';
 
 import { MakerDeb } from '@electron-forge/maker-deb';
@@ -67,14 +66,6 @@ const config: ForgeConfig = {
 	rebuildConfig: {},
 	hooks: {
 		packageAfterPrune: async (forgeConfig, buildPath, electronVersion, platform, arch) => {
-			const sqliteBuildPath = path.join(buildPath, 'node_modules', 'better-sqlite3', 'build');
-			// console.log("Sqlite BuildPath: ", sqliteBuildPath);
-			// needs to be deleted otherwise macos codesign will fail
-			rmSync(sqliteBuildPath, {
-				recursive: true,
-				force: true,
-			});
-
 			for (const packageName of runtimeExternalDependencies) {
 				await copyRuntimeExternalDependency(packageName, buildPath);
 			}
@@ -233,6 +224,20 @@ const config: ForgeConfig = {
 		// new AutoUnpackNativesPlugin({}),
 		new WebpackPlugin({
 			mainConfig,
+			// The dev-server client rides along in the preload bundle and turns any
+			// window error into a full-screen overlay. "ResizeObserver loop completed
+			// with undelivered notifications" is a benign browser warning (layout
+			// settled a frame late) — don't block the whole POS UI for it.
+			devServer: {
+				client: {
+					overlay: {
+						runtimeErrors: (error: Error) =>
+							!/ResizeObserver loop (completed with undelivered notifications|limit exceeded)/.test(
+								error?.message ?? ''
+							),
+					},
+				},
+			},
 			// devContentSecurityPolicy: "connect-src 'self' * 'unsafe-eval'",
 			renderer: {
 				config: rendererConfig,

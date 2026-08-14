@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: 📥 Check out the Monorepo repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: wcpos/monorepo
 
@@ -58,7 +58,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -66,10 +66,8 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: 🏗 Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
 
       - name: Install Python setuptools
         run: python3 -m pip install --break-system-packages setuptools
@@ -85,8 +83,8 @@ jobs:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          npm install
-          npm run rebuild:all
+          pnpm install
+          pnpm run rebuild:all
 
       - name: 🚀 Publish MacOS x64 release
         env:
@@ -94,7 +92,7 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run publish-app
+        run: pnpm run publish-app
 
   publish-macos-arm64:
     needs:
@@ -105,7 +103,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -113,10 +111,8 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: 🏗 Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
 
       - name: 🔐 Signing By Apple Developer ID
         uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
@@ -129,8 +125,8 @@ jobs:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          npm install
-          npm run rebuild:all
+          pnpm install
+          pnpm run rebuild:all
 
       - name: 🚀 Publish MacOS arm64 release
         env:
@@ -139,7 +135,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCH: arm64
-        run: npm run publish-app -- --arch=arm64 --platform=darwin
+        run: pnpm run publish-app -- --arch=arm64 --platform=darwin
 
   publish-windows:
     needs: build-expo
@@ -151,7 +147,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -159,23 +155,21 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: 🏗 Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
 
       - name: 📦 Install and rebuild native modules
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          npm install
-          npm run rebuild:all
+          pnpm install
+          pnpm run rebuild:all
 
       - name: 🚀 Publish Windows release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run publish-app
+        run: pnpm run publish-app
 
 
   validate-flathub-extra-data:
@@ -184,7 +178,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
@@ -208,7 +202,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -216,10 +210,8 @@ jobs:
           name: expo-dist
           path: dist
 
-      - name: 🏗 Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
 
       # Build tooling for the blocking makers only (.deb -> dpkg/fakeroot,
       # .rpm -> rpm) plus libudev for the `usb` native module. Flatpak tooling
@@ -241,8 +233,8 @@ jobs:
           npm_config_cxxflags: -std=c++17
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          npm install
-          npm run rebuild:all
+          pnpm install
+          pnpm run rebuild:all
 
       # Flatpak is excluded from this step (forge.config.ts only enables the
       # Flatpak maker when WCPOS_FLATPAK=1) so a flatpak-builder failure can
@@ -251,7 +243,7 @@ jobs:
       - name: 🚀 Publish Linux release (.deb / .rpm)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run publish-app
+        run: pnpm run publish-app
 
       # --- Non-blocking Flatpak attempt below: every step is continue-on-error ---
 
@@ -329,7 +321,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 

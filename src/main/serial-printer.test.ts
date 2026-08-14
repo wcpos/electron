@@ -185,8 +185,13 @@ async function main() {
 	];
 	const darwinResult = (await discoveryHandler()) as { id: string; name: string }[];
 	assert.equal(darwinResult.length, 1, 'darwin discovery should return 1 filtered port');
-	assert.equal(darwinResult[0].id, 'serial:/dev/cu.TM-T88V-SerialPort');
-	assert.equal(darwinResult[0].name, 'TM T88V SerialPort');
+	assert.deepEqual(darwinResult[0], {
+		id: 'serial:/dev/cu.TM-T88V-SerialPort',
+		name: 'TM T88V SerialPort',
+		connectionType: 'bluetooth',
+		address: 'serial:/dev/cu.TM-T88V-SerialPort',
+		vendor: 'generic',
+	});
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// print-raw-serial handler — arg validation
