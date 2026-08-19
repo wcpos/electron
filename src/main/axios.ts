@@ -4,6 +4,7 @@ import axios from 'axios';
 import { ipcMain } from 'electron';
 
 import { logger } from './log';
+import { isDevelopment } from './util';
 
 /**
  * Extract a short label from the request config for logging.
@@ -47,7 +48,6 @@ function prettyLog(label: string, obj: any): void {
  * Set WCPOS_LOG_HTTP_BODIES=1 to get full bodies back when you actually want
  * to read a payload.
  */
-const isDevelopment = process.env.NODE_ENV === 'development';
 const logHttpBodies = isDevelopment && process.env.WCPOS_LOG_HTTP_BODIES === '1';
 
 // import structuredClone from 'core-js-pure/stable/structured-clone';
@@ -103,9 +103,7 @@ ipcMain.handle('axios', (event, obj) => {
 				.request(config)
 				.then((response) => {
 					if (isDevelopment) {
-						logger.debug(
-							`${config.method?.toUpperCase() ?? 'GET'} ${config.url} → ${response.status}`
-						);
+						logger.debug(`${requestLabel(config)} → ${response.status}`);
 					}
 					// Create a serializable response object that matches Axios structure
 					const serializableResponse = {
@@ -135,7 +133,7 @@ ipcMain.handle('axios', (event, obj) => {
 					// small, rare, and it IS the diagnosis. Only the success firehose above
 					// is gated.
 					if (isDevelopment) {
-						logger.debug(`${config.method?.toUpperCase() ?? 'GET'} ${config.url} FAILED`, {
+						logger.debug(`${requestLabel(config)} FAILED`, {
 							status: error.response?.status,
 							data: error.response?.data,
 							message: error.message,
@@ -174,9 +172,9 @@ ipcMain.handle('axios', (event, obj) => {
 					logger.error('HTTP error', {
 						status: error.response?.status,
 						message: error.message,
-						url: obj.config?.url,
+						request: requestLabel(obj.config),
 					});
-					if (logHttpBodies) {
+					if (isDevelopment) {
 						prettyLog(`${requestLabel(obj.config)} ERROR`, {
 							status: error.response?.status,
 							message: error.message,
