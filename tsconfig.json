@@ -5,14 +5,16 @@
     "module": "commonjs",
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "strict": false,
     "noImplicitAny": true,
     "sourceMap": true,
     "baseUrl": ".",
     "rootDir": ".",
     "outDir": "dist",
     "moduleResolution": "node",
-    "ignoreDeprecations": "5.0",
+    "ignoreDeprecations": "6.0",
     "resolveJsonModule": true,
+    "types": ["node"],
     "paths": {
       "*": ["node_modules/*"]
     }
