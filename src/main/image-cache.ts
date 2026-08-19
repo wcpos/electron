@@ -1,5 +1,9 @@
 import crypto from 'crypto';
+import dns from 'dns';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
+import net from 'net';
 import path from 'path';
 
 import axios from 'axios';
@@ -102,12 +106,116 @@ function writeCacheEntry(
  */
 const inFlight = new Map<string, Promise<{ buffer: Buffer; contentType: string }>>();
 
+function isPublicIp(address: string): boolean {
+	if (net.isIPv4(address)) {
+		const [a, b] = address.split('.').map(Number);
+		return !(
+			a === 0 ||
+			a === 10 ||
+			a === 127 ||
+			(a === 100 && b >= 64 && b <= 127) ||
+			(a === 169 && b === 254) ||
+			(a === 172 && b >= 16 && b <= 31) ||
+			(a === 192 && (b === 0 || b === 168)) ||
+			(a === 198 && (b === 18 || b === 19)) ||
+			a >= 224
+		);
+	}
+
+	if (!net.isIPv6(address)) return false;
+	const unscoped = address.toLowerCase().split('%')[0];
+	const normalized = new URL(`http://[${unscoped}]`).hostname.slice(1, -1);
+	const [head = '', tail = ''] = normalized.split('::');
+	const headGroups = head ? head.split(':') : [];
+	const tailGroups = tail ? tail.split(':') : [];
+	const groups = [
+		...headGroups,
+		...Array(8 - headGroups.length - tailGroups.length).fill('0'),
+		...tailGroups,
+	].map((group) => Number.parseInt(group, 16));
+	if (
+		groups.length === 8 &&
+		groups.slice(0, 5).every((group) => group === 0) &&
+		groups[5] === 0xffff
+	) {
+		const high = groups[6];
+		const low = groups[7];
+		return isPublicIp(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
+	}
+	return !(
+		normalized === '::' ||
+		normalized === '::1' ||
+		normalized.startsWith('fc') ||
+		normalized.startsWith('fd') ||
+		/^fe[89ab]/.test(normalized) ||
+		/^fe[c-f]/.test(normalized) ||
+		normalized.startsWith('ff')
+	);
+}
+
+const publicNetworkLookup: net.LookupFunction = (hostname, options, callback): void => {
+	dns.lookup(hostname, options, (err, address, family) => {
+		if (err) return callback(err, address, family);
+		const resolvedAddresses = Array.isArray(address)
+			? address.map((result) => result.address)
+			: [address];
+		if (resolvedAddresses.some((result) => !isPublicIp(result))) {
+			const blocked = new Error(`Refusing to connect to non-public address for ${hostname}`);
+			return callback(blocked, address, family);
+		}
+		callback(null, address, family);
+	});
+};
+
+// Resolve through a validating lookup on every connection (including redirects).
+// This prevents DNS rebinding from turning the image fetcher into a localhost/LAN proxy.
+const publicHttpAgent = new http.Agent({ lookup: publicNetworkLookup });
+const publicHttpsAgent = new https.Agent({ lookup: publicNetworkLookup });
+
+const PUBLIC_HOST_TTL_MS = 60_000;
+const PUBLIC_HOST_CACHE_LIMIT = 100;
+const publicHostCache = new Map<string, number>();
+
+function hostnameResolvesToPublicNetwork(hostname: string): Promise<boolean> {
+	const cacheKey = hostname.toLowerCase();
+	const expiresAt = publicHostCache.get(cacheKey);
+	if (expiresAt !== undefined && expiresAt > Date.now()) {
+		return Promise.resolve(true);
+	}
+	publicHostCache.delete(cacheKey);
+
+	return new Promise((resolve) => {
+		publicNetworkLookup(hostname, { all: true }, (err) => {
+			if (!err) {
+				if (publicHostCache.size >= PUBLIC_HOST_CACHE_LIMIT) {
+					const oldestKey = publicHostCache.keys().next().value;
+					if (oldestKey !== undefined) publicHostCache.delete(oldestKey);
+				}
+				publicHostCache.set(cacheKey, Date.now() + PUBLIC_HOST_TTL_MS);
+			}
+			resolve(!err);
+		});
+	});
+}
+
 async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType: string }> {
 	const existing = inFlight.get(url);
 	if (existing) return existing;
 
 	const promise = axios
-		.get(url, { responseType: 'arraybuffer', timeout: 30000 })
+		.get(url, {
+			responseType: 'arraybuffer',
+			timeout: 30000,
+			httpAgent: publicHttpAgent,
+			httpsAgent: publicHttpsAgent,
+			proxy: false,
+			beforeRedirect: (options) => {
+				const hostname = options.hostname.replace(/^\[|\]$/g, '');
+				if (net.isIP(hostname) && !isPublicIp(hostname)) {
+					throw new Error(`Refusing to connect to non-public address for ${hostname}`);
+				}
+			},
+		})
 		.then((response) => {
 			const contentType = (response.headers['content-type'] as string) || 'image/jpeg';
 			return { buffer: Buffer.from(response.data), contentType };
@@ -154,6 +262,10 @@ app.on('ready', () => {
 			if (validatedUrl.protocol !== 'http:' && validatedUrl.protocol !== 'https:') {
 				return new Response(null, { status: 400 });
 			}
+			const hostname = validatedUrl.hostname.replace(/^\[|\]$/g, '');
+			if (net.isIP(hostname) && !isPublicIp(hostname)) {
+				return new Response(null, { status: 403 });
+			}
 
 			const cacheDir = getCacheDir();
 			const hash = urlToHash(originalUrl);
@@ -162,6 +274,9 @@ app.on('ready', () => {
 
 			// Serve from cache if exists
 			if (fs.existsSync(imagePath) && fs.existsSync(metaPath)) {
+				if (!net.isIP(hostname) && !(await hostnameResolvesToPublicNetwork(hostname))) {
+					return new Response(null, { status: 403 });
+				}
 				const meta: CacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
 				const body = fs.readFileSync(imagePath);
 
