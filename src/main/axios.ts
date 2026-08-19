@@ -4,6 +4,7 @@ import axios from 'axios';
 import { ipcMain } from 'electron';
 
 import { logger } from './log';
+import { isDevelopment } from './util';
 
 /**
  * Extract a short label from the request config for logging.
@@ -32,6 +33,22 @@ function prettyLog(label: string, obj: any): void {
 		logger.debug(`${label} [unable to stringify]`);
 	}
 }
+
+/**
+ * Response BODIES are opt-in, even in development.
+ *
+ * A catalogue sync writes megabytes of product JSON per minute. electron-log
+ * rotates main.log at 1MB, so a single sync silently destroyed the earlier part
+ * of its own session — on 2026-08-19 a 10-minute run left only the last 17
+ * seconds on disk, which is precisely the window a diagnosis does not need.
+ * Bodies also carry customer PII (emails, billing addresses), so they should be
+ * a deliberate choice rather than the default a dev machine falls into.
+ *
+ * Default dev logging is now one line per request: method, url, status.
+ * Set WCPOS_LOG_HTTP_BODIES=1 to get full bodies back when you actually want
+ * to read a payload.
+ */
+const logHttpBodies = isDevelopment && process.env.WCPOS_LOG_HTTP_BODIES === '1';
 
 // import structuredClone from 'core-js-pure/stable/structured-clone';
 
@@ -85,11 +102,8 @@ ipcMain.handle('axios', (event, obj) => {
 			axios
 				.request(config)
 				.then((response) => {
-					if (process.env.NODE_ENV === 'development') {
-						logger.debug(`${config.method?.toUpperCase() ?? 'GET'} ${config.url}`, {
-							status: response.status,
-							data: response.data,
-						});
+					if (isDevelopment) {
+						logger.debug(`${requestLabel(config)} → ${response.status}`);
 					}
 					// Create a serializable response object that matches Axios structure
 					const serializableResponse = {
@@ -106,7 +120,7 @@ ipcMain.handle('axios', (event, obj) => {
 						},
 						request: null as any, // Explicitly null for serialization
 					};
-					if (process.env.NODE_ENV === 'development') {
+					if (logHttpBodies) {
 						prettyLog(requestLabel(obj.config), {
 							status: response.status,
 							data: response.data,
@@ -115,8 +129,11 @@ ipcMain.handle('axios', (event, obj) => {
 					resolve(serializableResponse);
 				})
 				.catch((error) => {
-					if (process.env.NODE_ENV === 'development') {
-						logger.debug(`${config.method?.toUpperCase() ?? 'GET'} ${config.url} FAILED`, {
+					// Failures keep their body unconditionally in dev: an error payload is
+					// small, rare, and it IS the diagnosis. Only the success firehose above
+					// is gated.
+					if (isDevelopment) {
+						logger.debug(`${requestLabel(config)} FAILED`, {
 							status: error.response?.status,
 							data: error.response?.data,
 							message: error.message,
@@ -155,9 +172,9 @@ ipcMain.handle('axios', (event, obj) => {
 					logger.error('HTTP error', {
 						status: error.response?.status,
 						message: error.message,
-						url: obj.config?.url,
+						request: requestLabel(obj.config),
 					});
-					if (process.env.NODE_ENV === 'development') {
+					if (isDevelopment) {
 						prettyLog(`${requestLabel(obj.config)} ERROR`, {
 							status: error.response?.status,
 							message: error.message,
