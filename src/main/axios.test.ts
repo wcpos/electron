@@ -102,6 +102,29 @@ async function main() {
 		assert.ok(!JSON.stringify(debugCalls).includes('success-secret'));
 
 		debugCalls.length = 0;
+		process.env.WCPOS_LOG_HTTP_BODIES = '1';
+		axiosHandler = undefined;
+		delete require.cache[require.resolve('./axios')];
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		require('./axios');
+
+		assert.ok(axiosHandler, 'axios IPC handler should be re-registered');
+
+		await axiosHandler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				baseURL: 'https://store.test/wp-json/wcpos/v2',
+				url: 'products?token=success-secret',
+			},
+		});
+
+		assert.equal(debugCalls.length, 2, 'opt-in should retain the success body log');
+		assert.equal(debugCalls[0]?.[0], 'GET products → 200');
+		assert.match(String(debugCalls[1]?.[0]), /"products": \[\]/);
+		assert.ok(!JSON.stringify(debugCalls).includes('success-secret'));
+
+		debugCalls.length = 0;
 		rejectNextRequest = true;
 
 		await axiosHandler(undefined, {
@@ -116,6 +139,7 @@ async function main() {
 		assert.equal(debugCalls.length, 2, 'development failures should retain both body logs');
 		assert.match(String(debugCalls[0]?.[0]), /^GET orders FAILED$/);
 		assert.match(String(debugCalls[1]?.[0]), /^GET orders ERROR /);
+		assert.match(String(debugCalls[1]?.[0]), /"reason": "server failure"/);
 		assert.equal(errorCalls.length, 1);
 		assert.deepEqual(errorCalls[0], [
 			'HTTP error',
