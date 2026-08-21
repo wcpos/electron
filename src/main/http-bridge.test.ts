@@ -57,7 +57,7 @@ const errorCalls: unknown[][] = [];
 const electronMock = {
 	ipcMain: {
 		handle(channel: string, handler: AxiosHandler) {
-			assert.equal(channel, 'axios');
+			assert.equal(channel, 'http-request');
 			registeredHandler = handler;
 		},
 	},
@@ -94,9 +94,9 @@ mutableModule._load = function patchedLoad(
 };
 
 function loadAxiosModule(): AxiosModule {
-	delete require.cache[require.resolve('./axios')];
+	delete require.cache[require.resolve('./http-bridge')];
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	return require('./axios') as AxiosModule;
+	return require('./http-bridge') as AxiosModule;
 }
 
 function resetCalls(): void {
@@ -111,7 +111,7 @@ async function main() {
 
 	try {
 		const axiosModule = loadAxiosModule();
-		assert.ok(registeredHandler, 'axios IPC handler should be registered');
+		assert.ok(registeredHandler, 'http-request IPC handler should be registered');
 		let handler = axiosModule.createAxiosChannelHandler(fakeFetch);
 
 		const success = await handler(undefined, {
@@ -148,7 +148,7 @@ async function main() {
 		process.env.WCPOS_LOG_HTTP_BODIES = '1';
 		registeredHandler = undefined;
 		handler = loadAxiosModule().createAxiosChannelHandler(fakeFetch);
-		assert.ok(registeredHandler, 'axios IPC handler should be re-registered');
+		assert.ok(registeredHandler, 'http-request IPC handler should be re-registered');
 
 		await handler(undefined, {
 			type: 'request',
