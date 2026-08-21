@@ -56,6 +56,7 @@ type AxiosConfig = {
 	headers?: HeadersInit;
 	params?: Record<string, unknown>;
 	data?: unknown;
+	auth?: { username?: string; password?: string };
 	timeout?: number;
 	validateStatus?: null;
 	responseType?: 'text' | 'arraybuffer';
@@ -84,25 +85,46 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return Object.prototype.toString.call(value) === '[object Object]';
 }
 
-function paramValue(value: unknown): string {
-	if (value instanceof Date) return value.toISOString();
-	if (isPlainObject(value)) return JSON.stringify(value);
-	return String(value);
+// Axios's default encoder: %20 becomes +, and : $ , stay literal (brackets remain
+// percent-encoded). Verified against axios 1.19's getUri output.
+function axiosEncode(value: string): string {
+	return encodeURIComponent(value)
+		.replace(/%3A/gi, ':')
+		.replace(/%24/g, '$')
+		.replace(/%2C/gi, ',')
+		.replace(/%20/g, '+');
+}
+
+// Axios flattens params recursively: arrays as name[]=v per element, plain objects
+// as name[key]=v, Dates as ISO strings. Verified against axios 1.19's getUri.
+function appendParam(query: string[], name: string, value: unknown): void {
+	if (value == null) return;
+	if (Array.isArray(value)) {
+		for (const item of value) appendParam(query, `${name}[]`, item);
+		return;
+	}
+	if (value instanceof Date) {
+		query.push(`${axiosEncode(name)}=${axiosEncode(value.toISOString())}`);
+		return;
+	}
+	if (isPlainObject(value)) {
+		for (const [key, item] of Object.entries(value)) appendParam(query, `${name}[${key}]`, item);
+		return;
+	}
+	query.push(`${axiosEncode(name)}=${axiosEncode(String(value))}`);
 }
 
 export function buildRequestUrl(config: AxiosConfig): string {
 	const url = config.url || '';
-	const requestUrl = /^[a-z][a-z\d+.-]*:/i.test(url)
-		? url
-		: `${(config.baseURL || '').replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
+	// Axios drops any #fragment before appending params (buildURL does this always).
+	const requestUrl = (
+		/^[a-z][a-z\d+.-]*:/i.test(url)
+			? url
+			: `${(config.baseURL || '').replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`
+	).split('#', 1)[0];
 	const query: string[] = [];
 	for (const [key, value] of Object.entries(config.params || {})) {
-		if (value == null) continue;
-		const values = Array.isArray(value) ? value : [value];
-		const name = Array.isArray(value) ? `${key}[]` : key;
-		for (const item of values) {
-			query.push(`${encodeURIComponent(name)}=${encodeURIComponent(paramValue(item))}`);
-		}
+		appendParam(query, key, value);
 	}
 	return query.length
 		? `${requestUrl}${requestUrl.includes('?') ? '&' : '?'}${query.join('&')}`
@@ -184,23 +206,43 @@ export function createAxiosChannelHandler(fetchImpl: typeof net.fetch = net.fetc
 
 		const config = obj.config || {};
 		const controller = new AbortController();
-		const timeoutSignal =
-			config.timeout && config.timeout > 0 ? AbortSignal.timeout(config.timeout) : undefined;
-		const signal = timeoutSignal
-			? AbortSignal.any([controller.signal, timeoutSignal])
-			: controller.signal;
 		if (obj.requestId) activeRequests.set(obj.requestId, controller);
+		// Assigned inside try: a malformed timeout must resolve the failure shape,
+		// never reject the IPC promise (the always-resolve contract).
+		let timeoutSignal: AbortSignal | undefined;
 
 		try {
+			// Axios coerces string timeouts at runtime; AbortSignal.timeout throws on
+			// non-integer or out-of-range values, so normalize before building it.
+			const timeoutMs = Math.floor(Number(config.timeout));
+			if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+				timeoutSignal = AbortSignal.timeout(Math.min(timeoutMs, 2 ** 31 - 1));
+			}
+			const signal = timeoutSignal
+				? AbortSignal.any([controller.signal, timeoutSignal])
+				: controller.signal;
 			const headers = new Headers(config.headers);
+			// Axios generates a Basic Authorization header from config.auth, overriding
+			// any caller-supplied Authorization.
+			if (config.auth) {
+				const basic = `${config.auth.username ?? ''}:${config.auth.password ?? ''}`;
+				headers.set('authorization', `Basic ${Buffer.from(basic).toString('base64')}`);
+			}
+			const method = (config.method || 'GET').toUpperCase();
 			let body = config.data as BodyInit | null | undefined;
 			// Axios JSON-encodes plain objects AND arrays; an array is not a valid BodyInit.
 			if (isPlainObject(config.data) || Array.isArray(config.data)) {
 				body = JSON.stringify(config.data);
 				if (!headers.has('content-type')) headers.set('content-type', 'application/json');
 			}
+			// fetch (like the web platform's XHR lane) cannot send GET/HEAD bodies; the
+			// old Node transport could, but no caller does and the web lane never could —
+			// drop the body rather than fail the whole request with ERR_NETWORK.
+			if (method === 'GET' || method === 'HEAD') {
+				body = undefined;
+			}
 			const response = await fetchImpl(buildRequestUrl(config), {
-				method: config.method || 'GET',
+				method,
 				headers,
 				body,
 				signal,

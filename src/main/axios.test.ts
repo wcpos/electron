@@ -10,6 +10,7 @@ type BridgeConfig = {
 	headers?: Record<string, string>;
 	params?: Record<string, unknown>;
 	data?: unknown;
+	auth?: { username?: string; password?: string };
 	timeout?: number;
 	validateStatus?: null;
 	responseType?: 'text' | 'arraybuffer';
@@ -211,6 +212,64 @@ async function main() {
 			fetchCalls[0]?.url,
 			'https://absolute.test/items?existing=yes&include%5B%5D=1&include%5B%5D=2'
 		);
+
+		// axios-parity serialization: nested objects flatten to name[key], spaces
+		// become +, colons stay literal, fragments are dropped (matches axios 1.19
+		// getUri output, verified against the real library).
+		resetCalls();
+		responder = () => new Response('ok');
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				url: 'https://store.test/items#section',
+				params: { filter: { status: 'open' }, s: 'a b', colon: 'a:b' },
+			},
+		});
+		assert.equal(
+			fetchCalls[0]?.url,
+			'https://store.test/items?filter%5Bstatus%5D=open&s=a+b&colon=a:b'
+		);
+
+		// config.auth becomes a Basic Authorization header (axios behavior).
+		resetCalls();
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				url: 'https://store.test/private',
+				auth: { username: 'user', password: 'pass' },
+			},
+		});
+		assert.equal(
+			(fetchCalls[0]?.init?.headers as Headers).get('authorization'),
+			`Basic ${Buffer.from('user:pass').toString('base64')}`
+		);
+
+		// GET/HEAD bodies are dropped (fetch rejects them; the web XHR lane never
+		// sent them either) instead of failing the request with ERR_NETWORK.
+		resetCalls();
+		const getWithBody = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/search', data: { q: 'x' } },
+		});
+		assert.equal(getWithBody.success, true);
+		assert.equal(fetchCalls[0]?.init?.body, undefined);
+
+		// A string timeout (axios coerces at runtime) must not reject the IPC
+		// promise — it normalizes and still resolves the timeout failure shape.
+		resetCalls();
+		responder = (_url, init) =>
+			new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+					once: true,
+				});
+			});
+		const stringTimeoutKeepAlive = setTimeout(() => {}, 5_000);
+		const stringTimeout = await handler(undefined, {
+			type: 'request',
+			config: { url: 'https://store.test/slow', timeout: '50' as unknown as number },
+		});
+		clearTimeout(stringTimeoutKeepAlive);
+		assert.equal(stringTimeout.code, 'ECONNABORTED');
 
 		resetCalls();
 		responder = () => new Response('missing', { status: 404 });
