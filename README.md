@@ -64,13 +64,13 @@ flowchart LR
       DISCO["Printer discovery\n(Bonjour / mDNS)"]
       PROTO["wcpos:// protocol\n(OAuth deep links)"]
       UPD["Auto-updater"]
-      HTTP["axios proxy\n+ image cache"]
+      HTTP["HTTP bridge (net.fetch)\n+ image cache"]
     end
     UI <--> IPC
     IPC <--> DB & PRINT & DISCO & PROTO & UPD & HTTP
 ```
 
-Communication is locked down for security: `contextIsolation` is on, `nodeIntegration` is off, and [`src/preload.ts`](./src/preload.ts) only forwards an explicit allow-list of IPC channels (e.g. `rxStorage`, `axios`, `print-raw-tcp`, `printer-discovery`, `auth:prompt`).
+Communication is locked down for security: `contextIsolation` is on, `nodeIntegration` is off, and [`src/preload.ts`](./src/preload.ts) only forwards an explicit allow-list of IPC channels (e.g. `rxStorage`, `http-request`, `print-raw-tcp`, `printer-discovery`, `auth:prompt`).
 
 ### Key native services
 
@@ -80,7 +80,7 @@ Communication is locked down for security: `contextIsolation` is on, `nodeIntegr
 | Storage | [`src/main/rxdb-storage.ts`](./src/main/rxdb-storage.ts) | RxDB v17 over `getRxStorageFilesystemNode`, served to the renderer via the RxDB remote IPC bridge (with attachment serialization and targeted corruption recovery) |
 | Printing | [`src/main/print-raw-tcp.ts`](./src/main/print-raw-tcp.ts), [`src/main/usb-printer.ts`](./src/main/usb-printer.ts), [`src/main/serial-printer.ts`](./src/main/serial-printer.ts), [`src/main/winspool-printer.ts`](./src/main/winspool-printer.ts), [`src/main/print-external-url.ts`](./src/main/print-external-url.ts) | Raw ESC/POS over TCP, USB and serial; Windows USB routes through the print spooler |
 | Discovery | [`src/main/printer-discovery.ts`](./src/main/printer-discovery.ts), [`src/main/bluetooth-select.ts`](./src/main/bluetooth-select.ts) | mDNS network printer discovery and Bluetooth device selection |
-| Networking | [`src/main/axios.ts`](./src/main/axios.ts), [`src/main/image-cache.ts`](./src/main/image-cache.ts) | Main-process HTTP proxy and image caching |
+| Networking | [`src/main/http-bridge.ts`](./src/main/http-bridge.ts), [`src/main/image-cache.ts`](./src/main/image-cache.ts) | The `http-request` IPC channel over Chromium `net.fetch` (axios-shaped payloads — the renderer's client library is axios) and image caching |
 | Auth | [`src/main/auth-handler.ts`](./src/main/auth-handler.ts), [`src/main/protocol.ts`](./src/main/protocol.ts) | `wcpos://` deep-link handling for OAuth flows |
 | Updates | [`src/main/update.ts`](./src/main/update.ts) | Checks `https://updates.wcpos.com` and applies GitHub release assets |
 | Shell | [`src/main/window.ts`](./src/main/window.ts), [`src/main/menu/`](./src/main/menu) | Browser window and native application menus |
