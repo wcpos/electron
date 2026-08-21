@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import axios from 'axios';
 import { app, protocol } from 'electron';
 import serve from 'electron-serve';
 
@@ -106,15 +105,18 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType
 	const existing = inFlight.get(url);
 	if (existing) return existing;
 
-	const promise = axios
-		.get(url, { responseType: 'arraybuffer', timeout: 30000 })
-		.then((response) => {
-			const contentType = (response.headers['content-type'] as string) || 'image/jpeg';
-			return { buffer: Buffer.from(response.data), contentType };
-		})
-		.finally(() => {
-			inFlight.delete(url);
-		});
+	// Global fetch is net.fetch after app ready (see index.ts): image downloads
+	// honor the system proxy and OS trust store like the rest of the app.
+	const promise = (async () => {
+		const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+		if (!response.ok) {
+			throw new Error(`Image download failed: HTTP ${response.status}`);
+		}
+		const contentType = response.headers.get('content-type') || 'image/jpeg';
+		return { buffer: Buffer.from(await response.arrayBuffer()), contentType };
+	})().finally(() => {
+		inFlight.delete(url);
+	});
 
 	inFlight.set(url, promise);
 	return promise;

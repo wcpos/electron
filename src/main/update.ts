@@ -3,8 +3,7 @@ import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
 
-import axios from 'axios';
-import { app, autoUpdater, BrowserWindow, dialog, MenuItem, shell } from 'electron';
+import { app, autoUpdater, BrowserWindow, dialog, MenuItem, net, shell } from 'electron';
 import Store from 'electron-store';
 import semver from 'semver';
 
@@ -91,7 +90,14 @@ export class AutoUpdater implements UpdaterHandle {
 		const pipeline = promisify(stream.pipeline);
 		const filePath = `${this.tempDirPath}/${name}`;
 		const writer = createWriteStream(filePath, { flags: 'w+' });
-		const { data, headers } = await axios.get(url, { responseType: 'stream' });
+		// Chromium's stack (net.fetch): downloads honor the system proxy and OS trust
+		// store — a corporate-proxy network must not silently break auto-update while
+		// the migrated app transport (main/axios.ts) keeps working.
+		const response = await net.fetch(url);
+		if (!response.ok || !response.body) {
+			throw new Error(`Update download failed: HTTP ${response.status} for ${name}`);
+		}
+		const data = stream.Readable.fromWeb(response.body as import('stream/web').ReadableStream);
 
 		if (name !== 'RELEASES') {
 			this.targetPath = filePath;
@@ -100,16 +106,10 @@ export class AutoUpdater implements UpdaterHandle {
 		let progressBar: ProgressBar | undefined;
 		if (showProgress || name !== 'RELEASES') {
 			let loaded = 0;
-			const contentLengthHeader = headers['content-length'];
-			const total =
-				typeof contentLengthHeader === 'number'
-					? contentLengthHeader
-					: typeof contentLengthHeader === 'string'
-						? parseFloat(contentLengthHeader)
-						: 0;
+			const total = Number(response.headers.get('content-length')) || 0;
 			progressBar = new ProgressBar();
-			data.on('data', (chunk: string) => {
-				loaded += Buffer.byteLength(chunk);
+			data.on('data', (chunk: Buffer) => {
+				loaded += chunk.length;
 				const percentCompleted = Math.floor((loaded / total) * 100);
 				progressBar?.updateProgress(percentCompleted);
 				if (percentCompleted === 100) {
@@ -208,8 +208,12 @@ export class AutoUpdater implements UpdaterHandle {
 		this.targetPath = '';
 
 		try {
-			const response = await axios.get(this.updateUrl);
-			const data = response.data?.data || response.data;
+			const response = await net.fetch(this.updateUrl);
+			if (!response.ok) {
+				throw new Error(`Update check failed: HTTP ${response.status}`);
+			}
+			const payload = await response.json();
+			const data = payload?.data || payload;
 			const { version, name, assets, releaseDate, notes } = data;
 			const hasUpdate = semver.gt(semver.coerce(version), semver.coerce(app.getVersion()));
 

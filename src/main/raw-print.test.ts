@@ -97,6 +97,23 @@ async function main() {
 	assert.equal(logs.info.length, 1);
 	assert.match(logs.info[0], /sent 3 bytes to test-printer/);
 
+	// A structured-cloned Uint8Array (the renderer's native shape) is accepted
+	// directly, without the legacy number[] copy.
+	resetLogs();
+	let typedArrayBytes: number[] | null = null;
+	await sendRawPrint(
+		{ data: Uint8Array.from([0x1d, 0x56, 0x00]) },
+		{
+			label: 'typed-array-printer',
+			timeoutMs: 1_000,
+			async send(bytes: Buffer) {
+				typedArrayBytes = Array.from(bytes);
+			},
+			cleanup() {},
+		}
+	);
+	assert.deepEqual(typedArrayBytes, [0x1d, 0x56, 0x00]);
+
 	await assert.rejects(
 		() =>
 			sendRawPrint(
