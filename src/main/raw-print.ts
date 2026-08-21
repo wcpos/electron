@@ -24,6 +24,11 @@ export function validateRawPrintData(data: unknown): number[] {
 }
 
 export function rawPrintBufferFromData(data: unknown): Buffer {
+	// Structured clone delivers renderer Uint8Arrays directly (no number[] copy);
+	// legacy number[] senders stay accepted during the transition.
+	if (data instanceof Uint8Array) {
+		return Buffer.from(data);
+	}
 	return Buffer.from(validateRawPrintData(data));
 }
 

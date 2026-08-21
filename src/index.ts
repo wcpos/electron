@@ -1,4 +1,4 @@
-import { app, BrowserWindow, powerMonitor } from 'electron';
+import { app, BrowserWindow, net, powerMonitor } from 'electron';
 
 import {
 	type AppContext,
@@ -50,7 +50,15 @@ if (require('electron-squirrel-startup')) {
 }
 
 const bootDeps: BootDeps = {
-	whenReady: () => app.whenReady(),
+	whenReady: () =>
+		app.whenReady().then(() => {
+			// Route every main-process global fetch consumer (Novu SDK REST, translation
+			// catalogs, image cache) through Chromium's stack — system proxy + OS trust
+			// store — instead of Node's undici. net.fetch is only callable after ready.
+			// Known residual: Novu's socket.io realtime channel keeps its own Node
+			// transport (no injection point); REST paths cover subscriber operations.
+			globalThis.fetch = net.fetch as typeof globalThis.fetch;
+		}),
 	loadTranslations,
 	clearPendingAppDataOnStartup,
 	installExtensions,

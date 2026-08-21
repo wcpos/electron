@@ -3,8 +3,7 @@ import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
 
-import axios from 'axios';
-import { app, autoUpdater, BrowserWindow, dialog, MenuItem, shell } from 'electron';
+import { app, autoUpdater, BrowserWindow, dialog, MenuItem, net, shell } from 'electron';
 import Store from 'electron-store';
 import semver from 'semver';
 
@@ -90,40 +89,40 @@ export class AutoUpdater implements UpdaterHandle {
 	private async download(name: string, url: string, showProgress = true): Promise<void> {
 		const pipeline = promisify(stream.pipeline);
 		const filePath = `${this.tempDirPath}/${name}`;
+		// Chromium's stack (net.fetch): downloads honor the system proxy and OS trust
+		// store — a corporate-proxy network must not silently break auto-update while
+		// the migrated app transport (main/axios.ts) keeps working.
+		const response = await net.fetch(url);
+		if (!response.ok || !response.body) {
+			throw new Error(`Update download failed: HTTP ${response.status} for ${name}`);
+		}
+		// The writer opens only after the response validates, so an early failure
+		// never leaks the file descriptor.
 		const writer = createWriteStream(filePath, { flags: 'w+' });
-		const { data, headers } = await axios.get(url, { responseType: 'stream' });
+		const data = stream.Readable.fromWeb(response.body as import('stream/web').ReadableStream);
 
 		if (name !== 'RELEASES') {
 			this.targetPath = filePath;
 		}
 
 		let progressBar: ProgressBar | undefined;
-		if (showProgress || name !== 'RELEASES') {
+		const total = Number(response.headers.get('content-length')) || 0;
+		// No Content-Length means no denominator — skip the bar rather than feed
+		// it Infinity.
+		if ((showProgress || name !== 'RELEASES') && total > 0) {
 			let loaded = 0;
-			const contentLengthHeader = headers['content-length'];
-			const total =
-				typeof contentLengthHeader === 'number'
-					? contentLengthHeader
-					: typeof contentLengthHeader === 'string'
-						? parseFloat(contentLengthHeader)
-						: 0;
 			progressBar = new ProgressBar();
-			data.on('data', (chunk: string) => {
-				loaded += Buffer.byteLength(chunk);
-				const percentCompleted = Math.floor((loaded / total) * 100);
-				progressBar?.updateProgress(percentCompleted);
-				if (percentCompleted === 100) {
-					progressBar?.close();
-					progressBar = undefined;
-				}
+			data.on('data', (chunk: Buffer) => {
+				loaded += chunk.length;
+				progressBar?.updateProgress(Math.floor((loaded / total) * 100));
 			});
 		}
 
 		try {
 			await pipeline(data, writer);
-		} catch (error) {
+		} finally {
 			progressBar?.close();
-			throw error;
+			progressBar = undefined;
 		}
 	}
 
@@ -208,8 +207,12 @@ export class AutoUpdater implements UpdaterHandle {
 		this.targetPath = '';
 
 		try {
-			const response = await axios.get(this.updateUrl);
-			const data = response.data?.data || response.data;
+			const response = await net.fetch(this.updateUrl);
+			if (!response.ok) {
+				throw new Error(`Update check failed: HTTP ${response.status}`);
+			}
+			const payload = await response.json();
+			const data = payload?.data || payload;
 			const { version, name, assets, releaseDate, notes } = data;
 			const hasUpdate = semver.gt(semver.coerce(version), semver.coerce(app.getVersion()));
 

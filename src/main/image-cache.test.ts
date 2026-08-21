@@ -49,15 +49,17 @@ const electronServeMock = (options: { scheme?: string; partition?: string }) => 
 
 const imageBytes = Buffer.from('image-bytes');
 
-const axiosMock = {
-	get(url: string) {
-		requestedUrl = url;
-		return Promise.resolve({
-			data: nextImageBytes,
+// downloadImage now uses the global fetch (net.fetch after app ready).
+const originalFetch = globalThis.fetch;
+globalThis.fetch = ((url: string | URL | Request) => {
+	requestedUrl = String(url);
+	return Promise.resolve(
+		new Response(Uint8Array.from(nextImageBytes), {
+			status: 200,
 			headers: { 'content-type': 'image/jpeg' },
-		});
-	},
-};
+		})
+	);
+}) as typeof globalThis.fetch;
 
 const loggerMock = {
 	info() {},
@@ -100,7 +102,6 @@ mutableModule._load = function patchedLoad(
 ) {
 	if (request === 'electron') return electronMock;
 	if (request === 'electron-serve') return electronServeMock;
-	if (request === 'axios') return axiosMock;
 	if (request === './log') return { logger: loggerMock };
 	if (request === './window') {
 		moduleLoadOrder.push('window');
@@ -284,10 +285,12 @@ async function main() {
 
 main()
 	.then(() => {
+		globalThis.fetch = originalFetch;
 		fs.rmSync(userDataPath, { recursive: true, force: true });
 	})
 	.catch((error) => {
 		console.error(error);
 		process.exitCode = 1;
+		globalThis.fetch = originalFetch;
 		fs.rmSync(userDataPath, { recursive: true, force: true });
 	});
