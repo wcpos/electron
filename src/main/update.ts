@@ -89,7 +89,6 @@ export class AutoUpdater implements UpdaterHandle {
 	private async download(name: string, url: string, showProgress = true): Promise<void> {
 		const pipeline = promisify(stream.pipeline);
 		const filePath = `${this.tempDirPath}/${name}`;
-		const writer = createWriteStream(filePath, { flags: 'w+' });
 		// Chromium's stack (net.fetch): downloads honor the system proxy and OS trust
 		// store — a corporate-proxy network must not silently break auto-update while
 		// the migrated app transport (main/axios.ts) keeps working.
@@ -97,6 +96,9 @@ export class AutoUpdater implements UpdaterHandle {
 		if (!response.ok || !response.body) {
 			throw new Error(`Update download failed: HTTP ${response.status} for ${name}`);
 		}
+		// The writer opens only after the response validates, so an early failure
+		// never leaks the file descriptor.
+		const writer = createWriteStream(filePath, { flags: 'w+' });
 		const data = stream.Readable.fromWeb(response.body as import('stream/web').ReadableStream);
 
 		if (name !== 'RELEASES') {
@@ -104,26 +106,23 @@ export class AutoUpdater implements UpdaterHandle {
 		}
 
 		let progressBar: ProgressBar | undefined;
-		if (showProgress || name !== 'RELEASES') {
+		const total = Number(response.headers.get('content-length')) || 0;
+		// No Content-Length means no denominator — skip the bar rather than feed
+		// it Infinity.
+		if ((showProgress || name !== 'RELEASES') && total > 0) {
 			let loaded = 0;
-			const total = Number(response.headers.get('content-length')) || 0;
 			progressBar = new ProgressBar();
 			data.on('data', (chunk: Buffer) => {
 				loaded += chunk.length;
-				const percentCompleted = Math.floor((loaded / total) * 100);
-				progressBar?.updateProgress(percentCompleted);
-				if (percentCompleted === 100) {
-					progressBar?.close();
-					progressBar = undefined;
-				}
+				progressBar?.updateProgress(Math.floor((loaded / total) * 100));
 			});
 		}
 
 		try {
 			await pipeline(data, writer);
-		} catch (error) {
+		} finally {
 			progressBar?.close();
-			throw error;
+			progressBar = undefined;
 		}
 	}
 
