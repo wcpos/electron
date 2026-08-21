@@ -91,7 +91,7 @@ export class AutoUpdater implements UpdaterHandle {
 		const filePath = `${this.tempDirPath}/${name}`;
 		// Chromium's stack (net.fetch): downloads honor the system proxy and OS trust
 		// store — a corporate-proxy network must not silently break auto-update while
-		// the migrated app transport (main/axios.ts) keeps working.
+		// the migrated app transport (main/http-bridge.ts) keeps working.
 		const response = await net.fetch(url);
 		if (!response.ok || !response.body) {
 			throw new Error(`Update download failed: HTTP ${response.status} for ${name}`);

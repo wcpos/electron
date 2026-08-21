@@ -1,4 +1,7 @@
-// This implements the 'axios' IPC channel; the renderer speaks axios shapes, and the transport is Chromium's net.
+// The 'http-request' IPC channel: the renderer speaks axios-shaped configs and
+// serialized AxiosError results (its client library is axios), and the transport
+// underneath is Chromium's net.fetch. Formerly src/main/axios.ts on the 'axios'
+// channel, renamed when the axios library left the main process entirely.
 
 import { ipcMain, net } from 'electron';
 
@@ -300,4 +303,4 @@ export function createAxiosChannelHandler(fetchImpl: typeof net.fetch = net.fetc
 }
 
 // Renderer IPC starts after app ready, which is required by net.fetch.
-ipcMain.handle('axios', createAxiosChannelHandler());
+ipcMain.handle('http-request', createAxiosChannelHandler());
