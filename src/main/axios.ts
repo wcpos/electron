@@ -212,9 +212,17 @@ export function createAxiosChannelHandler(fetchImpl: typeof net.fetch = net.fetc
 		let timeoutSignal: AbortSignal | undefined;
 
 		try {
-			// Axios coerces string timeouts at runtime; AbortSignal.timeout throws on
-			// non-integer or out-of-range values, so normalize before building it.
+			// Axios coerces string timeouts at runtime but rejects nonnumeric ones with
+			// ERR_BAD_OPTION_VALUE (verified against axios 1.19); AbortSignal.timeout
+			// additionally throws on non-integer/out-of-range values, so normalize first.
 			const timeoutMs = Math.floor(Number(config.timeout));
+			if (config.timeout != null && Number.isNaN(timeoutMs)) {
+				return serializeFailure(config, {
+					message: 'error trying to parse `config.timeout` to int',
+					name: 'AxiosError',
+					code: 'ERR_BAD_OPTION_VALUE',
+				});
+			}
 			if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
 				timeoutSignal = AbortSignal.timeout(Math.min(timeoutMs, 2 ** 31 - 1));
 			}

@@ -271,6 +271,19 @@ async function main() {
 		clearTimeout(stringTimeoutKeepAlive);
 		assert.equal(stringTimeout.code, 'ECONNABORTED');
 
+		// A NONNUMERIC timeout is rejected the way axios rejects it (verified
+		// against axios 1.19), still via the always-resolve failure shape.
+		resetCalls();
+		responder = () => new Response('ok');
+		const badTimeout = await handler(undefined, {
+			type: 'request',
+			config: { url: 'https://store.test/x', timeout: 'abc' as unknown as number },
+		});
+		assert.equal(badTimeout.success, false);
+		assert.equal(badTimeout.code, 'ERR_BAD_OPTION_VALUE');
+		assert.equal(badTimeout.message, 'error trying to parse `config.timeout` to int');
+		assert.equal(fetchCalls.length, 0, 'invalid timeout must not issue the request');
+
 		resetCalls();
 		responder = () => new Response('missing', { status: 404 });
 		const accepted404 = await handler(undefined, {
