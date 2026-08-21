@@ -38,6 +38,12 @@ registerNovuBridge();
 // 	app.commandLine.appendSwitch('v', '1');
 // }
 
+if (process.env.NODE_ENV === 'development') {
+	// Chromium-level replacement for the old Node TLS bypass so self-signed dev stores keep working;
+	// dev-only; must run before app ready.
+	app.commandLine.appendSwitch('ignore-certificate-errors');
+}
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
 	app.quit();

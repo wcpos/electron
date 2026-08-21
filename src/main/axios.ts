@@ -1,7 +1,6 @@
-import https from 'https';
+// This implements the 'axios' IPC channel; the renderer speaks axios shapes, and the transport is Chromium's net.
 
-import axios from 'axios';
-import { ipcMain } from 'electron';
+import { ipcMain, net } from 'electron';
 
 import { logger } from './log';
 import { isDevelopment } from './util';
@@ -50,145 +49,205 @@ function prettyLog(label: string, obj: any): void {
  */
 const logHttpBodies = isDevelopment && process.env.WCPOS_LOG_HTTP_BODIES === '1';
 
-// import structuredClone from 'core-js-pure/stable/structured-clone';
+type AxiosConfig = {
+	url?: string;
+	baseURL?: string;
+	method?: string;
+	headers?: HeadersInit;
+	params?: Record<string, unknown>;
+	data?: unknown;
+	timeout?: number;
+	validateStatus?: null;
+	responseType?: 'text' | 'arraybuffer';
+	decompress?: boolean;
+};
 
-/**
- * Allow self-signed certicates in development only
- */
-if (process.env.NODE_ENV === 'development') {
-	process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-	const httpsAgent = new https.Agent({
-		rejectUnauthorized: false,
-		family: 4,
-	});
-	axios.defaults.httpsAgent = httpsAgent;
+type AxiosMessage =
+	| { type: 'cancel'; requestId?: string }
+	| { type: 'request'; requestId?: string; config?: AxiosConfig };
 
-	console.log(process.env.NODE_ENV, `RejectUnauthorized is disabled.`);
+type SerializedResponse = {
+	data: unknown;
+	status: number;
+	statusText: string;
+	headers: Record<string, string>;
+};
+
+type AxiosFailure = {
+	message: string;
+	name: 'AxiosError' | 'CanceledError';
+	code: string;
+	response?: SerializedResponse;
+};
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return Object.prototype.toString.call(value) === '[object Object]';
 }
 
-// Map to store AbortControllers for active requests
-const activeRequests = new Map<string, AbortController>();
+function paramValue(value: unknown): string {
+	if (value instanceof Date) return value.toISOString();
+	if (isPlainObject(value)) return JSON.stringify(value);
+	return String(value);
+}
 
-/**
- *
- */
-ipcMain.handle('axios', (event, obj) => {
-	// console.log(obj);
-
-	// Handle request cancellation
-	if (obj.type === 'cancel') {
-		const { requestId } = obj;
-		if (requestId && activeRequests.has(requestId)) {
-			const controller = activeRequests.get(requestId);
-			controller.abort();
-			activeRequests.delete(requestId);
-			logger.debug(`Cancelled request ${requestId}`);
+export function buildRequestUrl(config: AxiosConfig): string {
+	const url = config.url || '';
+	const requestUrl = /^[a-z][a-z\d+.-]*:/i.test(url)
+		? url
+		: `${(config.baseURL || '').replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
+	const query: string[] = [];
+	for (const [key, value] of Object.entries(config.params || {})) {
+		if (value == null) continue;
+		const values = Array.isArray(value) ? value : [value];
+		const name = Array.isArray(value) ? `${key}[]` : key;
+		for (const item of values) {
+			query.push(`${encodeURIComponent(name)}=${encodeURIComponent(paramValue(item))}`);
 		}
-		return Promise.resolve({ success: true });
 	}
+	return query.length
+		? `${requestUrl}${requestUrl.includes('?') ? '&' : '?'}${query.join('&')}`
+		: requestUrl;
+}
 
-	if (obj.type === 'request') {
-		return new Promise((resolve) => {
-			const config = obj.config || {};
-			const requestId = obj.requestId;
+function reducedConfig(config: AxiosConfig) {
+	return {
+		url: config.url,
+		method: config.method,
+		baseURL: config.baseURL,
+		headers: config.headers,
+	};
+}
 
-			// If request ID is provided, attach an abort signal
-			if (requestId) {
-				const controller = new AbortController();
-				config.signal = controller.signal;
-				activeRequests.set(requestId, controller);
-			}
+async function responseData(response: Response, responseType?: AxiosConfig['responseType']) {
+	if (responseType === 'arraybuffer') return Buffer.from(await response.arrayBuffer());
+	const text = await response.text();
+	if (responseType === 'text') return text;
+	try {
+		return JSON.parse(text);
+	} catch {
+		return text;
+	}
+}
 
-			axios
-				.request(config)
-				.then((response) => {
-					if (isDevelopment) {
-						logger.debug(`${requestLabel(config)} → ${response.status}`);
-					}
-					// Create a serializable response object that matches Axios structure
-					const serializableResponse = {
-						success: true,
-						data: response.data,
-						status: response.status,
-						statusText: response.statusText,
-						headers: response.headers,
-						config: {
-							url: obj.config?.url,
-							method: obj.config?.method,
-							baseURL: obj.config?.baseURL,
-							headers: obj.config?.headers,
-						},
-						request: null as any, // Explicitly null for serialization
-					};
-					if (logHttpBodies) {
-						prettyLog(requestLabel(obj.config), {
-							status: response.status,
-							data: response.data,
-						});
-					}
-					resolve(serializableResponse);
-				})
-				.catch((error) => {
-					// Failures keep their body unconditionally in dev: an error payload is
-					// small, rare, and it IS the diagnosis. Only the success firehose above
-					// is gated.
-					if (isDevelopment) {
-						logger.debug(`${requestLabel(config)} FAILED`, {
-							status: error.response?.status,
-							data: error.response?.data,
-							message: error.message,
-						});
-					}
-					// Create a serializable error object that matches Axios error structure
-					const serializableError = {
-						success: false,
-						message: error.message,
-						name: error.name,
-						code: error.code,
-						config: {
-							url: obj.config?.url,
-							method: obj.config?.method,
-							baseURL: obj.config?.baseURL,
-							headers: obj.config?.headers,
-						},
-						request: null as any, // Explicitly null for serialization
-						response: error.response
-							? {
-									data: error.response.data,
-									status: error.response.status,
-									statusText: error.response.statusText,
-									headers: error.response.headers,
-									config: {
-										url: obj.config?.url,
-										method: obj.config?.method,
-										baseURL: obj.config?.baseURL,
-										headers: obj.config?.headers,
-									},
-									request: null as any, // Explicitly null for serialization
-								}
-							: undefined,
-						isAxiosError: true,
-					};
-					logger.error('HTTP error', {
-						status: error.response?.status,
-						message: error.message,
-						request: requestLabel(obj.config),
-					});
-					if (isDevelopment) {
-						prettyLog(`${requestLabel(obj.config)} ERROR`, {
-							status: error.response?.status,
-							message: error.message,
-							data: error.response?.data,
-						});
-					}
-					resolve(serializableError);
-				})
-				.finally(() => {
-					// Clean up the active request map
-					if (requestId && activeRequests.has(requestId)) {
-						activeRequests.delete(requestId);
-					}
-				});
+function logFailure(config: AxiosConfig, failure: AxiosFailure): void {
+	if (isDevelopment) {
+		logger.debug(`${requestLabel(config)} FAILED`, {
+			status: failure.response?.status,
+			data: failure.response?.data,
+			message: failure.message,
 		});
 	}
-});
+	logger.error('HTTP error', {
+		status: failure.response?.status,
+		message: failure.message,
+		request: requestLabel(config),
+	});
+	if (isDevelopment) {
+		prettyLog(`${requestLabel(config)} ERROR`, {
+			status: failure.response?.status,
+			message: failure.message,
+			data: failure.response?.data,
+		});
+	}
+}
+
+function serializeFailure(config: AxiosConfig, failure: AxiosFailure) {
+	logFailure(config, failure);
+	const response = failure.response
+		? { ...failure.response, config: reducedConfig(config), request: null as null }
+		: undefined;
+	return {
+		success: false,
+		message: failure.message,
+		name: failure.name,
+		code: failure.code,
+		config: reducedConfig(config),
+		request: null as null,
+		response,
+		isAxiosError: true,
+	};
+}
+
+export function createAxiosChannelHandler(fetchImpl: typeof net.fetch = net.fetch) {
+	const activeRequests = new Map<string, AbortController>();
+
+	return async (_event: unknown, obj: AxiosMessage) => {
+		if (obj.type === 'cancel') {
+			const controller = obj.requestId ? activeRequests.get(obj.requestId) : undefined;
+			if (controller && obj.requestId) {
+				controller.abort();
+				activeRequests.delete(obj.requestId);
+				logger.debug(`Cancelled request ${obj.requestId}`);
+			}
+			return { success: true };
+		}
+
+		const config = obj.config || {};
+		const controller = new AbortController();
+		const timeoutSignal =
+			config.timeout && config.timeout > 0 ? AbortSignal.timeout(config.timeout) : undefined;
+		const signal = timeoutSignal
+			? AbortSignal.any([controller.signal, timeoutSignal])
+			: controller.signal;
+		if (obj.requestId) activeRequests.set(obj.requestId, controller);
+
+		try {
+			const headers = new Headers(config.headers);
+			let body = config.data as BodyInit | null | undefined;
+			// Axios JSON-encodes plain objects AND arrays; an array is not a valid BodyInit.
+			if (isPlainObject(config.data) || Array.isArray(config.data)) {
+				body = JSON.stringify(config.data);
+				if (!headers.has('content-type')) headers.set('content-type', 'application/json');
+			}
+			const response = await fetchImpl(buildRequestUrl(config), {
+				method: config.method || 'GET',
+				headers,
+				body,
+				signal,
+			});
+			const serialized: SerializedResponse = {
+				data: await responseData(response, config.responseType),
+				status: response.status,
+				statusText: response.statusText,
+				headers: Object.fromEntries(response.headers.entries()),
+			};
+			if (config.validateStatus !== null && (response.status < 200 || response.status >= 300)) {
+				return serializeFailure(config, {
+					message: `Request failed with status code ${response.status}`,
+					name: 'AxiosError',
+					code: response.status >= 500 ? 'ERR_BAD_RESPONSE' : 'ERR_BAD_REQUEST',
+					response: serialized,
+				});
+			}
+			if (isDevelopment) logger.debug(`${requestLabel(config)} → ${response.status}`);
+			if (logHttpBodies)
+				prettyLog(requestLabel(config), { status: response.status, data: serialized.data });
+			return {
+				success: true,
+				...serialized,
+				config: reducedConfig(config),
+				request: null as null,
+			};
+		} catch (error) {
+			const failure: AxiosFailure = controller.signal.aborted
+				? { message: 'canceled', name: 'CanceledError', code: 'ERR_CANCELED' }
+				: timeoutSignal?.aborted
+					? {
+							message: `timeout of ${config.timeout}ms exceeded`,
+							name: 'AxiosError',
+							code: 'ECONNABORTED',
+						}
+					: {
+							message: error instanceof Error ? error.message : String(error),
+							name: 'AxiosError',
+							code: 'ERR_NETWORK',
+						};
+			return serializeFailure(config, failure);
+		} finally {
+			if (obj.requestId) activeRequests.delete(obj.requestId);
+		}
+	};
+}
+
+// Renderer IPC starts after app ready, which is required by net.fetch.
+ipcMain.handle('axios', createAxiosChannelHandler());
