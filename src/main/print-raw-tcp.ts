@@ -10,7 +10,6 @@ export function createTcpDelivery(host: string, port: number): Delivery {
 	// withTimeout() runs, so a factory-time socket would escape cleanup() on
 	// invalid data.
 	let socket: net.Socket | undefined;
-	let ended = false;
 	const label = `${host}:${port}`;
 
 	return {
@@ -24,6 +23,7 @@ export function createTcpDelivery(host: string, port: number): Delivery {
 		},
 		send(bytes, ctx): Promise<void> {
 			return new Promise<void>((resolve, reject) => {
+				let ended = false;
 				const sock = new net.Socket();
 				socket = sock;
 				// Persistent (not `once`): cleanup() destroys the socket after the promise

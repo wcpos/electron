@@ -94,6 +94,14 @@ mutableModule._load = function patchedLoad(
 		assert.doesNotThrow(() => socket.emit('error', new Error('second late error')));
 		assert.ok(socket.listenerCount('error') >= 1, 'the error guard persists after errors');
 
+		// A successful send must not mask an unexpected close on the next operation.
+		const secondSend = delivery.send(Buffer.from([0x0a]), { settled: () => false });
+		const secondSocket = FakeSocket.instances[1];
+		secondSocket.emit('close');
+		await assert.rejects(secondSend, /closed unexpectedly/);
+		delivery.cleanup();
+		assert.equal(secondSocket.destroyed, true, 'cleanup() destroys the latest socket');
+
 		// cleanup() before any send() is a no-op rather than a crash.
 		assert.doesNotThrow(() => createTcpDelivery('h', 1).cleanup());
 

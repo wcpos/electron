@@ -201,20 +201,36 @@ async function initClient(request: Extract<NovuBridgeRequest, { type: 'init' }>)
 }
 
 function isNovuBridgeRequest(value: unknown): value is NovuBridgeRequest {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		typeof (value as { type?: unknown }).type === 'string'
+	if (typeof value !== 'object' || value === null) return false;
+	const request = value as Record<string, unknown>;
+
+	if (request.type === 'init') {
+		return (
+			['subscriberId', 'applicationIdentifier', 'apiUrl', 'socketUrl'].every(
+				(key) => typeof request[key] === 'string' && request[key] !== ''
+			) &&
+			(request.locale === undefined ||
+				(typeof request.locale === 'string' && request.locale.trim() !== ''))
+		);
+	}
+	if (request.type === 'markAsRead' || request.type === 'markAsSeen') {
+		return typeof request.notificationId === 'string' && request.notificationId.trim() !== '';
+	}
+	if (request.type === 'waitReady')
+		return request.timeoutMs === undefined || Number.isFinite(request.timeoutMs);
+	if (request.type === 'fetchNotifications')
+		return request.limit === undefined || Number.isFinite(request.limit);
+	return ['disconnect', 'markAllAsRead', 'markAllAsSeen', 'getUnreadCount'].includes(
+		request.type as string
 	);
 }
 
 export function registerNovuBridge(): void {
 	handleIpc('novu', async (_event, request): Promise<NovuBridgeResponse> => {
-		// Validate before dispatch so a malformed invoke (null, a bare string, a
-		// missing type) gets the advertised { success: false } shape instead of a
-		// rejected IPC promise — and the catch below can never throw on request.type.
+		// Validate before dispatch so malformed invokes get the advertised
+		// { success: false } shape instead of a rejected IPC promise.
 		if (!isNovuBridgeRequest(request)) {
-			const message = 'Invalid Novu request: expected an object with a string "type"';
+			const message = 'Invalid Novu request: malformed or unsupported request payload';
 			logger.error(message);
 			return { success: false, message };
 		}

@@ -130,21 +130,6 @@ async function main() {
 		registerNovuBridge();
 		const invoke = handlers.get('novu');
 		assert.ok(invoke, 'novu invoke handler should be registered');
-
-		for (const malformed of [null, undefined, 'init', 42, {}, { type: 7 }]) {
-			const response = (await invoke(null, malformed)) as { success: boolean; message?: string };
-			assert.equal(
-				response.success,
-				false,
-				`malformed request ${JSON.stringify(malformed)} must not succeed`
-			);
-			assert.match(response.message ?? '', /Invalid Novu request/);
-		}
-		assert.match(
-			((await invoke(null, { type: 'bogus' })) as { message: string }).message,
-			/Unknown Novu request type: bogus/
-		);
-
 		const initRequest = {
 			type: 'init',
 			subscriberId: 'subscriber-a',
@@ -153,6 +138,37 @@ async function main() {
 			apiUrl: 'https://api.example.test',
 			socketUrl: 'wss://socket.example.test',
 		};
+
+		for (const malformed of [
+			null,
+			undefined,
+			'init',
+			42,
+			{},
+			{ type: 7 },
+			{ type: 'init' },
+			{ ...initRequest, subscriberId: '' },
+			{ ...initRequest, locale: 7 },
+			{ ...initRequest, applicationIdentifier: '' },
+			{ ...initRequest, apiUrl: null },
+			{ ...initRequest, socketUrl: undefined },
+			{ type: 'waitReady', timeoutMs: 'soon' },
+			{ type: 'fetchNotifications', limit: 'many' },
+			{ type: 'markAsRead' },
+			{ type: 'markAsRead', notificationId: '' },
+			{ type: 'markAsSeen', notificationId: 42 },
+			{ type: 'bogus' },
+		]) {
+			const response = (await invoke(null, malformed)) as { success: boolean; message?: string };
+			assert.equal(
+				response.success,
+				false,
+				`malformed request ${JSON.stringify(malformed)} must not succeed`
+			);
+			assert.match(response.message ?? '', /Invalid Novu request/);
+		}
+		assert.equal(FakeNovu.instances.length, 0, 'invalid init must not create a client');
+
 		assert.deepEqual(await invoke(null, initRequest), { success: true, result: true });
 		assert.equal(FakeNovu.instances.length, 1);
 		assert.deepEqual(FakeNovu.instances[0]?.options, {
