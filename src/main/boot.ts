@@ -70,6 +70,24 @@ export function wireMainWindowConsumers(
 	}
 }
 
+/**
+ * Re-create the main window outside boot (macOS `activate` with no windows open)
+ * and finish the window-bound wiring boot could not do without one: consumers,
+ * and the updater if boot skipped it. Returns the window, or null if none exists.
+ */
+export function recreateMainWindow(deps: BootDeps, ctx: Partial<AppContext>): BrowserWindow | null {
+	const mainWindow = createMainWindowContext(deps, ctx);
+	if (!mainWindow) {
+		return null;
+	}
+	wireMainWindowConsumers(deps, ctx);
+	if (!ctx.updater) {
+		ctx.updater = deps.createUpdater(mainWindow);
+		ctx.updater.init();
+	}
+	return mainWindow;
+}
+
 /** The canonical, ordered boot plan. Pure data — safe to import and inspect in a test. */
 export function bootPlan(deps: BootDeps): BootPhase[] {
 	return [
@@ -93,11 +111,10 @@ export function bootPlan(deps: BootDeps): BootPhase[] {
 			name: 'create-window',
 			run: (ctx) => {
 				deps.logger.info('Starting app');
-				if (!createMainWindowContext(deps, ctx)) {
-					// Stop here: every later phase (menu, updater, final context check)
-					// assumes a window, and continuing only defers the failure.
-					throw new Error('Main window was not created during boot');
-				}
+				// Deliberately not fatal here: auth-handler, protocol-handling and menu
+				// must still register so a window re-created later (macOS `activate`)
+				// is fully functional. boot() rejects at the end if no window exists.
+				createMainWindowContext(deps, ctx);
 			},
 		},
 		{
@@ -124,8 +141,12 @@ export function bootPlan(deps: BootDeps): BootPhase[] {
 		{
 			name: 'updater-init',
 			run: (ctx) => {
-				// create-window already threw if there is no window.
-				ctx.updater = deps.createUpdater(ctx.mainWindow as BrowserWindow);
+				if (!ctx.mainWindow) {
+					deps.logger.warn?.('Skipping updater init because no main window exists');
+					return;
+				}
+
+				ctx.updater = deps.createUpdater(ctx.mainWindow);
 				ctx.updater.init();
 			},
 		},
@@ -141,6 +162,9 @@ export async function boot(deps: BootDeps): Promise<AppContext> {
 		await phase.run(ctx);
 	}
 
+	if (!ctx.mainWindow) {
+		throw new Error('Main window was not created during boot');
+	}
 	if (!ctx.updater) {
 		throw new Error('Auto updater was not configured during boot');
 	}
