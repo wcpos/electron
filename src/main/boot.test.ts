@@ -108,6 +108,29 @@ mutableModule._load = function patchedLoad(
 		assert.deepEqual(updaterWindows, [fakeWindow]);
 		assert.deepEqual(scannerWindows, [fakeWindow]);
 		assert.deepEqual(calls, phaseNames);
+
+		// Without a main window, boot must fail at create-window and run nothing after it.
+		const windowlessCalls: string[] = [];
+		const windowlessUpdaterWindows: unknown[] = [];
+		const windowlessDeps = {
+			...fakeDeps,
+			createWindow: () => {
+				windowlessCalls.push('create-window');
+				return null as never;
+			},
+			getMainWindow: () => null as never,
+			registerMenu: (): void => {
+				windowlessCalls.push('menu');
+			},
+			createUpdater: (mainWindow: unknown) => {
+				windowlessCalls.push('updater-init');
+				windowlessUpdaterWindows.push(mainWindow);
+				return fakeUpdater;
+			},
+		};
+		await assert.rejects(boot(windowlessDeps), /Main window was not created during boot/);
+		assert.deepEqual(windowlessCalls, ['create-window'], 'boot stops at create-window');
+		assert.deepEqual(windowlessUpdaterWindows, [], 'no updater is created without a window');
 		console.log('boot tests passed');
 	} finally {
 		mutableModule._load = originalLoad;

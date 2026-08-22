@@ -19,6 +19,8 @@ let listenerUnsubscribes: Unsubscribe[] = [];
 let readyPromise: Promise<void> | null = null;
 let resolveReady: (() => void) | null = null;
 let lifecycleChain: Promise<unknown> = Promise.resolve();
+/** Bumped on every dispose, so SDK calls can tell their client was replaced mid-flight. */
+let sessionGeneration = 0;
 
 /**
  * init/disconnect run strictly in arrival order. Two overlapping inits would
@@ -57,6 +59,7 @@ function pushEvent(event: NovuBridgeEvent): void {
 }
 
 async function disposeClient(): Promise<void> {
+	sessionGeneration += 1;
 	const previousClient = client;
 	client = null;
 	activeSubscriberId = null;
@@ -88,6 +91,20 @@ function requireClient(): Novu {
 	return client;
 }
 
+/**
+ * Run an SDK call against the active client and refuse its result if init or
+ * disconnect replaced that client while the call was in flight — otherwise a
+ * fetch started for subscriber A could be returned after B became active.
+ */
+async function withActiveClient<T>(operation: (novu: Novu) => Promise<T>): Promise<T> {
+	const session = sessionGeneration;
+	const result = await operation(requireClient());
+	if (session !== sessionGeneration) {
+		throw new Error('Novu session changed while the request was in flight');
+	}
+	return result;
+}
+
 async function handleRequest(request: NovuBridgeRequest): Promise<unknown> {
 	switch (request.type) {
 		case 'init':
@@ -112,25 +129,37 @@ async function handleRequest(request: NovuBridgeRequest): Promise<unknown> {
 			}
 		}
 		case 'fetchNotifications': {
-			const response = await requireClient().notifications.list({ limit: request.limit ?? 50 });
+			const response = await withActiveClient((novu) =>
+				novu.notifications.list({ limit: request.limit ?? 50 })
+			);
 			return jsonPlain(sdkData(response).notifications);
 		}
 		case 'markAsRead':
-			sdkData(await requireClient().notifications.read({ notificationId: request.notificationId }));
+			sdkData(
+				await withActiveClient((novu) =>
+					novu.notifications.read({ notificationId: request.notificationId })
+				)
+			);
 			return true;
 		case 'markAllAsRead':
-			sdkData(await requireClient().notifications.readAll());
+			sdkData(await withActiveClient((novu) => novu.notifications.readAll()));
 			return true;
 		case 'markAsSeen':
-			sdkData(await requireClient().notifications.seen({ notificationId: request.notificationId }));
+			sdkData(
+				await withActiveClient((novu) =>
+					novu.notifications.seen({ notificationId: request.notificationId })
+				)
+			);
 			return true;
 		case 'markAllAsSeen':
-			sdkData(await requireClient().notifications.seenAll());
+			sdkData(await withActiveClient((novu) => novu.notifications.seenAll()));
 			return true;
 		case 'getUnreadCount': {
-			const response = await requireClient().notifications.count({ read: false });
+			const response = await withActiveClient((novu) => novu.notifications.count({ read: false }));
 			return sdkData(response).count;
 		}
+		default:
+			throw new Error(`Unknown Novu request type: ${String((request as { type: unknown }).type)}`);
 	}
 }
 
@@ -171,8 +200,24 @@ async function initClient(request: Extract<NovuBridgeRequest, { type: 'init' }>)
 	return true;
 }
 
+function isNovuBridgeRequest(value: unknown): value is NovuBridgeRequest {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		typeof (value as { type?: unknown }).type === 'string'
+	);
+}
+
 export function registerNovuBridge(): void {
 	handleIpc('novu', async (_event, request): Promise<NovuBridgeResponse> => {
+		// Validate before dispatch so a malformed invoke (null, a bare string, a
+		// missing type) gets the advertised { success: false } shape instead of a
+		// rejected IPC promise — and the catch below can never throw on request.type.
+		if (!isNovuBridgeRequest(request)) {
+			const message = 'Invalid Novu request: expected an object with a string "type"';
+			logger.error(message);
+			return { success: false, message };
+		}
 		try {
 			return { success: true, result: await handleRequest(request) };
 		} catch (error) {

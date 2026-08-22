@@ -644,7 +644,11 @@ test("drops whitespace-only index rows after cleanup fails", async () => {
       [deleted, dead, survivor].map((item) => ({ document: item })),
       "seed",
     );
-    while (!(await initial.cleanup(0))) {}
+    let initialCleaned = false;
+    for (let attempt = 0; attempt < 5 && !initialCleaned; attempt += 1) {
+      initialCleaned = await initial.cleanup(0);
+    }
+    assert.equal(initialCleaned, true);
     await initial.bulkWrite(
       [
         {

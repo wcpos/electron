@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import Module from 'node:module';
 import path from 'node:path';
 
+import type { TypedIpcRenderer } from '@wcpos/printer/ipc-channels';
+
 const exposures: Record<string, any> = {};
 const onCalls: {
 	channel: string;
@@ -111,7 +113,15 @@ async function main() {
 		{ channel: 'printer-discovery', args: { action: 'start' } },
 		'preload should allow printer discovery IPC invocations'
 	);
-	const storageMeasurement = await exposedIpcRenderer.invoke('storage:measure');
+	// Typed call: `storage:measure` declares `req: undefined`, so the argument is optional.
+	const typedIpcRenderer: TypedIpcRenderer = exposedIpcRenderer;
+	const storageMeasurement = await typedIpcRenderer.invoke('storage:measure');
+	// Compile-time only: channels with a request payload must still require it.
+	const assertPayloadStillRequired = (renderer: TypedIpcRenderer): void => {
+		// @ts-expect-error -- print-raw-tcp declares a request payload; omitting it must not compile
+		void renderer.invoke('print-raw-tcp');
+	};
+	void assertPayloadStillRequired;
 	assert.deepEqual(
 		invokeCalls[invokeCalls.length - 1],
 		{ channel: 'storage:measure', args: undefined },

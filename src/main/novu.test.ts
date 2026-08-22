@@ -131,6 +131,20 @@ async function main() {
 		const invoke = handlers.get('novu');
 		assert.ok(invoke, 'novu invoke handler should be registered');
 
+		for (const malformed of [null, undefined, 'init', 42, {}, { type: 7 }]) {
+			const response = (await invoke(null, malformed)) as { success: boolean; message?: string };
+			assert.equal(
+				response.success,
+				false,
+				`malformed request ${JSON.stringify(malformed)} must not succeed`
+			);
+			assert.match(response.message ?? '', /Invalid Novu request/);
+		}
+		assert.match(
+			((await invoke(null, { type: 'bogus' })) as { message: string }).message,
+			/Unknown Novu request type: bogus/
+		);
+
 		const initRequest = {
 			type: 'init',
 			subscriberId: 'subscriber-a',
@@ -273,6 +287,35 @@ async function main() {
 		const supersededD = FakeNovu.instances[instancesBefore + 1]!;
 		assert.equal(supersededC.disconnectCalls, 1, 'superseded client c was not disposed');
 		assert.equal(supersededD.disconnectCalls, 1, 'superseded client d was not disposed');
+		// An SDK call that settles after init switched subscribers must not leak the
+		// old subscriber's data into the new session.
+		const activeBefore = FakeNovu.instances.length;
+		const staleClient = FakeNovu.instances[activeBefore - 1]!;
+		let releaseStaleList: (() => void) | null = null;
+		staleClient.listResult = new Promise((resolve) => {
+			releaseStaleList = () =>
+				resolve({ data: { notifications: [{ id: 'stale-from-previous-subscriber' }] } });
+		});
+		const staleFetch = invoke(null, { type: 'fetchNotifications' }) as Promise<unknown>;
+		assert.deepEqual(
+			await invoke(null, { ...initRequest, subscriberId: 'subscriber-after-stale' }),
+			{
+				success: true,
+				result: true,
+			}
+		);
+		assert.equal(FakeNovu.instances.length, activeBefore + 1);
+		assert.ok(releaseStaleList, 'the stale list call should be pending');
+		releaseStaleList!();
+		assert.deepEqual(await staleFetch, {
+			success: false,
+			message: 'Novu session changed while the request was in flight',
+		});
+		// The new session is unaffected.
+		assert.deepEqual(await invoke(null, { type: 'fetchNotifications' }), {
+			success: true,
+			result: [],
+		});
 	} finally {
 		mutableModule._load = originalLoad;
 	}

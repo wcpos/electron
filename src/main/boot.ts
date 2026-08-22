@@ -93,7 +93,11 @@ export function bootPlan(deps: BootDeps): BootPhase[] {
 			name: 'create-window',
 			run: (ctx) => {
 				deps.logger.info('Starting app');
-				createMainWindowContext(deps, ctx);
+				if (!createMainWindowContext(deps, ctx)) {
+					// Stop here: every later phase (menu, updater, final context check)
+					// assumes a window, and continuing only defers the failure.
+					throw new Error('Main window was not created during boot');
+				}
 			},
 		},
 		{
@@ -120,12 +124,8 @@ export function bootPlan(deps: BootDeps): BootPhase[] {
 		{
 			name: 'updater-init',
 			run: (ctx) => {
-				if (!ctx.mainWindow) {
-					deps.logger.warn?.('Skipping updater init because no main window exists');
-					return;
-				}
-
-				ctx.updater = deps.createUpdater(ctx.mainWindow);
+				// create-window already threw if there is no window.
+				ctx.updater = deps.createUpdater(ctx.mainWindow as BrowserWindow);
 				ctx.updater.init();
 			},
 		},
@@ -141,9 +141,6 @@ export async function boot(deps: BootDeps): Promise<AppContext> {
 		await phase.run(ctx);
 	}
 
-	if (!ctx.mainWindow) {
-		throw new Error('Main window was not created during boot');
-	}
 	if (!ctx.updater) {
 		throw new Error('Auto updater was not configured during boot');
 	}
