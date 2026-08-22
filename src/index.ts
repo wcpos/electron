@@ -1,12 +1,6 @@
 import { app, BrowserWindow, net, powerMonitor } from 'electron';
 
-import {
-	type AppContext,
-	boot,
-	type BootDeps,
-	createMainWindowContext,
-	wireMainWindowConsumers,
-} from './main/boot';
+import { type AppContext, boot, type BootDeps, recreateMainWindow } from './main/boot';
 import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
@@ -99,9 +93,10 @@ app.on('activate', () => {
 	// On OS X it's common to re-create a window in the app when the
 	// dock icon is clicked and there are no other windows open.
 	if (BrowserWindow.getAllWindows().length === 0) {
-		const context = appContext ?? {};
-		createMainWindowContext(bootDeps, context);
-		wireMainWindowConsumers(bootDeps, context);
+		const context: Partial<AppContext> = appContext ?? {};
+		if (recreateMainWindow(bootDeps, context) && context.mainWindow && context.updater) {
+			appContext = context as AppContext;
+		}
 	}
 });
 

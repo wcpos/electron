@@ -179,7 +179,13 @@ export const RXDB_IPC_CHANNEL_PREFIX = 'rxdb-ipc-renderer-storage|';
 export interface TypedIpcRenderer {
 	invoke<C extends keyof IpcInvokeChannels>(
 		channel: C,
-		args: IpcInvokeChannels[C]['req']
+		// Channels declaring `req: undefined` (e.g. storage:measure) may omit the argument;
+		// every other channel still requires it. Tested as `[req] extends [undefined]`
+		// (not `undefined extends req`) so it holds with strictNullChecks off, where
+		// undefined is assignable to every type.
+		...args: [IpcInvokeChannels[C]['req']] extends [undefined]
+			? [args?: IpcInvokeChannels[C]['req']]
+			: [args: IpcInvokeChannels[C]['req']]
 	): Promise<IpcInvokeChannels[C]['res']>;
 	send<C extends keyof IpcSendChannels>(channel: C, args: IpcSendChannels[C]): void;
 	on<C extends keyof IpcOnChannels>(

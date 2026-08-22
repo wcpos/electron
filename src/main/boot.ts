@@ -70,6 +70,24 @@ export function wireMainWindowConsumers(
 	}
 }
 
+/**
+ * Re-create the main window outside boot (macOS `activate` with no windows open)
+ * and finish the window-bound wiring boot could not do without one: consumers,
+ * and the updater if boot skipped it. Returns the window, or null if none exists.
+ */
+export function recreateMainWindow(deps: BootDeps, ctx: Partial<AppContext>): BrowserWindow | null {
+	const mainWindow = createMainWindowContext(deps, ctx);
+	if (!mainWindow) {
+		return null;
+	}
+	wireMainWindowConsumers(deps, ctx);
+	if (!ctx.updater) {
+		ctx.updater = deps.createUpdater(mainWindow);
+		ctx.updater.init();
+	}
+	return mainWindow;
+}
+
 /** The canonical, ordered boot plan. Pure data — safe to import and inspect in a test. */
 export function bootPlan(deps: BootDeps): BootPhase[] {
 	return [
@@ -93,6 +111,9 @@ export function bootPlan(deps: BootDeps): BootPhase[] {
 			name: 'create-window',
 			run: (ctx) => {
 				deps.logger.info('Starting app');
+				// Deliberately not fatal here: auth-handler, protocol-handling and menu
+				// must still register so a window re-created later (macOS `activate`)
+				// is fully functional. boot() rejects at the end if no window exists.
 				createMainWindowContext(deps, ctx);
 			},
 		},
