@@ -84,6 +84,12 @@ jobs:
       - name: 📦 Install and rebuild native modules
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
+          # `usb` pulls a node-addon-api that requires C++17 (std::void_t,
+          # std::is_convertible_v, …). The Linux job has carried these flags
+          # since the 1.9.2 run; macOS relied on the runner image defaulting
+          # to a new enough standard and broke when the image moved.
+          CXXFLAGS: -std=c++17
+          npm_config_cxxflags: -std=c++17
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           pnpm install
@@ -128,6 +134,12 @@ jobs:
       - name: 📦 Install and rebuild native modules
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
+          # `usb` pulls a node-addon-api that requires C++17 (std::void_t,
+          # std::is_convertible_v, …). The Linux job has carried these flags
+          # since the 1.9.2 run; macOS relied on the runner image defaulting
+          # to a new enough standard and broke when the image moved.
+          CXXFLAGS: -std=c++17
+          npm_config_cxxflags: -std=c++17
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           pnpm install
@@ -172,6 +184,36 @@ jobs:
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           pnpm install
           pnpm run rebuild:all
+
+      # Squirrel dies in CreateZipFromDirectory -> Process.Start with
+      # "The system cannot find the file specified", i.e. it cannot launch a
+      # vendored helper (7z.exe / Squirrel's Update.exe). This is upstream
+      # electron/forge#3892: previously-green Windows CI images (2019/2022/2025)
+      # started failing with no code change, local Windows builds still work,
+      # and the issue is open with no confirmed fix. Print what Squirrel needs
+      # before invoking it, so the next run tells us which file is missing
+      # instead of us guessing. Non-blocking.
+      - name: 🔎 Squirrel vendor diagnostics (non-blocking)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $roots = @(
+            "node_modules/electron-winstaller/vendor",
+            "node_modules/.pnpm"
+          )
+          foreach ($r in $roots) {
+            if (Test-Path $r) {
+              Write-Host "--- $r ---"
+              Get-ChildItem -Path $r -Recurse -Include '7z.exe','7z.dll','Squirrel.exe','Update.exe','SyncReleases.exe' -ErrorAction SilentlyContinue |
+                Select-Object -First 40 FullName, Length | Format-Table -AutoSize
+            } else {
+              Write-Host "--- $r : NOT PRESENT ---"
+            }
+          }
+          Write-Host "--- Defender exclusions / real-time protection ---"
+          try { Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled | Format-List } catch { Write-Host "Get-MpComputerStatus unavailable" }
+          Write-Host "--- .NET Framework releases ---"
+          try { Get-ItemProperty 'HKLM:/SOFTWARE/Microsoft/NET Framework Setup/NDP/v4/Full' -ErrorAction Stop | Select-Object Version, Release | Format-List } catch { Write-Host "NDP v4 Full key not readable" }
 
       - name: 🚀 Publish Windows release
         env:
