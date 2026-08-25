@@ -33,6 +33,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const MARKER = 'wcpos-smoke-ok';
 const CDP_PORT = 9412;
@@ -137,10 +138,14 @@ function crossCheckArtifact(appDir) {
 	console.log(`smoke: renderer invokes [${[...invoked].join(', ')}] — all permitted by the preload`);
 }
 
-async function findPageTarget(deadline) {
+/** Find the packaged renderer target without waiting past the boot deadline. */
+export async function findPageTarget(deadline) {
 	while (Date.now() < deadline) {
 		try {
-			const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`);
+			const remaining = Math.max(1, deadline - Date.now());
+			const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`, {
+				signal: AbortSignal.timeout(remaining),
+			});
 			const targets = await res.json();
 			const page = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
 			if (page) return page;
@@ -210,6 +215,7 @@ async function evaluate(page, expression) {
 	}
 }
 
+/** Launch the packaged app and verify its renderer-to-main HTTP bridge. */
 async function main() {
 	const { executable, appDir } = resolveBundle(process.argv[2]);
 	console.log(`smoke: ${executable}`);
@@ -219,17 +225,20 @@ async function main() {
 		res.writeHead(200, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ marker: MARKER }));
 	});
-	await new Promise((res) => server.listen(0, '127.0.0.1', res));
-	const origin = `http://127.0.0.1:${server.address().port}`;
-
-	// A throwaway profile: a release gate must never read or write a real store.
-	const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-smoke-'));
-	const child = spawn(executable, [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`], {
-		stdio: 'ignore',
-	});
-	child.on('error', (err) => console.error(`smoke: could not launch the app: ${err.message}`));
+	let child;
+	let userDataDir;
 
 	try {
+		await new Promise((res) => server.listen(0, '127.0.0.1', res));
+		const origin = `http://127.0.0.1:${server.address().port}`;
+
+		// A throwaway profile: a release gate must never read or write a real store.
+		userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-smoke-'));
+		child = spawn(executable, [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`], {
+			stdio: 'ignore',
+		});
+		child.on('error', (err) => console.error(`smoke: could not launch the app: ${err.message}`));
+
 		const page = await findPageTarget(Date.now() + BOOT_TIMEOUT_MS);
 		if (!page) fail(`the app did not open a renderer within ${BOOT_TIMEOUT_MS}ms`);
 
@@ -265,14 +274,16 @@ async function main() {
 		console.log(`smoke: HTTP over the IPC bridge -> ${outcome}`);
 		console.log('SMOKE-COMPLETE: the packaged app can reach a server');
 	} finally {
-		child.kill('SIGKILL');
-		server.close();
-		fs.rmSync(userDataDir, { recursive: true, force: true });
+		child?.kill('SIGKILL');
+		if (server.listening) server.close();
+		if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true });
 	}
 }
 
-main().catch((error) => {
-	if (error instanceof SmokeFailure) console.error(`\nSMOKE FAILED: ${error.message}\n`);
-	else console.error(error);
-	process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	main().catch((error) => {
+		if (error instanceof SmokeFailure) console.error(`\nSMOKE FAILED: ${error.message}\n`);
+		else console.error(error);
+		process.exitCode = 1;
+	});
+}
