@@ -85,17 +85,21 @@ export type NovuBridgeEvent =
  * on = main→render push (renderer subscribes).
  */
 export interface IpcInvokeChannels {
-	'print-raw-tcp': { req: { host: string; port: number; data: number[] }; res: void };
-	'print-raw-usb': { req: { device: string; data: number[] }; res: void };
-	'print-raw-serial': { req: { device: string; data: number[] }; res: void };
+	// data crosses IPC as a structured-cloned Uint8Array; number[] is the legacy
+	// wire shape, still accepted by main (wcpos/electron#353).
+	'print-raw-tcp': { req: { host: string; port: number; data: Uint8Array | number[] }; res: void };
+	'print-raw-usb': { req: { device: string; data: Uint8Array | number[] }; res: void };
+	'print-raw-serial': { req: { device: string; data: Uint8Array | number[] }; res: void };
 	'printer-discovery': {
 		req: { action?: 'start' | 'stop'; timeoutMs?: number };
 		res: DiscoveredNetworkPrinter[];
 	};
 	'usb-discovery': { req: Record<string, never>; res: UsbPrinterInfo[] };
 	'serial-discovery': { req: Record<string, never>; res: DiscoveredSerialPrinter[] };
-	'sqlite': { req: unknown; res: unknown };
-	'axios': { req: unknown; res: unknown };
+	// axios-shaped request/response payloads over Chromium net.fetch. The channel was
+	// named 'axios' until the library left the main process (wcpos/electron#354); the
+	// 'sqlite' channel went with the storage rewrite. Both were removed in 1.10.0.
+	'http-request': { req: unknown; res: unknown };
 	'novu': { req: NovuBridgeRequest; res: NovuBridgeResponse };
 	'auth:prompt': { req: AuthPromptParams; res: AuthResult };
 	'storage:measure': {
@@ -130,8 +134,7 @@ export const INVOKE_CHANNELS = [
 	'printer-discovery',
 	'usb-discovery',
 	'serial-discovery',
-	'sqlite',
-	'axios',
+	'http-request',
 	'novu',
 	'auth:prompt',
 	'storage:measure',
