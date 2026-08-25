@@ -102,6 +102,16 @@ jobs:
         # before IPC. Both repos' source tests passed, because the defect only
         # existed in the packaged artifact. Launch the real build and prove it
         # can complete one real request over the real bridge.
+        #
+        # CI=false is deliberate: forge.config.ts enables osxNotarize whenever
+        # CI === 'true', and the Apple credentials are scoped to the publish step
+        # below. Left as-is, this throwaway package would attempt notarization
+        # with empty credentials and fail before the smoke test ran — turning a
+        # release gate into a release blocker. Signing still happens via the
+        # keychain identity imported above; the smoke build is never shipped.
+        env:
+          CI: 'false'
+        timeout-minutes: 25
         run: |
           pnpm run package
           pnpm run test:smoke-packaged out
@@ -163,6 +173,16 @@ jobs:
         # before IPC. Both repos' source tests passed, because the defect only
         # existed in the packaged artifact. Launch the real build and prove it
         # can complete one real request over the real bridge.
+        #
+        # CI=false is deliberate: forge.config.ts enables osxNotarize whenever
+        # CI === 'true', and the Apple credentials are scoped to the publish step
+        # below. Left as-is, this throwaway package would attempt notarization
+        # with empty credentials and fail before the smoke test ran — turning a
+        # release gate into a release blocker. Signing still happens via the
+        # keychain identity imported above; the smoke build is never shipped.
+        env:
+          CI: 'false'
+        timeout-minutes: 25
         run: |
           pnpm run package
           pnpm run test:smoke-packaged out
