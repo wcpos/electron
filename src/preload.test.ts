@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import Module from 'node:module';
 import path from 'node:path';
 
+import { IPC_RENDERER_KEY_PREFIX } from 'rxdb/plugins/electron';
+
+import { INVOKE_CHANNELS, SEND_CHANNELS } from '@wcpos/printer/ipc-channels';
 import type { TypedIpcRenderer } from '@wcpos/printer/ipc-channels';
 
 const exposures: Record<string, any> = {};
@@ -139,7 +143,8 @@ async function main() {
 		'preload should expose ipcRenderer.removeListener'
 	);
 
-	const rxdbChannel = 'rxdb-ipc-renderer-storage|main-storage';
+	// Match main's variable-built ipcMain.on(channelId, ...) registration.
+	const rxdbChannel = `${IPC_RENDERER_KEY_PREFIX}|main-storage`;
 	const listenerCalls: unknown[][] = [];
 	const listener = (...args: unknown[]) => {
 		listenerCalls.push(args);
@@ -273,6 +278,79 @@ async function main() {
 		removeListenerCalls[removeListenerCalls.length - 1]?.listener,
 		wrappedListener,
 		'unsubscribe should remove the wrapped RxDB bridge listener'
+	);
+
+	// ------------------------------------------------------------------
+	// The preload allowlist must cover every channel main actually serves.
+	//
+	// This test used to invoke two arbitrary channels ('printer-discovery',
+	// 'storage:measure') and call the bridge proven. It stayed green through
+	// the 1.10.1 release while EVERY HTTP request in the packaged app was
+	// rejected at the preload: wcpos/electron#354 renamed the transport channel
+	// 'axios' -> 'http-request' in main, but this repo carries its own vendored
+	// copy of the channel registry and that copy kept the old name. Main served
+	// 'http-request'; the preload allowed 'axios'; the renderer got
+	// "Channel http-request is not allowed" before IPC, so nothing reached the
+	// main process and nothing appeared in the transport log.
+	//
+	// Sampling channels cannot catch that. The invariant is the coverage
+	// relation itself, so assert it directly against the source.
+	// ------------------------------------------------------------------
+	const collectSourceFiles = (dir: string, acc: string[] = []): string[] => {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			const full = path.join(dir, entry.name);
+			if (entry.isDirectory()) collectSourceFiles(full, acc);
+			else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) acc.push(full);
+		}
+		return acc;
+	};
+
+	const sourceFiles = collectSourceFiles(path.join(__dirname));
+	const sources = sourceFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+
+	// `handleIpc('x')` is the typed wrapper in src/main/ipc.ts; `ipcMain.handle('x')`
+	// is the raw call. `protocol.handle` is a URL scheme, not IPC — hence the anchors.
+	const registeredInvokeChannels = new Set(
+		[...sources.matchAll(/(?:ipcMain\.handle|handleIpc)\(\s*'([^']+)'/g)].map((m) => m[1])
+	);
+	assert.ok(
+		registeredInvokeChannels.size > 0,
+		'expected to find ipcMain.handle registrations — the scan itself must not silently match nothing'
+	);
+	assert.ok(
+		registeredInvokeChannels.has('http-request'),
+		'main must still register the http-request transport channel'
+	);
+	for (const channel of registeredInvokeChannels) {
+		assert.ok(
+			(INVOKE_CHANNELS as readonly string[]).includes(channel),
+			`main registers invoke channel '${channel}' but the preload allowlist does not permit it — ` +
+				'the renderer will get "Channel ' +
+				channel +
+				' is not allowed" before IPC'
+		);
+	}
+
+	const registeredSendChannels = new Set(
+		[...sources.matchAll(/ipcMain\.on\(\s*'([^']+)'/g)].map((m) => m[1])
+	);
+	for (const channel of registeredSendChannels) {
+		assert.ok(
+			(SEND_CHANNELS as readonly string[]).includes(channel),
+			`main listens on send channel '${channel}' but the preload allowlist does not permit it`
+		);
+	}
+
+	// The specific regression, exercised through the real bridge rather than the list.
+	await exposedIpcRenderer.invoke('http-request', {
+		type: 'request',
+		requestId: 'allowlist-probe',
+		config: { url: 'https://example.com', method: 'get' },
+	});
+	assert.equal(
+		invokeCalls[invokeCalls.length - 1]?.channel,
+		'http-request',
+		'preload must forward the http-request transport channel to main'
 	);
 
 	console.log('preload bridge assertions passed');
