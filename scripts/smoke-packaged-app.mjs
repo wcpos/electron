@@ -285,8 +285,14 @@ async function main() {
 		try {
 			if (child && child.exitCode === null && child.signalCode === null) {
 				await new Promise((res) => {
-					child.once('exit', res);
-					setTimeout(res, 5_000);
+					// Clear the fallback when the child goes promptly (the normal path),
+					// or the pending timer holds the event loop open for the full 5s on
+					// every run of the gate.
+					const timer = setTimeout(res, 5_000);
+					child.once('exit', () => {
+						clearTimeout(timer);
+						res();
+					});
 				});
 			}
 			if (userDataDir) {
