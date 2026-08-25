@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: 'Select the platform to build and publish'
+        description: "Select the platform to build and publish"
         required: true
-        default: 'all'
+        default: "all"
         type: choice
         options:
           - all
@@ -95,6 +95,27 @@ jobs:
           pnpm install
           pnpm run rebuild:all
 
+      - name: 🔬 Smoke-test the packaged app
+        # 1.10.1 shipped with every HTTP request dead: main served the
+        # 'http-request' IPC channel, the preload allowlist still permitted the
+        # old 'axios' name, and the renderer's own guard rejected each call
+        # before IPC. Both repos' source tests passed, because the defect only
+        # existed in the packaged artifact. Launch the real build and prove it
+        # can complete one real request over the real bridge.
+        #
+        # CI=false is deliberate: forge.config.ts enables osxNotarize whenever
+        # CI === 'true', and the Apple credentials are scoped to the publish step
+        # below. Left as-is, this throwaway package would attempt notarization
+        # with empty credentials and fail before the smoke test ran — turning a
+        # release gate into a release blocker. Signing still happens via the
+        # keychain identity imported above; the smoke build is never shipped.
+        env:
+          CI: 'false'
+        timeout-minutes: 25
+        run: |
+          pnpm run package
+          pnpm run test:smoke-packaged out
+
       - name: 🚀 Publish MacOS x64 release
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -144,6 +165,27 @@ jobs:
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
           pnpm install
           pnpm run rebuild:all
+
+      - name: 🔬 Smoke-test the packaged app
+        # 1.10.1 shipped with every HTTP request dead: main served the
+        # 'http-request' IPC channel, the preload allowlist still permitted the
+        # old 'axios' name, and the renderer's own guard rejected each call
+        # before IPC. Both repos' source tests passed, because the defect only
+        # existed in the packaged artifact. Launch the real build and prove it
+        # can complete one real request over the real bridge.
+        #
+        # CI=false is deliberate: forge.config.ts enables osxNotarize whenever
+        # CI === 'true', and the Apple credentials are scoped to the publish step
+        # below. Left as-is, this throwaway package would attempt notarization
+        # with empty credentials and fail before the smoke test ran — turning a
+        # release gate into a release blocker. Signing still happens via the
+        # keychain identity imported above; the smoke build is never shipped.
+        env:
+          CI: 'false'
+        timeout-minutes: 25
+        run: |
+          pnpm run package
+          pnpm run test:smoke-packaged out
 
       - name: 🚀 Publish MacOS arm64 release
         env:
@@ -219,7 +261,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm run publish-app
-
 
   validate-flathub-extra-data:
     runs-on: ubuntu-latest
@@ -317,10 +358,10 @@ jobs:
         if: steps.flatpak-runtime.outcome == 'success'
         continue-on-error: true
         env:
-          WCPOS_FLATPAK: '1'
+          WCPOS_FLATPAK: "1"
           # Surface flatpak-builder output — Forge swallows it otherwise, which is
           # why past failures only showed "flatpak-builder failed with status code 1".
-          DEBUG: 'electron-installer-flatpak*'
+          DEBUG: "electron-installer-flatpak*"
         run: npx electron-forge make --targets=@electron-forge/maker-flatpak --skip-package
 
       - name: ⬆️ Upload Flatpak to release (non-blocking)
