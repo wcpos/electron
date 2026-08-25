@@ -8,8 +8,13 @@
 	"packageManager": "pnpm@10.31.0",
 	"pnpm": {
 		"onlyBuiltDependencies": [
+			"@serialport/bindings-cpp",
 			"electron",
-			"rxdb-premium"
+			"electron-winstaller",
+			"fs-xattr",
+			"macos-alias",
+			"rxdb-premium",
+			"usb"
 		]
 	},
 	"main": ".webpack/main",
