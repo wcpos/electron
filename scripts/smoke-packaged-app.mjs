@@ -274,9 +274,35 @@ async function main() {
 		console.log(`smoke: HTTP over the IPC bridge -> ${outcome}`);
 		console.log('SMOKE-COMPLETE: the packaged app can reach a server');
 	} finally {
+		// Teardown must never decide the verdict. On the 1.10.3 x64 run the gate
+		// printed SMOKE-COMPLETE and then exited 1 because rmSync raced the app
+		// still writing to its profile (ENOTEMPTY) — so a job whose artifact had
+		// just been verified good failed anyway, and the release went out without
+		// Intel Mac assets. Kill, let the process actually go, then clean up on a
+		// best-effort basis.
 		child?.kill('SIGKILL');
 		if (server.listening) server.close();
-		if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true });
+		try {
+			if (child && child.exitCode === null && child.signalCode === null) {
+				await new Promise((res) => {
+					// Clear the fallback when the child goes promptly (the normal path),
+					// or the pending timer holds the event loop open for the full 5s on
+					// every run of the gate.
+					const timer = setTimeout(res, 5_000);
+					child.once('exit', () => {
+						clearTimeout(timer);
+						res();
+					});
+				});
+			}
+			if (userDataDir) {
+				fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+			}
+		} catch (error) {
+			console.log(
+				`smoke: could not remove the temp profile (${userDataDir}) — ignoring: ${error.message}`
+			);
+		}
 	}
 }
 
