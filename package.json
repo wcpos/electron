@@ -49,7 +49,8 @@
 		"test:raw-print": "ts-node src/main/raw-print.test.ts",
 		"test:print-raw-tcp": "ts-node src/main/print-raw-tcp.test.ts",
 		"test:boot": "ts-node src/main/boot.test.ts",
-		"test:opfs-recovery": "node --test src/main/opfs-targeted-recovery.cleanup.test.mjs src/main/opfs-targeted-recovery.test.mjs"
+		"test:opfs-recovery": "node --test src/main/opfs-targeted-recovery.cleanup.test.mjs src/main/opfs-targeted-recovery.test.mjs",
+		"test:smoke-packaged": "node scripts/smoke-packaged-app.mjs"
 	},
 	"dependencies": {
 		"@novu/js": "3.19.0",
