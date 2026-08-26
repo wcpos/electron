@@ -8,10 +8,14 @@
  * run opened. Neither `triggerReadTasks` nor `triggerWriteTasks` wraps that in a
  * `finally`, so a task that THROWS skips it:
  *
- *   - a throwing READ is harmless: `runRead`'s task wrapper swallows the error
- *     (it rejects the caller's promise without rethrowing), so the run reaches
- *     `cleanupAfterRun` normally. Pinned here so that if upstream ever makes
- *     reads rethrow, it fails loudly instead of silently joining the write case.
+ *   - a throwing READ task is harmless: `runRead`'s task wrapper swallows the
+ *     error (it rejects the caller's promise without rethrowing), so the run
+ *     reaches `cleanupAfterRun` normally. Pinned here so that if upstream ever
+ *     makes reads rethrow, it fails loudly instead of silently joining the
+ *     write case. But the shared PRE-RUN hook (`beforeTaskReadOrWrite`, the
+ *     changes-file replay) runs outside every task wrapper on READ and CLEANUP
+ *     runs too, and its rejection unwinds those runs past cleanup exactly like
+ *     a throwing write — the hook-failure tests below pin that containment.
  *   - a throwing WRITE is not: `runWrite`'s wrapper DOES rethrow. The run unwinds
  *     past `cleanupAfterRun`, leaking every access handle it opened — on OPFS
  *     they stay open for the life of the worker, so any later open of the same
@@ -55,9 +59,8 @@ const packageRoot = dirname(require.resolve('rxdb-premium/package.json'));
  * the patch are guaranteed to be talking about the same file on disk.
  */
 const { TaskQueue, getAccessHandle } = await import(
-	pathToFileURL(
-		join(packageRoot, 'dist/esm/plugins/storage-abstract-filesystem/task-queue.js')
-	).href
+	pathToFileURL(join(packageRoot, 'dist/esm/plugins/storage-abstract-filesystem/task-queue.js'))
+		.href
 );
 
 /** Stands in for `navigator.locks` — the real lock is not the subject here. */
@@ -70,7 +73,7 @@ const passthroughLock = { request: async (_lockId, fn) => fn() };
  */
 const SETTLE_TIMEOUT_MS = 1000;
 
-function createHarness() {
+function createHarness({ beforeTaskReadOrWrite } = {}) {
 	const opened = [];
 	const fileHandle = {
 		createAccessHandle: async () => {
@@ -80,7 +83,19 @@ function createHarness() {
 		},
 	};
 
-	const queue = new TaskQueue('containment-probe', passthroughLock, async () => {});
+	// The third constructor argument IS `beforeTaskReadOrWrite` — in production
+	// it is the changes-file replay (`processChangesFileIfRequired`), which opens
+	// access handles of its own and can genuinely reject (a torn or misapplied
+	// changes file — the #1045 class). The hook-failure tests below stand on that.
+	// The hook receives an `openHandle` so it can register handles on the run
+	// state the way the real replay does, then fail.
+	const queue = new TaskQueue(
+		'containment-probe',
+		passthroughLock,
+		beforeTaskReadOrWrite
+			? (runState) => beforeTaskReadOrWrite(runState, (rs) => getAccessHandle(fileHandle, rs))
+			: async () => {}
+	);
 	// The queue only reaches for `primaryPath` on the write path; nothing here
 	// exercises real storage, so the narrowest possible instance is right.
 	queue.setStorageInstance({ primaryPath: 'id' });
@@ -90,6 +105,8 @@ function createHarness() {
 		opened,
 		read: (task) => queue.runRead(task),
 		write: (task) => queue.runWrite({ primaryPath: 'id', documentWrites: [], task }),
+		cleanup: (fn) => queue.runCleanup(fn),
+		init: (fn) => queue.runInit(fn),
 		openHandle: (runState) => getAccessHandle(fileHandle, runState),
 		/**
 		 * Handles are closed by `cleanupAfterRun` at the END of a run, and a run
@@ -268,4 +285,90 @@ test('a failed task does not take its batch-mates down with it', async () => {
 
 	assert.equal((await settle(failing)).state, 'rejected');
 	assert.deepEqual(await settle(healthy), { state: 'resolved', value: 'sibling-ok' });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-run-hook failures.
+//
+// `beforeTaskReadOrWrite` — the changes-file replay in production — runs at the
+// start of READ and CLEANUP runs (and per-batch inside WRITE runs, which the
+// write `finally` already covers). Its rejection happens OUTSIDE every per-task
+// wrapper, so before the read/cleanup guards it unwound those runs past
+// `cleanupAfterRun`: the same leak as a throwing write, reachable from a pure
+// read. The replay opens access handles of its own before it can fail (that is
+// how a torn changes file presents), so the hook here does exactly that.
+//
+// Deliberately NOT asserted: the failing run's own callers. Their tasks never
+// execute and upstream has nothing that rejects them — a pre-existing, bounded
+// semantic surfaced by the app-layer stall diagnostic, not part of what the
+// patch changes.
+// ---------------------------------------------------------------------------
+
+/** A hook that opens a handle on the run state, then fails — once. */
+function failingReplayHook() {
+	let failed = false;
+	return async (runState, openHandle) => {
+		if (failed) return;
+		failed = true;
+		await openHandle(runState);
+		throw new Error('deliberate replay failure');
+	};
+}
+
+test('a failing replay hook on a READ run closes the handles it opened', async () => {
+	const harness = createHarness({ beforeTaskReadOrWrite: failingReplayHook() });
+
+	await settle(harness.read(async () => 'never-runs'));
+	await harness.settleRun();
+
+	assert.equal(harness.opened.length, 1, 'the hook should have opened exactly one handle');
+	assert.deepEqual(
+		harness.leakedHandles(),
+		[],
+		'a leaked replay handle blocks every later open of that file — across tabs too'
+	);
+	assert.deepEqual(
+		await settle(harness.read(async () => 'read-ok')),
+		{ state: 'resolved', value: 'read-ok' },
+		'a later read must still settle after the failed run'
+	);
+	assert.deepEqual(
+		await settle(harness.write(async () => 'write-ok')),
+		{ state: 'resolved', value: 'write-ok' },
+		'a later write must still settle after the failed run'
+	);
+});
+
+test('a failing replay hook on a CLEANUP run closes the handles it opened', async () => {
+	const harness = createHarness({ beforeTaskReadOrWrite: failingReplayHook() });
+
+	await settle(harness.cleanup(async () => 'never-runs'));
+	await harness.settleRun();
+
+	assert.equal(harness.opened.length, 1, 'the hook should have opened exactly one handle');
+	assert.deepEqual(harness.leakedHandles(), [], 'the cleanup run must not leak its handles');
+	assert.deepEqual(
+		await settle(harness.read(async () => 'read-ok')),
+		{ state: 'resolved', value: 'read-ok' },
+		'a later read must still settle after the failed run'
+	);
+});
+
+test('INIT needs no guard: a failing init callback still cleans up and rejects its caller', async () => {
+	// Upstream chains `cleanupAfterRun` AFTER the init callback's own `.catch`,
+	// so it always runs — this pin is why the patcher has no INIT anchor. If an
+	// upstream refactor breaks that chaining, this fails loudly.
+	const harness = createHarness();
+
+	const failed = await settle(
+		harness.init(async (runState) => {
+			await harness.openHandle(runState);
+			throw boom();
+		})
+	);
+
+	assert.equal(failed.state, 'rejected', 'the failing init must reject to its caller');
+	await harness.settleRun();
+	assert.equal(harness.opened.length, 1, 'the probe should have opened exactly one handle');
+	assert.deepEqual(harness.leakedHandles(), [], 'the init run must not leak its handles');
 });

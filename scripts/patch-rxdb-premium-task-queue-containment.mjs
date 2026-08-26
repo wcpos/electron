@@ -41,11 +41,20 @@
  *     failing task's own promise still rejects to its caller. Only the leak and
  *     the poisoning are removed.
  *
- * The read run is NOT patched: `runRead`'s task wrapper swallows the task error,
- * so its run reaches `cleanupAfterRun` normally. The containment test pins that
- * (a read failure leaves the queue serving) so a future upstream change that
- * makes reads rethrow fails loudly here rather than silently reintroducing the
- * leak.
+ * READ and CLEANUP runs get the same `finally` guard. Their task wrappers do
+ * swallow task errors (pinned by the containment test, so an upstream change
+ * that makes reads rethrow fails loudly), but the shared pre-run hook —
+ * `beforeTaskReadOrWrite`, i.e. the changes-file replay — runs on those run
+ * types too, and its rejection unwinds the run past `cleanupAfterRun` exactly
+ * like a throwing write task (found by review on the first cut of this patch,
+ * which guarded only writes). The INIT run needs no anchor: upstream chains
+ * `cleanupAfterRun` after its own `.catch`, so it always runs — pinned by test.
+ *
+ * A pre-run-hook rejection still leaves that one run's own callers pending
+ * (their tasks never execute and nothing rejects them) — that is upstream's
+ * pre-existing semantic, bounded to the failing run and surfaced by the
+ * app-layer stall diagnostic; only the permanent damage (leak, poisoning) is
+ * removed here.
  *
  * Why not `pnpm patch`: rxdb-premium's dist/ is materialized by its own
  * license-gated postinstall, so it does not exist in the tarball pnpm patches —
@@ -110,6 +119,17 @@ const DISTS = [
 		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(s),await this.cleanupAfterRun(s)}}))',
 		writeCleanupAfter:
 			'await this.beforeTaskReadOrWrite(s)}finally{if(s)await this.cleanupAfterRun(s)}}}))',
+		readRunBefore:
+			'(async()=>{var e={type:"READ",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+		readRunAfter:
+			'(async()=>{try{var e={type:"READ",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+		readCleanupBefore: '0===this.readTasks.length&&(s=!0)}return this.cleanupAfterRun(e)}))',
+		readCleanupAfter:
+			'0===this.readTasks.length&&(s=!0)}}finally{if(e)await this.cleanupAfterRun(e)}}))',
+		cleanupRunBefore:
+			'(async()=>{var r={type:"CLEANUP",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>s(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
+		cleanupRunAfter:
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>s(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 	{
 		dist: 'cjs',
@@ -120,6 +140,17 @@ const DISTS = [
 		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(a),await this.cleanupAfterRun(a)}}))',
 		writeCleanupAfter:
 			'await this.beforeTaskReadOrWrite(a)}finally{if(a)await this.cleanupAfterRun(a)}}}))',
+		readRunBefore:
+			'(async()=>{var s={type:"READ",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(s);',
+		readRunAfter:
+			'(async()=>{try{var s={type:"READ",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(s);',
+		readCleanupBefore: '0===this.readTasks.length&&(a=!0)}return this.cleanupAfterRun(s)}))',
+		readCleanupAfter:
+			'0===this.readTasks.length&&(a=!0)}}finally{if(s)await this.cleanupAfterRun(s)}}))',
+		cleanupRunBefore:
+			'(async()=>{var r={type:"CLEANUP",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await t(r).then((e=>s(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
+		cleanupRunAfter:
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await t(r).then((e=>s(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 ];
 
@@ -132,7 +163,14 @@ function preparePatch(path, anchors) {
 	const source = readFileSync(path, 'utf8');
 	if (source.includes(MARKER)) return { path, status: 'already patched' };
 
-	for (const key of ['constructorBefore', 'writeRunBefore', 'writeCleanupBefore']) {
+	for (const key of [
+		'constructorBefore',
+		'writeRunBefore',
+		'writeCleanupBefore',
+		'readRunBefore',
+		'readCleanupBefore',
+		'cleanupRunBefore',
+	]) {
 		const anchor = anchors[key];
 		const occurrences = source.split(anchor).length - 1;
 		if (occurrences !== 1) {
@@ -148,7 +186,10 @@ function preparePatch(path, anchors) {
 		source
 			.replace(anchors.constructorBefore, anchors.constructorAfter)
 			.replace(anchors.writeRunBefore, anchors.writeRunAfter)
-			.replace(anchors.writeCleanupBefore, anchors.writeCleanupAfter);
+			.replace(anchors.writeCleanupBefore, anchors.writeCleanupAfter)
+			.replace(anchors.readRunBefore, anchors.readRunAfter)
+			.replace(anchors.readCleanupBefore, anchors.readCleanupAfter)
+			.replace(anchors.cleanupRunBefore, anchors.cleanupRunAfter);
 
 	return { path, next, status: 'patched' };
 }
