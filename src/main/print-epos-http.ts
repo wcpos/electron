@@ -35,6 +35,8 @@ handleIpc('print-epos-http', async (_event, args) => {
 	const transport = useHttps ? https : http;
 
 	return new Promise<{ status: number; body: string }>((resolve, reject) => {
+		let deadline: ReturnType<typeof setTimeout> | undefined;
+		const clearDeadline = () => deadline && clearTimeout(deadline);
 		const request = transport.request(
 			{
 				hostname: host,
@@ -46,6 +48,7 @@ handleIpc('print-epos-http', async (_event, args) => {
 					// Embedded printer HTTP servers can reject chunked POSTs — always send a length.
 					'Content-Length': Buffer.byteLength(xml, 'utf8'),
 				},
+				// codeql[js/disabling-certificate-validation] Self-signed ePOS cert; request-scoped.
 				...(useHttps ? { rejectUnauthorized: false } : {}),
 			},
 			(response) => {
@@ -59,8 +62,12 @@ handleIpc('print-epos-http', async (_event, args) => {
 					chunks.push(capped);
 					bodyBytes += capped.length;
 				});
-				response.on('error', reject);
+				response.on('error', (error) => {
+					clearDeadline();
+					reject(error);
+				});
 				response.on('end', () => {
+					clearDeadline();
 					resolve({
 						status: response.statusCode ?? 0,
 						body: Buffer.concat(chunks, bodyBytes).toString('utf8'),
@@ -69,11 +76,14 @@ handleIpc('print-epos-http', async (_event, args) => {
 			}
 		);
 
-		request.on('error', reject);
-		request.setTimeout(requestTimeoutMs, () => {
+		request.on('error', (error) => {
+			clearDeadline();
+			reject(error);
+		});
+		deadline = setTimeout(() => {
 			request.destroy();
 			reject(new Error(`EPOS HTTP request to ${host}:${port} timed out`));
-		});
+		}, requestTimeoutMs);
 		request.end(xml);
 	});
 });

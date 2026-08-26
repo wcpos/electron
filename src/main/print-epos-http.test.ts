@@ -23,34 +23,27 @@ class FakeResponse extends EventEmitter {
 class FakeRequest extends EventEmitter {
 	body = '';
 	destroyed = false;
-	timeoutMs: number | undefined;
-	private timeoutCallback: (() => void) | undefined;
 
 	constructor(
 		readonly options: RequestOptions,
 		private readonly respond: (response: FakeResponse) => void,
-		private readonly mode: 'success' | 'timeout',
+		private readonly mode: 'success' | 'stream',
 		private readonly responseBody: Buffer
 	) {
 		super();
 	}
 
-	setTimeout(timeoutMs: number, callback: () => void): this {
-		this.timeoutMs = timeoutMs;
-		this.timeoutCallback = callback;
+	setTimeout(_timeoutMs: number, _callback: () => void): this {
 		return this;
 	}
 
 	end(data?: string): this {
 		this.body = data ?? '';
 		queueMicrotask(() => {
-			if (this.mode === 'timeout') {
-				this.timeoutCallback?.();
-				return;
-			}
 			const response = new FakeResponse();
 			this.respond(response);
 			response.emit('data', this.responseBody);
+			if (this.mode === 'stream') return;
 			response.emit('end');
 		});
 		return this;
@@ -64,7 +57,7 @@ class FakeRequest extends EventEmitter {
 
 const handlers = new Map<string, Handler>();
 const requests: { transport: 'http' | 'https'; request: FakeRequest }[] = [];
-let nextMode: 'success' | 'timeout' = 'success';
+let nextMode: 'success' | 'stream' = 'success';
 let nextResponseBody = Buffer.from('<ok/>');
 
 function fakeTransport(transport: 'http' | 'https') {
@@ -158,15 +151,19 @@ const validRequest = {
 		const capped = (await handler(null, validRequest)) as { body: string };
 		assert.equal(Buffer.byteLength(capped.body), 1024 * 1024);
 
-		nextMode = 'timeout';
+		nextMode = 'stream';
 		await assert.rejects(
-			handler(null, { ...validRequest, port: 9100, timeoutMs: 20 }),
+			Promise.race([
+				handler(null, { ...validRequest, port: 9100, timeoutMs: 20 }),
+				new Promise((_, reject) =>
+					setTimeout(() => reject(new Error('absolute deadline did not fire')), 1300)
+				),
+			]),
 			/printer\.local:9100/
 		);
 		const timedOut = requests[requests.length - 1]?.request;
 		assert.ok(timedOut);
-		assert.equal(timedOut.timeoutMs, 1000, 'timeout is clamped to the minimum');
-		assert.equal(timedOut.destroyed, true, 'timed-out requests are destroyed');
+		assert.equal(timedOut.destroyed, true, 'requests are destroyed at the absolute deadline');
 
 		console.log('print-epos-http assertions passed');
 	} finally {
