@@ -48,7 +48,8 @@ handleIpc('print-epos-http', async (_event, args) => {
 					// Embedded printer HTTP servers can reject chunked POSTs — always send a length.
 					'Content-Length': Buffer.byteLength(xml, 'utf8'),
 				},
-				...(useHttps ? { rejectUnauthorized: false } : {}), // lgtm[js/disabling-certificate-validation] Self-signed ePOS cert; request-scoped.
+				// Epson ePOS HTTPS printers use self-signed certificates; keep this request-scoped.
+				...(useHttps ? { rejectUnauthorized: false } : {}),
 			},
 			(response) => {
 				const chunks: Buffer[] = [];
