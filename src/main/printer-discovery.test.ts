@@ -91,6 +91,39 @@ try {
 		}
 	);
 
+	// Regression: the Epson TM-m30III advertises _ipp on 631. Raw ESC/POS bytes sent to
+	// the IPP port are accepted and silently discarded, so ipp/ipps/lpd results must map
+	// to jetdirect 9100 rather than carrying the advertised protocol port.
+	assert.deepEqual(
+		mapMdnsServiceToPrinter({
+			name: 'EPSON TM-m30III',
+			type: 'ipp',
+			port: 631,
+			host: 'epson-m30.local',
+			addresses: ['192.168.1.131'],
+		}),
+		{
+			id: 'mdns-192.168.1.131-9100',
+			name: 'EPSON TM-m30III',
+			connectionType: 'network',
+			address: '192.168.1.131',
+			port: 9100,
+			vendor: 'epson',
+		}
+	);
+
+	assert.equal(
+		mapMdnsServiceToPrinter({
+			name: 'Custom raw port',
+			type: 'pdl-datastream',
+			port: 9101,
+			host: 'custom.local',
+			addresses: ['192.168.1.46'],
+		})?.port,
+		9101,
+		'pdl-datastream advertises a raw socket, so its advertised port is trusted'
+	);
+
 	assert.equal(
 		mapMdnsServiceToPrinter({ name: 'No address', type: 'printer' }),
 		null,

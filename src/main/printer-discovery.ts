@@ -19,6 +19,12 @@ export type { DiscoveredNetworkPrinter } from '@wcpos/printer/ipc-channels';
 type PrinterDiscoveryRequest = IpcInvokeChannels['printer-discovery']['req'];
 
 const SERVICE_TYPES = ['printer', 'pdl-datastream', 'ipp', 'ipps', 'star'];
+// Printing always goes over raw TCP (ESC/POS bytes on a plain socket), so a discovery
+// result may only carry a raw-socket port. Only these service types advertise one;
+// ipp/ipps (631) and lpd ("printer", 515) advertise protocol ports that accept the TCP
+// connection and silently discard raw bytes — those results map to jetdirect 9100.
+const RAW_SOCKET_SERVICE_TYPES = new Set(['pdl-datastream', 'star']);
+const RAW_PRINT_PORT = 9100;
 const DEFAULT_SCAN_TIMEOUT_MS = 4000;
 
 let activeScan: { stop: () => void } | null = null;
@@ -55,9 +61,14 @@ function detectVendor(service: MdnsServiceLike): 'epson' | 'star' | 'generic' {
 export function mapMdnsServiceToPrinter(service: MdnsServiceLike): DiscoveredNetworkPrinter | null {
 	const address = pickAddress(service);
 	if (!address) return null;
+	const serviceType = (service.type ?? '').toLowerCase();
 	const servicePort = Number(service.port);
-	const port =
-		Number.isInteger(servicePort) && servicePort >= 1 && servicePort <= 65535 ? servicePort : 9100;
+	const advertisedPortUsable =
+		RAW_SOCKET_SERVICE_TYPES.has(serviceType) &&
+		Number.isInteger(servicePort) &&
+		servicePort >= 1 &&
+		servicePort <= 65535;
+	const port = advertisedPortUsable ? servicePort : RAW_PRINT_PORT;
 	const id = `mdns-${sanitizeIdPart(address)}-${port}`;
 
 	return {
