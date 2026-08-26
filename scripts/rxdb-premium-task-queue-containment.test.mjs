@@ -117,16 +117,24 @@ function createHarness({ beforeTaskReadOrWrite } = {}) {
 		 * rejected, so a failure here must not be mistaken for a leak.
 		 */
 		settleRun: async () => {
+			// The timeout timer stays REFERENCED (and is cleared after the race):
+			// when the raced promise never settles — precisely what the hook-failure
+			// tests leave behind — an unref'd timer lets the event loop drain and
+			// node:test cancels the whole test with "Promise resolution is still
+			// pending but the event loop has already resolved" (seen on the electron
+			// CI's node before this was fixed).
+			let timer;
 			try {
 				await Promise.race([
 					queue.awaitIdle(),
 					new Promise((resolve) => {
-						const timer = setTimeout(resolve, SETTLE_TIMEOUT_MS);
-						timer.unref?.();
+						timer = setTimeout(resolve, SETTLE_TIMEOUT_MS);
 					}),
 				]);
 			} catch {
 				/* a rejected queue is the poisoning assertion's business, not ours */
+			} finally {
+				clearTimeout(timer);
 			}
 		},
 		leakedHandles: () => opened.filter((handle) => !handle.closed),
@@ -139,6 +147,8 @@ function createHarness({ beforeTaskReadOrWrite } = {}) {
  * which task never came back.
  */
 async function settle(promise) {
+	// Referenced timer, cleared after the race — see settleRun for why unref'ing
+	// it cancels tests on a drained event loop when the raced promise is hung.
 	let timer;
 	const verdict = await Promise.race([
 		promise.then(
@@ -147,7 +157,6 @@ async function settle(promise) {
 		),
 		new Promise((resolve) => {
 			timer = setTimeout(() => resolve({ state: 'hung' }), SETTLE_TIMEOUT_MS);
-			timer.unref?.();
 		}),
 	]);
 	clearTimeout(timer);
