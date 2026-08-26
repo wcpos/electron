@@ -19,6 +19,7 @@ import './main/image-cache';
 import './main/storage-measure';
 import './main/print-external-url';
 import './main/print-raw-tcp';
+import './main/print-epos-http';
 import './main/serial-printer';
 import './main/usb-printer';
 import './main/printer-discovery';
