@@ -64,9 +64,13 @@
  * dropped, once upstream ships the `finally` — re-run the containment test
  * before deleting this).
  *
- * Because the patch lands in the shared abstract-filesystem layer it covers all
- * three platforms at once: OPFS on web, filesystem-node in the Electron main
- * process, and the expo-filesystem engine on native.
+ * The patch lands in the shared abstract-filesystem layer, so it covers every
+ * storage backend served by the rxdb-premium install it runs against — a
+ * postinstall can only reach its own repo's node_modules. In the monorepo that
+ * is OPFS on web and the expo-filesystem engine on native. The Electron app
+ * carries its own rxdb-premium and its own verbatim copy of this patcher
+ * (wcpos/electron#375), which is what contains filesystem-node in its main
+ * process — keep the two copies identical.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
