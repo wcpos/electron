@@ -51,10 +51,14 @@
  * only prove the fake behaves, which is the trap this arc has fallen into before.
  */
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
+
+import { MARKER, preparePatch } from './patch-rxdb-premium-task-queue-containment.mjs';
 
 const require = createRequire(import.meta.url);
 const packageRoot = dirname(require.resolve('rxdb-premium/package.json'));
@@ -85,6 +89,82 @@ const passthroughLock = { request: async (_lockId, fn) => fn() };
  * after this is not merely slow — the pre-patch hang never settles at all.
  */
 const SETTLE_TIMEOUT_MS = 1000;
+
+const syntheticAnchors = {
+	constructorBefore: '__first__',
+	constructorAfter: '__after_constructor__',
+	writeRunBefore: '__first__second__',
+	writeRunAfter: '__after_write_run__',
+	writeCleanupBefore: '__before_write_cleanup__',
+	writeCleanupAfter: '__after_write_cleanup__',
+	readRunBefore: '__before_read_run__',
+	readRunAfter: '__after_read_run__',
+	readCleanupBefore: '__before_read_cleanup__',
+	readCleanupAfter: '__after_read_cleanup__',
+	cleanupRunBefore: '__before_cleanup_run__',
+	cleanupRunAfter: '__after_cleanup_run__',
+};
+
+function withFixture(content, fn) {
+	const directory = mkdtempSync(join(tmpdir(), 'wcpos-task-queue-patch-'));
+	const path = join(directory, 'task-queue.js');
+	writeFileSync(path, content);
+	try {
+		return fn(path);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+}
+
+test('patch preparation rejects when an earlier rewrite removes a later anchor', () => {
+	const anchors = syntheticAnchors;
+	withFixture(
+		anchors.writeRunBefore +
+			anchors.writeCleanupBefore +
+			anchors.readRunBefore +
+			anchors.readCleanupBefore +
+			anchors.cleanupRunBefore,
+		(path) => {
+			assert.throws(
+				() => preparePatch(path, anchors),
+				/rewrite writeRun did not apply/,
+				'an install must fail instead of reporting a partially applied patch as successful'
+			);
+		}
+	);
+});
+
+test('a marked file missing a rewrite is corrupt, not "already patched"', () => {
+	// An interrupted write used to be able to leave the marker without every
+	// rewrite; commitPatches now writes via temp+rename so this cannot happen on
+	// its own, and this check is the backstop for any other corruption.
+	const anchors = syntheticAnchors;
+	const everyAfterBut = (missing) =>
+		Object.entries(anchors)
+			.filter(([key]) => key.endsWith('After') && key !== missing)
+			.map(([, value]) => value)
+			.join('');
+
+	withFixture(MARKER + everyAfterBut('writeRunAfter'), (path) => {
+		assert.throws(
+			() => preparePatch(path, anchors),
+			/carries the patch marker but rewrite writeRun is missing/,
+			'a half-patched file must fail the install, not report success'
+		);
+	});
+});
+
+test('a marked file carrying every rewrite reports "already patched"', () => {
+	const anchors = syntheticAnchors;
+	const everyAfter = Object.entries(anchors)
+		.filter(([key]) => key.endsWith('After'))
+		.map(([, value]) => value)
+		.join('');
+
+	withFixture(MARKER + everyAfter, (path) => {
+		assert.deepEqual(preparePatch(path, anchors), { path, status: 'already patched' });
+	});
+});
 
 /**
  * Resolves to a verdict rather than propagating, so a hang is a readable
