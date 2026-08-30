@@ -1180,7 +1180,7 @@ test("refuses a rebuild when the primary points at a stale duplicate revision", 
   }
 });
 
-test("refuses a rebuild when the primary index is missing rows", async () => {
+test("rebuilds every index from documents.json when the primary index is missing rows", async () => {
   const basePath = await mkdtemp(join(tmpdir(), "wcpos-index-truncated-"));
   const ids = ["lane:aaa", "lane:bbb", "lane:ccc"];
 
@@ -1208,6 +1208,8 @@ test("refuses a rebuild when the primary index is missing rows", async () => {
       JSON.stringify(rows.filter((row) => !row[0].includes("lane:ccc"))),
     );
 
+    const rebuilds = [];
+    globalThis.__wcposOnIndexRebuild = (event) => rebuilds.push(event);
     const { withTargetedOpfsRecovery } =
       await import("./opfs-targeted-recovery.mjs");
     const recovering = await withTargetedOpfsRecovery(
@@ -1220,12 +1222,22 @@ test("refuses a rebuild when the primary index is missing rows", async () => {
         sort: [{ beta: "asc" }],
       }),
     );
-    await assert.rejects(recovering.query(betaQuery), {
-      name: "SyntaxError",
-      message: /index reconciliation refused: id-set-mismatch:lane:ccc$/,
-    });
+    // Boot validation (patch-rxdb-premium-changelog-replay-safety.mjs) sees the
+    // index lengths disagree and rebuilds every index from documents.json
+    // before the first read, so the wrapper never has to decide whether the
+    // primary can be trusted: the store heals, and the query answers.
+    const result = await recovering.query(betaQuery);
+    assert.deepEqual(
+      result.documents.map((row) => row.id),
+      ids,
+    );
+    assert.deepEqual(
+      rebuilds.map((event) => event.reason),
+      ["length-mismatch"],
+    );
     await recovering.close();
   } finally {
+    delete globalThis.__wcposOnIndexRebuild;
     await rm(basePath, { recursive: true, force: true });
   }
 });
@@ -1381,7 +1393,7 @@ test("refuses a rebuild when index ID sets differ despite equal counts", async (
   }
 });
 
-test("refuses a rebuild when the primary index holds duplicate IDs", async () => {
+test("rebuilds every index from documents.json when the primary index holds duplicate IDs", async () => {
   const basePath = await mkdtemp(join(tmpdir(), "wcpos-index-dupid-"));
   const ids = ["lane:aaa", "lane:bbb", "lane:ccc"];
 
@@ -1418,6 +1430,8 @@ test("refuses a rebuild when the primary index holds duplicate IDs", async () =>
     bbbRow[2] = documentsBytes.length + copy.length;
     await writeFile(primaryPath, JSON.stringify(rows));
 
+    const rebuilds = [];
+    globalThis.__wcposOnIndexRebuild = (event) => rebuilds.push(event);
     const { withTargetedOpfsRecovery } =
       await import("./opfs-targeted-recovery.mjs");
     const recovering = await withTargetedOpfsRecovery(
@@ -1430,12 +1444,22 @@ test("refuses a rebuild when the primary index holds duplicate IDs", async () =>
         sort: [{ beta: "asc" }],
       }),
     );
-    await assert.rejects(recovering.query(betaQuery), {
-      name: "SyntaxError",
-      message: /index reconciliation refused: duplicate-primary-id:lane:aaa$/,
-    });
+    // Boot validation (patch-rxdb-premium-changelog-replay-safety.mjs) sees the
+    // duplicated primary key and rebuilds every index from documents.json
+    // before the first read; the byte-identical appended copy collapses to one
+    // lane:aaa, so the store heals and the query answers.
+    const result = await recovering.query(betaQuery);
+    assert.deepEqual(
+      result.documents.map((row) => row.id),
+      ids,
+    );
+    assert.deepEqual(
+      rebuilds.map((event) => event.reason),
+      ["duplicate-primary"],
+    );
     await recovering.close();
   } finally {
+    delete globalThis.__wcposOnIndexRebuild;
     await rm(basePath, { recursive: true, force: true });
   }
 });
