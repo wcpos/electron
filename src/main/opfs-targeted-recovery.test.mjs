@@ -171,7 +171,10 @@ test("derives an invalid count result and passes through a valid result", async 
   });
   assert.strictEqual(queriedPreparedQuery, preparedQuery);
   assert.equal(errors.length, 1);
-  assert.match(errors[0][0], /^\[count-recovery\].*collection=products$/);
+  assert.equal(errors[0][0], "[count-recovery] targeted-recovery-db/products");
+  assert.deepEqual(errors[0][1], {
+    detail: "typeof=undefined result=undefined",
+  });
   assert.strictEqual(await recovering.count(preparedQuery), validResult);
 });
 
@@ -1524,5 +1527,726 @@ test("rebuilds a secondary index that duplicates one document and drops another"
     await reopened.close();
   } finally {
     await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+// A "hollow" row: the index still carries the document, but its byte range
+// holds only whitespace — the shape a compaction leaves when it dies between
+// relocating a record and persisting the moved row. A read of that single row
+// parses to `[]` and reports the document absent, so nothing upstream treats it
+// as damage; the storage's own write path then indexes the parsed rows
+// positionally and dereferences `undefined` (Sentry WOOCOMMERCE-POS-2HC).
+async function seedCompacted(basePath, records, token) {
+  const initial = await getRxStorageFilesystemNode({
+    basePath,
+  }).createStorageInstance(storageParams(token));
+  assert.deepEqual(
+    (
+      await initial.bulkWrite(
+        records.map((item) => ({ document: item })),
+        "seed",
+      )
+    ).error,
+    [],
+  );
+  let compacted = false;
+  for (let attempt = 0; attempt < 5 && !compacted; attempt += 1) {
+    compacted = await initial.cleanup(0);
+  }
+  assert.equal(compacted, true);
+  return initial;
+}
+
+function captureRecoveryEvents() {
+  const events = [];
+  const hook = (event) => events.push(event);
+  globalThis.__wcposOnStorageRecovery = hook;
+  return {
+    events,
+    stop() {
+      if (globalThis.__wcposOnStorageRecovery === hook)
+        delete globalThis.__wcposOnStorageRecovery;
+    },
+  };
+}
+
+test("drops a hollow index row so a pending write lands instead of dereferencing it", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-hollow-write-"));
+  const hollow = document("order:hollow", 0);
+  const sibling = document("order:sibling", 1);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [hollow, sibling], "hollow-seed")
+    ).close();
+    await corruptRecordInPlace(basePath, hollow.id, () => Buffer.alloc(0));
+
+    // The raw storage sees the damage as absence: the index has the row, the
+    // read has no document for it.
+    const raw = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("hollow-raw"));
+    const rawState = await raw.internals.statePromise;
+    assert.ok(rawState.firstIdx.metaIdMap.has(hollow.id));
+    assert.deepEqual(await raw.findDocumentsById([hollow.id], true), []);
+    await raw.close();
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("hollow-recovering"));
+    const updated = {
+      ...hollow,
+      value: "recovered",
+      _rev: "2-hollow",
+      _meta: { lwt: hollow._meta.lwt + 100 },
+    };
+    const written = await recovering.bulkWrite(
+      [{ previous: hollow, document: updated }],
+      "update",
+    );
+    assert.deepEqual(written.error, []);
+    assert.deepEqual(capture.events, [
+      {
+        kind: "hollow-row-dropped",
+        target: "targeted-recovery-db/products",
+        id: hollow.id,
+      },
+    ]);
+    const current = await recovering.findDocumentsById(
+      [hollow.id, sibling.id],
+      false,
+    );
+    assert.deepEqual(
+      current.map((item) => [item.id, item.value]),
+      [
+        [hollow.id, "recovered"],
+        [sibling.id, sibling.value],
+      ],
+    );
+    const state = await recovering.internals.statePromise;
+    for (const indexState of state.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(hollow.id)).length,
+        1,
+        "exactly one row per index for the re-inserted document",
+      );
+    }
+    await recovering.close();
+
+    const reopened = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("hollow-reopened"));
+    assert.deepEqual(
+      (await reopened.findDocumentsById([hollow.id, sibling.id], false)).map(
+        (item) => item.value,
+      ),
+      ["recovered", sibling.value],
+    );
+    await reopened.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("does not verify a hollow id as clean on a withDeleted read", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-hollow-read-"));
+  const hollow = document("order:hollow", 0);
+  const sibling = document("order:sibling", 1);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [hollow, sibling], "read-seed")
+    ).close();
+    await corruptRecordInPlace(basePath, hollow.id, () => Buffer.alloc(0));
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("read-recovering"));
+    // The read that would have cached the id as verified drops the row instead.
+    assert.deepEqual(
+      (await recovering.findDocumentsById([hollow.id, sibling.id], true)).map(
+        (item) => item.id,
+      ),
+      [sibling.id],
+    );
+    assert.deepEqual(
+      capture.events.map((event) => [event.kind, event.id]),
+      [["hollow-row-dropped", hollow.id]],
+    );
+    const state = await recovering.internals.statePromise;
+    assert.equal(state.firstIdx.metaIdMap.has(hollow.id), false);
+    // The id is now genuinely absent — verified clean by that read — and a
+    // plain insert lands.
+    assert.deepEqual(
+      (await recovering.bulkWrite([{ document: hollow }], "reinsert")).error,
+      [],
+    );
+    assert.deepEqual(
+      (await recovering.findDocumentsById([hollow.id], false)).map(
+        (item) => item.id,
+      ),
+      [hollow.id],
+    );
+    await recovering.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("refuses a row that points at another document and still lands the write", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-foreign-row-"));
+  const shifted = document("order:shifted", 0);
+  const victim = document("order:victim", 1);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [shifted, victim], "foreign-seed")
+    ).close();
+    // Point every index row for order:shifted at order:victim's bytes:
+    // parseable, wrong document — not hollow, and not repairable in place.
+    const directory = join(basePath, (await readdir(basePath))[0]);
+    for (const name of (await readdir(directory)).filter((entry) =>
+      entry.startsWith("index-"),
+    )) {
+      const path = join(directory, name);
+      const rows = JSON.parse(await readFile(path, "utf8"));
+      const victimRow = rows.find((row) => row[0].includes(victim.id));
+      const shiftedRow = rows.find((row) => row[0].includes(shifted.id));
+      shiftedRow[1] = victimRow[1];
+      shiftedRow[2] = victimRow[2];
+      await writeFile(path, JSON.stringify(rows));
+    }
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("foreign-recovering"));
+    // A read of the shifted id is refused (nothing to drop) and must not hand
+    // back the victim's record in its place.
+    assert.deepEqual(
+      await recovering.findDocumentsById([shifted.id], true),
+      [],
+    );
+    assert.deepEqual(
+      (await recovering.findDocumentsById([shifted.id, victim.id], true)).map(
+        (item) => item.id,
+      ),
+      [victim.id],
+    );
+    assert.deepEqual(
+      capture.events.map((event) => [event.kind, event.reason]),
+      [
+        ["hollow-row-refused", "range-holds-foreign-bytes"],
+        ["hollow-row-refused", "range-holds-foreign-bytes"],
+      ],
+    );
+    capture.events.length = 0;
+    const updated = {
+      ...shifted,
+      value: "written-over-a-stale-row",
+      _rev: "2-shifted",
+      _meta: { lwt: shifted._meta.lwt + 100 },
+    };
+    const written = await recovering.bulkWrite(
+      [{ previous: shifted, document: updated }],
+      "update",
+    );
+    assert.deepEqual(written.error, []);
+    assert.deepEqual(capture.events, [
+      {
+        kind: "hollow-row-refused",
+        target: "targeted-recovery-db/products",
+        id: shifted.id,
+        reason: "range-holds-foreign-bytes",
+      },
+    ]);
+    // Not hollow, so `previous` is kept: the storage inserts the document and
+    // its index code locates the stale rows by the previous revision's keys,
+    // replacing them in place with the new record's range.
+    const live = await recovering.internals.statePromise;
+    for (const indexState of live.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(shifted.id)).length,
+        1,
+      );
+    }
+    await recovering.close();
+
+    const reopened = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("foreign-reopened"));
+    assert.deepEqual(
+      (await reopened.findDocumentsById([shifted.id, victim.id], false)).map(
+        (item) => [item.id, item.value],
+      ),
+      [
+        [shifted.id, "written-over-a-stale-row"],
+        [victim.id, victim.value],
+      ],
+    );
+    const state = await reopened.internals.statePromise;
+    assert.equal(
+      state.firstIdx.rows.filter((row) => row[0].includes(shifted.id)).length,
+      1,
+    );
+    await reopened.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("repairs a malformed tombstone when the cleanup retry still fails", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-cleanup-repair-"));
+  const oldLwt = Date.now() - 10_000;
+  const survivor = {
+    ...document("product:survivor", 0),
+    _meta: { lwt: oldLwt },
+  };
+  const other = { ...document("product:other", 1), _meta: { lwt: oldLwt + 1 } };
+  const doomed = {
+    ...document("product:doomed", 2),
+    _meta: { lwt: oldLwt + 2 },
+  };
+  const capture = captureRecoveryEvents();
+
+  try {
+    const initial = await seedCompacted(
+      basePath,
+      [survivor, other, doomed],
+      "cleanup-seed",
+    );
+    assert.deepEqual(
+      (
+        await initial.bulkWrite(
+          [
+            {
+              previous: doomed,
+              document: {
+                ...doomed,
+                _deleted: true,
+                _rev: "2-doomed",
+                _meta: { lwt: oldLwt + 100 },
+              },
+            },
+          ],
+          "delete",
+        )
+      ).error,
+      [],
+    );
+    // Bake the delete's changelog operations into the index files without
+    // purging the tombstone, so the corruption below targets the row the
+    // next open will actually see.
+    let baked = false;
+    for (let attempt = 0; attempt < 5 && !baked; attempt += 1) {
+      baked = await initial.cleanup(1_000_000_000_000);
+    }
+    assert.equal(baked, true);
+    await initial.close();
+    // Garbage after the tombstone's bytes: the whitespace pass cannot touch
+    // it, so the cleanup retry fails exactly like the first attempt.
+    await corruptRecord(basePath, doomed.id);
+
+    const raw = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("cleanup-raw"));
+    await assert.rejects(raw.cleanup(0), { name: "SyntaxError" });
+    await raw.close();
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("cleanup-recovering"));
+    let cleaned = false;
+    for (let attempt = 0; attempt < 5 && !cleaned; attempt += 1) {
+      cleaned = await recovering.cleanup(0);
+    }
+    assert.equal(cleaned, true);
+    assert.deepEqual(
+      capture.events,
+      [],
+      "no terminal cleanup failure reported",
+    );
+    assert.deepEqual(
+      (
+        await recovering.findDocumentsById(
+          [survivor.id, other.id, doomed.id],
+          true,
+        )
+      )
+        .map((item) => item.id)
+        .sort(),
+      [other.id, survivor.id],
+    );
+    await recovering.close();
+
+    const reopened = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("cleanup-reopened"));
+    assert.deepEqual(
+      (
+        await reopened.findDocumentsById(
+          [survivor.id, other.id, doomed.id],
+          true,
+        )
+      )
+        .map((item) => item.id)
+        .sort(),
+      [other.id, survivor.id],
+    );
+    await reopened.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+// The changes file is the storage's per-run write-ahead log. Upstream appended
+// every bulk at offset 0, so a crash mid-run left the shorter second bulk
+// written over the longer first one — a parse failure in the hook that opens
+// every read, on every boot (Sentry WOOCOMMERCE-POS-2GA). Seeds `long` and
+// `short`, updates both in one run, then lays a re-targeted short bulk (value
+// "from-wal") over the head of the long one the way the unpatched writer did.
+async function seedOverwriteResidue(basePath, long, short) {
+  const initial = await getRxStorageFilesystemNode({
+    basePath,
+  }).createStorageInstance(storageParams("residue-seed"));
+  await initial.bulkWrite([{ document: long }, { document: short }], "seed");
+  await initial.taskQueue.awaitIdle();
+  const state = await initial.internals.statePromise;
+  const writes = [];
+  const original = state.changesFileHandle;
+  state.changesFileHandle = {
+    createAccessHandle: async () => {
+      const handle = await original.createAccessHandle();
+      const getWritable = handle.getWritable.bind(handle);
+      handle.getWritable = () => {
+        const writable = getWritable();
+        const write = writable.write.bind(writable);
+        writable.write = async (bytes, options) => {
+          writes.push(Buffer.from(bytes));
+          return write(bytes, options);
+        };
+        return writable;
+      };
+      return handle;
+    },
+  };
+  await Promise.all([
+    initial.bulkWrite(
+      [
+        {
+          previous: long,
+          document: {
+            ...long,
+            _rev: "2-long",
+            _meta: { lwt: long._meta.lwt + 10 },
+          },
+        },
+      ],
+      "update-long",
+    ),
+    initial.bulkWrite(
+      [
+        {
+          previous: short,
+          document: {
+            ...short,
+            _rev: "2-short",
+            _meta: { lwt: short._meta.lwt + 10 },
+          },
+        },
+      ],
+      "update-short",
+    ),
+  ]);
+  await initial.taskQueue.awaitIdle();
+  const stored = await initial.findDocumentsById([long.id, short.id], false);
+  await initial.close();
+  assert.equal(writes.length, 2);
+
+  const bulk = JSON.parse(writes[1].toString().replace(/^,/, ""));
+  const previous = stored.find((item) => item.id === short.id);
+  bulk.events[0].previousDocumentData = previous;
+  bulk.events[0].documentData = {
+    ...previous,
+    value: "from-wal",
+    _rev: "3-short",
+    _meta: { lwt: previous._meta.lwt + 1000 },
+  };
+  const shortBytes = Buffer.from(JSON.stringify(bulk));
+  const residue = Buffer.concat([
+    shortBytes,
+    writes[0].subarray(shortBytes.length),
+  ]);
+  const directory = join(basePath, (await readdir(basePath))[0]);
+  await writeFile(join(directory, "changes.json"), residue);
+  return { stored, directory };
+}
+
+test("boots through a crash-damaged changes file instead of failing every run", async () => {
+  // The rxdb-premium patch salvages the complete leading bulk; this pins
+  // that the patched storage behind the wrapper boots and serves reads.
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-changes-residue-"));
+  const long = { ...document("order:long", 0), value: "x".repeat(400) };
+  const short = { ...document("order:short", 1), value: "y" };
+  const capture = captureRecoveryEvents();
+
+  try {
+    const { directory } = await seedOverwriteResidue(basePath, long, short);
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("residue-recovering"));
+    const documents = await Promise.race([
+      recovering.findDocumentsById([long.id, short.id], false),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("boot read never settled")), 3000),
+      ),
+    ]);
+    assert.deepEqual(
+      documents.map((item) => [item.id, item.value]),
+      [
+        [long.id, long.value],
+        [short.id, "from-wal"],
+      ],
+    );
+    assert.equal(capture.events.length, 1);
+    assert.equal(capture.events[0].kind, "changes-file-salvage");
+    assert.equal(capture.events[0].keptBulks, 1);
+    assert.equal((await readFile(join(directory, "changes.json"))).length, 0);
+    await recovering.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("strips a stale previous from a write after an earlier read dropped the row", async () => {
+  // The row goes in a read; the write that follows still carries `previous`
+  // and skips the preflight because the read verified the id as clean. The
+  // storage treats it as an insert either way — but with `previousDocumentData`
+  // on the event, its index code looks the previous key up, finds nothing,
+  // and operates at position -1: the document ends up in no index and a
+  // sibling's row can be spliced away.
+  const basePath = await mkdtemp(
+    join(tmpdir(), "wcpos-hollow-read-then-write-"),
+  );
+  const hollow = document("order:hollow", 0);
+  const sibling = document("order:sibling", 1);
+  const third = document("order:third", 2);
+  const capture = captureRecoveryEvents();
+  const rebuilds = [];
+  globalThis.__wcposOnIndexRebuild = (event) => rebuilds.push(event);
+
+  try {
+    await (
+      await seedCompacted(basePath, [hollow, sibling, third], "rtw-seed")
+    ).close();
+    await corruptRecordInPlace(basePath, hollow.id, () => Buffer.alloc(0));
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("rtw-recovering"));
+    assert.deepEqual(await recovering.findDocumentsById([hollow.id], true), []);
+    assert.deepEqual(
+      capture.events.map((event) => event.kind),
+      ["hollow-row-dropped"],
+    );
+    const updated = {
+      ...hollow,
+      value: "written-after-read-drop",
+      _rev: "2-hollow",
+      _meta: { lwt: hollow._meta.lwt + 100 },
+    };
+    const written = await recovering.bulkWrite(
+      [{ previous: hollow, document: updated }],
+      "update",
+    );
+    assert.deepEqual(written.error, []);
+    const query = prepareQuery(
+      schema,
+      normalizeMangoQuery(schema, {
+        selector: {},
+        sort: [{ id: "asc" }],
+      }),
+    );
+    assert.deepEqual(
+      (await recovering.query(query)).documents.map((item) => [
+        item.id,
+        item.value,
+      ]),
+      [
+        [hollow.id, "written-after-read-drop"],
+        [sibling.id, sibling.value],
+        [third.id, third.value],
+      ],
+    );
+    const state = await recovering.internals.statePromise;
+    for (const indexState of state.indexStates) {
+      assert.equal(
+        indexState.rows.length,
+        3,
+        "every index holds every document",
+      );
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(hollow.id)).length,
+        1,
+      );
+    }
+    await recovering.close();
+
+    // Persisted cleanly: the next open needs no rebuild.
+    const reopened = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("rtw-reopened"));
+    assert.deepEqual(
+      (await reopened.query(query)).documents.map((item) => item.id),
+      [hollow.id, sibling.id, third.id],
+    );
+    assert.deepEqual(rebuilds, []);
+    await reopened.close();
+  } finally {
+    delete globalThis.__wcposOnIndexRebuild;
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("replays crash residue before a write when the first operation after boot is a write", async () => {
+  // The storage skips its replay hook ahead of a small write touching
+  // nothing yet touched in its run, and that write would then land at offset
+  // 0 over the residue. Through the wrapper a fresh instance's first write is
+  // preceded by its own preflight read, whose run replays the file first.
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-write-first-"));
+  const long = { ...document("order:long", 0), value: "x".repeat(400) };
+  const short = { ...document("order:short", 1), value: "y" };
+  const capture = captureRecoveryEvents();
+
+  try {
+    const { stored, directory } = await seedOverwriteResidue(
+      basePath,
+      long,
+      short,
+    );
+    const storedLong = stored.find((item) => item.id === long.id);
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("write-first-recovering"));
+    const written = await recovering.bulkWrite(
+      [
+        {
+          previous: storedLong,
+          document: {
+            ...storedLong,
+            value: "first-write",
+            _rev: "3-long",
+            _meta: { lwt: storedLong._meta.lwt + 2000 },
+          },
+        },
+      ],
+      "first-op",
+    );
+    assert.deepEqual(written.error, []);
+    assert.deepEqual(
+      (await recovering.findDocumentsById([long.id, short.id], false)).map(
+        (item) => [item.id, item.value],
+      ),
+      [
+        [long.id, "first-write"],
+        [short.id, "from-wal"],
+      ],
+    );
+    assert.deepEqual(
+      capture.events.map((event) => [event.kind, event.keptBulks]),
+      [["changes-file-salvage", 1]],
+    );
+    assert.equal((await readFile(join(directory, "changes.json"))).length, 0);
+    await recovering.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("refuses to drop a hollow row when the storage is multi-instance", async () => {
+  // The drop is a positional changelog operation; two peers detecting the
+  // same hollow row would each apply the other's "D" over a healthy
+  // neighbour. Under multi-instance the id is refused and never cached as
+  // verified, exactly like the byte-range repairs above.
+  const state = {
+    firstIdx: {
+      metaIdMap: new Map([["order:hollow", ["0order:hollow", 0, 0]]]),
+    },
+    indexStates: [],
+  };
+  let dropped = 0;
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => "[]",
+    bulkWrite: async () => ({ error: [] }),
+    query: async () => JSON.stringify({ documents: [] }),
+    getChangedDocumentsSince: async () => JSON.stringify({ documents: [] }),
+    internals: { statePromise: Promise.resolve(state) },
+    taskQueue: {
+      runCleanup: async (operation) => {
+        dropped += 1;
+        return operation({ accessHandlers: new Map() });
+      },
+    },
+  };
+  const capture = captureRecoveryEvents();
+  try {
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery({
+      createStorageInstance: async () => instance,
+    }).createStorageInstance({
+      ...storageParams("multi-instance-hollow"),
+      multiInstance: true,
+    });
+    assert.deepEqual(
+      JSON.parse(await recovering.findDocumentsById(["order:hollow"], true)),
+      [],
+    );
+    assert.deepEqual(
+      (
+        await recovering.bulkWrite(
+          [{ document: document("order:hollow", 0) }],
+          "w",
+        )
+      ).error,
+      [],
+    );
+    assert.equal(dropped, 0);
+    assert.ok(state.firstIdx.metaIdMap.has("order:hollow"));
+    assert.deepEqual(
+      capture.events.map((event) => [event.kind, event.reason]),
+      [
+        ["hollow-row-refused", "multi-instance"],
+        ["hollow-row-refused", "multi-instance"],
+      ],
+    );
+  } finally {
+    capture.stop();
   }
 });

@@ -11,6 +11,59 @@ function parseStorageResult(result) {
   return result;
 }
 
+function parseDocuments(result) {
+  return typeof result === "string" ? JSON.parse(result) : result;
+}
+
+// Recovery events go to a host-installed hook when there is one (the Electron
+// main process forwards them to Sentry with a stable message per kind), and to
+// the console otherwise — the same seam shape as the rxdb-premium patches'
+// __wcposOnStorageRunFailure / __wcposOnIndexRebuild.
+function report(kind, details) {
+  const hook = globalThis.__wcposOnStorageRecovery;
+  if (typeof hook === "function") {
+    try {
+      hook({ kind, ...details });
+      return;
+    } catch {}
+  }
+  const { target, error, ...rest } = details;
+  console.error(`[${kind}] ${target ?? ""}`.trimEnd(), error ?? rest);
+}
+
+function documentsAccessHandle(state, runState) {
+  let accessHandlePromise = runState.accessHandlers.get(
+    state.documentFileHandle,
+  );
+  if (!accessHandlePromise) {
+    accessHandlePromise = state.documentFileHandle.createAccessHandle();
+    runState.accessHandlers.set(state.documentFileHandle, accessHandlePromise);
+  }
+  return accessHandlePromise;
+}
+
+// Removes one index row the way the storage itself would: an in-memory "D"
+// operation, persisted to the changelog and broadcast to multi-instance peers.
+async function dropIndexRow(state, runState, indexState, position) {
+  const operation = [
+    indexState.indexId,
+    position,
+    "D",
+    indexState.rows[position],
+  ];
+  indexState.runChangelogOperation(operation);
+  await state.changelog.addChangelogOperations(runState, [operation]);
+  state.broadcastChannel?.postMessage({
+    type: "event",
+    eventBulks: [],
+    changelogOperations: [operation],
+    info: {
+      db: state.params.databaseName,
+      col: state.params.collectionName,
+    },
+  });
+}
+
 function extractDocument(text, primaryPath, expectedId) {
   for (
     let start = text.indexOf("{");
@@ -58,17 +111,7 @@ async function repairDocument(instance, documentId) {
     if (indexRows.some(({ position }) => position < 0))
       return "missing-index-row";
 
-    let accessHandlePromise = runState.accessHandlers.get(
-      state.documentFileHandle,
-    );
-    if (!accessHandlePromise) {
-      accessHandlePromise = state.documentFileHandle.createAccessHandle();
-      runState.accessHandlers.set(
-        state.documentFileHandle,
-        accessHandlePromise,
-      );
-    }
-    const accessHandle = await accessHandlePromise;
+    const accessHandle = await documentsAccessHandle(state, runState);
     const damagedBytes = await accessHandle.read(oldStart, oldEnd);
     const document = extractDocument(
       instance._decode(damagedBytes),
@@ -106,48 +149,71 @@ async function repairDocument(instance, documentId) {
 async function dropWhitespaceRows(instance) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
-    const accessHandlePromise =
-      runState.accessHandlers.get(state.documentFileHandle) ??
-      state.documentFileHandle.createAccessHandle();
-    runState.accessHandlers.set(state.documentFileHandle, accessHandlePromise);
-    const accessHandle = await accessHandlePromise;
+    const accessHandle = await documentsAccessHandle(state, runState);
     const isWhitespace = (bytes) => instance._decode(bytes).trim() === "";
     for (const indexState of state.indexStates) {
       let position = indexState.rows.length;
       while (position--) {
         const row = indexState.rows[position];
         if (!isWhitespace(await accessHandle.read(row[1], row[2]))) continue;
-        const operation = [indexState.indexId, position, "D", row];
-        indexState.runChangelogOperation(operation);
-        await state.changelog.addChangelogOperations(runState, [operation]);
-        state.broadcastChannel?.postMessage({
-          type: "event",
-          eventBulks: [],
-          changelogOperations: [operation],
-          info: {
-            db: state.params.databaseName,
-            col: state.params.collectionName,
-          },
-        });
+        await dropIndexRow(state, runState, indexState, position);
       }
     }
+  });
+}
+
+// A hollow row: the index says the document exists, but its byte range holds
+// only whitespace (or nothing), so a read of that one row parses to `[]` and
+// simply reports the document absent — no malformed-JSON signal for the paths
+// above to catch. Compaction leaves exactly this behind when it dies between
+// relocating a record and persisting the moved row: the old range has been
+// space-filled while the index still points at it. The storage's own write
+// path then indexes the parsed rows positionally and dereferences `undefined`
+// (Sentry WOOCOMMERCE-POS-2HC). Dropping the row is the only repair — there
+// are no bytes to recover — and a pending write for the id then lands as an
+// insert. The caller refuses this under multi-instance: the drop is a
+// positional "D" operation, and two peers that each detect the same hollow
+// row before either broadcast lands will both drop it locally and then apply
+// the other's operation at a position that now holds a healthy neighbour.
+// All ids share one cleanup run (each run replays the changes file and
+// re-reads every index first). Returns a Map of id → true when a row was
+// dropped, false when the id was already gone, or a reason string when the
+// range holds something other than whitespace (a foreign document or junk
+// that happened to parse): that is a stale-range problem, not a hollow row,
+// and is refused rather than guessed.
+async function dropHollowRows(instance, documentIds) {
+  const state = await instance.internals.statePromise;
+  return instance.taskQueue.runCleanup(async (runState) => {
+    const outcomes = new Map();
+    const accessHandle = await documentsAccessHandle(state, runState);
+    for (const documentId of documentIds) {
+      const primaryRow = state.firstIdx.metaIdMap.get(documentId);
+      if (!primaryRow) {
+        outcomes.set(documentId, false);
+        continue;
+      }
+      const [, start, end] = primaryRow;
+      if (instance._decode(await accessHandle.read(start, end)).trim() !== "") {
+        outcomes.set(documentId, "range-holds-foreign-bytes");
+        continue;
+      }
+      for (const indexState of state.indexStates) {
+        const position = indexState.rows.findIndex(
+          (row) => row[1] === start && row[2] === end,
+        );
+        if (position >= 0)
+          await dropIndexRow(state, runState, indexState, position);
+      }
+      outcomes.set(documentId, true);
+    }
+    return outcomes;
   });
 }
 
 async function reconcileSecondaryIndexes(instance) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
-    let accessHandlePromise = runState.accessHandlers.get(
-      state.documentFileHandle,
-    );
-    if (!accessHandlePromise) {
-      accessHandlePromise = state.documentFileHandle.createAccessHandle();
-      runState.accessHandlers.set(
-        state.documentFileHandle,
-        accessHandlePromise,
-      );
-    }
-    const accessHandle = await accessHandlePromise;
+    const accessHandle = await documentsAccessHandle(state, runState);
     const secondaries = state.indexStates.filter(
       (indexState) => indexState !== state.firstIdx,
     );
@@ -365,12 +431,58 @@ export function withTargetedOpfsRecovery(storage) {
       // any malformed observation still clears the cache so a damage episode
       // re-enables full probing.
       const cleanIds = new Set();
+      const target = `${params.databaseName}/${params.collectionName}`;
+
+      // Ids a read should have served but did not: the primary index has a
+      // row for them (every row for a withDeleted read; only live rows —
+      // index key prefixed "0" — otherwise, mirroring the storage's own
+      // filter), yet no parsed document carries the id. Those rows are
+      // hollow, or point at some other document's bytes.
+      const findHollowIds = async (ids, documents, withDeleted) => {
+        const metaIdMap = (await instance.internals?.statePromise)?.firstIdx
+          ?.metaIdMap;
+        if (!metaIdMap) return [];
+        const returned = new Set();
+        for (const row of documents) {
+          if (row) returned.add(row[instance.primaryPath]);
+        }
+        return ids.filter((id) => {
+          if (returned.has(id)) return false;
+          const row = metaIdMap.get(id);
+          return Boolean(row) && (withDeleted || row[0][0] === "0");
+        });
+      };
+
+      const dropHollowIds = async (hollow) => {
+        const refused = [];
+        if (hollow.length === 0) return refused;
+        if (params.multiInstance) {
+          for (const id of hollow) {
+            refused.push({ id, reason: "multi-instance" });
+            report("hollow-row-refused", {
+              target,
+              id,
+              reason: "multi-instance",
+            });
+          }
+          return refused;
+        }
+        for (const [id, outcome] of await dropHollowRows(instance, hollow)) {
+          if (typeof outcome === "string") {
+            refused.push({ id, reason: outcome });
+            report("hollow-row-refused", { target, id, reason: outcome });
+          } else if (outcome) {
+            report("hollow-row-dropped", { target, id });
+          }
+        }
+        return refused;
+      };
 
       const repairMalformedIds = async (ids, onMalformedBatch) => {
         const repairBatch = async (batch) => {
+          let documents;
           try {
-            parseStorageResult(await findDocumentsById(batch, true));
-            return false;
+            documents = parseDocuments(await findDocumentsById(batch, true));
           } catch (error) {
             if (!isMalformedJson(error)) throw error;
             if (params.multiInstance) {
@@ -391,6 +503,18 @@ export function withTargetedOpfsRecovery(storage) {
             const repairedRight = await repairBatch(batch.slice(middle));
             return repairedLeft || repairedRight;
           }
+          // The batch parsed, but a hollow row parses too — to nothing — and
+          // the storage's write path would dereference the missing document.
+          // A row whose range holds some other document's bytes is refused
+          // here (reported, not repaired): the storage does not dereference
+          // it, and a write carrying `previous` still locates the stale rows
+          // by key and replaces them in place.
+          const hollow = await findHollowIds(batch, documents, true);
+          if (hollow.length === 0) return false;
+          const refused = await dropHollowIds(hollow);
+          if (refused.length === hollow.length) return false;
+          onMalformedBatch?.();
+          return true;
         };
         return repairBatch([...new Set(ids)]);
       };
@@ -398,19 +522,42 @@ export function withTargetedOpfsRecovery(storage) {
       instance.findDocumentsById = async (ids, withDeleted) => {
         try {
           const result = await findDocumentsById(ids, withDeleted);
-          const documents =
-            typeof result === "string" ? JSON.parse(result) : result;
+          const documents = parseDocuments(result);
           // A withDeleted read proves every requested id either parsed or is
           // absent — exactly what the write preflight establishes. Without
           // withDeleted the storage filters tombstones by index key alone,
           // never parsing their bytes, so only ids actually returned are
-          // proven clean.
+          // proven clean. A hollow row is neither: the storage reports its id
+          // absent while the index still carries it, so the row is dropped
+          // here — after which the id really is absent, hence clean — and a
+          // refused id stays unverified for the write preflight.
+          const hollow = await findHollowIds(ids, documents, withDeleted);
           if (withDeleted) {
-            for (const id of ids) cleanIds.add(id);
+            const refused = new Set(
+              (await dropHollowIds(hollow)).map(({ id }) => id),
+            );
+            for (const id of ids) if (!refused.has(id)) cleanIds.add(id);
           } else {
+            if (hollow.length > 0) await dropHollowIds(hollow);
             for (const row of documents) {
               cleanIds.add(row[instance.primaryPath]);
             }
+          }
+          // A refused row's range holds some other document, which the
+          // storage then serves in place of the one asked for — twice, if
+          // that document was requested too. A read returns each requested
+          // id at most once; the foreign record stays reachable under its
+          // own id.
+          const requested = new Set(ids);
+          const served = new Set();
+          const own = documents.filter((row) => {
+            const id = row?.[instance.primaryPath];
+            if (!requested.has(id) || served.has(id)) return false;
+            served.add(id);
+            return true;
+          });
+          if (own.length !== documents.length) {
+            return typeof result === "string" ? JSON.stringify(own) : own;
           }
           return result;
         } catch (error) {
@@ -435,40 +582,66 @@ export function withTargetedOpfsRecovery(storage) {
         }
       };
 
+      // A write whose `previous` names a document the index no longer holds
+      // (its hollow row was just dropped, or it was purged before a late
+      // update arrived) is an insert as far as the storage is concerned — but
+      // the event it emits would carry `previousDocumentData`, and the index
+      // code then looks up the previous key, finds no row, and operates at
+      // position -1: a same-key index gains no row at all, a changed-key
+      // index splices some other document's last row out. Stripping
+      // `previous` makes it the plain insert the storage already treats it
+      // as, so it applies to every write, not only one whose own preflight
+      // dropped a row — the row may have gone in an earlier read, or the id
+      // may be cached as verified precisely because it is absent. A
+      // multi-instance peer inserting the id between this check and the run
+      // changes nothing: with or without `previous`, that write is a 409.
+      const withoutStalePrevious = async (documentWrites) => {
+        if (!documentWrites.some((row) => row.previous)) return documentWrites;
+        const metaIdMap = (await instance.internals?.statePromise)?.firstIdx
+          ?.metaIdMap;
+        if (!metaIdMap) return documentWrites;
+        return documentWrites.map((row) =>
+          row.previous && !metaIdMap.has(row.document[instance.primaryPath])
+            ? { document: row.document }
+            : row,
+        );
+      };
+
       instance.bulkWrite = async (documentWrites, context) => {
         const ids = documentWrites.map(
           (row) => row.document[instance.primaryPath],
         );
+        let malformedBatch = false;
         if (ids.some((id) => !cleanIds.has(id))) {
-          let malformedBatch = false;
           await repairMalformedIds(ids, () => {
             malformedBatch = true;
             cleanIds.clear();
           });
-          if (malformedBatch) {
-            if (documentWrites.length > 1) {
-              // Sequential on purpose: parallel singleton writes can
-              // interleave revisions of the same document.
-              const results = [];
-              for (const row of documentWrites) {
-                results.push(await bulkWrite([row], context));
-              }
-              await instance.taskQueue?.awaitIdle?.();
-              return {
-                error: results.flatMap((result) => result.error),
-              };
-            }
-          } else {
+          if (!malformedBatch) {
             for (const id of ids) cleanIds.add(id);
           }
         }
+        const writes = await withoutStalePrevious(documentWrites);
+        if (malformedBatch && writes.length > 1) {
+          // Sequential on purpose: parallel singleton writes can
+          // interleave revisions of the same document.
+          const results = [];
+          for (const row of writes) {
+            results.push(await bulkWrite([row], context));
+          }
+          await instance.taskQueue?.awaitIdle?.();
+          return {
+            error: results.flatMap((result) => result.error),
+          };
+        }
         try {
-          return await bulkWrite(documentWrites, context);
+          return await bulkWrite(writes, context);
         } catch (error) {
-          // A malformed failure here means stored bytes rotted after their
-          // ids were verified — drop the cache so retries re-probe and can
+          // A thrown write is exceptional whatever its shape — stored bytes
+          // rotted after their ids were verified, or a row hollowed out under
+          // a verified id — so drop the cache: retries re-probe and can
           // repair instead of skipping the preflight forever.
-          if (isMalformedJson(error)) cleanIds.clear();
+          cleanIds.clear();
           throw error;
         }
       };
@@ -522,6 +695,7 @@ export function withTargetedOpfsRecovery(storage) {
         if (repairedDocuments) return true;
         if (reconcileGeneration !== generationAtStart) return true;
         error.message += `; index reconciliation refused: ${refusal}`;
+        report("index-reconcile-refused", { target, reason: refusal });
         return false;
       };
 
@@ -549,9 +723,10 @@ export function withTargetedOpfsRecovery(storage) {
             typeof result.count === "number"
           )
             return result;
-          console.error(
-            `[count-recovery] typeof=${typeof result} result=${JSON.stringify(result)?.slice(0, 200)} collection=${params.collectionName}`,
-          );
+          report("count-recovery", {
+            target,
+            detail: `typeof=${typeof result} result=${JSON.stringify(result)?.slice(0, 200)}`,
+          });
           const queryResult = await instance.query(preparedQuery);
           const parsedResult =
             typeof queryResult === "string"
@@ -583,16 +758,39 @@ export function withTargetedOpfsRecovery(storage) {
       };
 
       if (!cleanup) return instance;
+      // Cleanup trips on two damage shapes. A hollow row makes the compaction
+      // walk dereference a missing document (a TypeError), which dropping the
+      // whitespace rows resolves. A malformed record — garbage after a
+      // tombstone's bytes — is a parse failure the whitespace pass cannot
+      // touch, and the retry fails identically (Sentry WOOCOMMERCE-POS-2HC's
+      // breadcrumb); that shape needs the same per-document repair the read
+      // and write paths use, so it runs over every id before a last retry.
+      const repairCleanupDamage = async (error) => {
+        if (!isMalformedJson(error)) return false;
+        cleanIds.clear();
+        const state = await instance.internals.statePromise;
+        return repairMalformedIds(state.firstIdx.metaIdMap.keys());
+      };
       instance.cleanup = async (minimumDeletedTime) => {
         try {
           return await cleanup(minimumDeletedTime);
         } catch (_error) {
-          return dropWhitespaceRows(instance)
-            .then(() => cleanup(minimumDeletedTime))
-            .catch((retryError) => {
-              console.error("[cleanup-recovery]", retryError);
-              throw retryError;
-            });
+          let failure;
+          try {
+            await dropWhitespaceRows(instance);
+            return await cleanup(minimumDeletedTime);
+          } catch (retryError) {
+            failure = retryError;
+          }
+          try {
+            if (await repairCleanupDamage(failure)) {
+              return await cleanup(minimumDeletedTime);
+            }
+          } catch (repairError) {
+            failure = repairError;
+          }
+          report("cleanup-recovery", { target, error: failure });
+          throw failure;
         }
       };
 
