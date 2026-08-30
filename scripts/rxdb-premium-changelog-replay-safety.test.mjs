@@ -196,6 +196,36 @@ async function seedCrashWindow(runtime, basePath, { dieAt = 'empty', keepStamp =
 	});
 }
 
+/**
+ * The pre-patch corruption that leaves NO structural trace: a store compacted
+ * a deletion, died before emptying the changelog, and carries no stamp. The
+ * stale `D` op is in range on the baked rows, so replaying it removes a
+ * different, valid document from every index while lengths, order and
+ * uniqueness all still hold.
+ */
+async function seedLegacyStaleDeletion(runtime, basePath) {
+	const { db, collection } = await openDatabase(runtime, basePath);
+	const documents = ['a', 'b', 'c', 'd', 'e'].map((id) => ({
+		id: `k-${id}`,
+		status: `s-${id}`,
+		note: 'kept',
+	}));
+	for (const document of documents) await collection.insert(document);
+	await fullCleanup(collection);
+	await (await collection.findOne('k-c').exec()).remove();
+	// Tombstone pass: records the `D` ops for k-c in the changelog.
+	await collection.storageInstance.cleanup(0);
+	const directory = collectionDirectory(basePath);
+	const staleChangelog = readFileSync(join(directory, 'changelog.txt'), 'utf8');
+	assert.match(staleChangelog, /"D"/, 'fixture captured a deletion op');
+	// Bake it, then restore the pre-compaction changelog with no stamp.
+	await fullCleanup(collection);
+	await db.close();
+	writeFileSync(join(directory, 'changelog.txt'), staleChangelog);
+	writeFileSync(join(directory, STAMP_FILE), '');
+	return documents.filter((document) => document.id !== 'k-c');
+}
+
 async function seedHealthy(runtime, basePath, documents) {
 	const { db, collection } = await openDatabase(runtime, basePath);
 	for (const document of documents) await collection.insert(document);
@@ -261,7 +291,7 @@ for (const runtime of runtimes) {
 		}
 	});
 
-	test(`${runtime.dist}: replay holes without a stamp are detected and rebuilt`, async () => {
+	test(`${runtime.dist}: a stale changelog without a stamp is refused before it can punch holes`, async () => {
 		const basePath = makeDirectory(`${runtime.dist}-unstamped`);
 		try {
 			const expected = await seedCrashWindow(runtime, basePath, { keepStamp: false });
@@ -269,7 +299,27 @@ for (const runtime of runtimes) {
 			assert.deepEqual(await findAll(opened.collection), expected);
 			opened.stopCapture();
 			assert.equal(opened.events.length, 1);
-			assert.match(opened.events[0].reason, /^(hole:|length-mismatch|duplicate-primary)/);
+			// Op verification refuses the stale replay before it can punch a hole;
+			// the structural validators behind it are the second line of defence.
+			assert.match(
+				opened.events[0].reason,
+				/^(stale-changelog-op:|hole:|length-mismatch|duplicate-primary)/
+			);
+			await opened.db.close();
+		} finally {
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	test(`${runtime.dist}: a legacy stale deletion that leaves no structural trace is caught by op verification`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-legacy-delete`);
+		try {
+			const expected = await seedLegacyStaleDeletion(runtime, basePath);
+			const opened = await openWithRebuildEvents(runtime, basePath);
+			assert.deepEqual(await findAll(opened.collection), expected);
+			opened.stopCapture();
+			assert.equal(opened.events.length, 1);
+			assert.match(opened.events[0].reason, /^stale-changelog-op:D:/);
 			await opened.db.close();
 		} finally {
 			rmSync(basePath, { recursive: true, force: true });
