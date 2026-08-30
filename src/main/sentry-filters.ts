@@ -33,3 +33,25 @@ export function isAbortedShellLoad(event: SentryEventLike): boolean {
 export function shouldDropEvent(event: SentryEventLike, state: ShutdownState): boolean {
 	return isAbortedShellLoad(event) && (state.quitting || state.windowsAlive === 0);
 }
+
+export interface BreadcrumbLike {
+	data?: Record<string, unknown>;
+}
+
+/**
+ * `beforeBreadcrumb`: strip the origin from a breadcrumb's `data.url` so the
+ * merchant's store hostname never reaches Sentry. Unparseable urls are left
+ * as-is; every other breadcrumb passes through untouched.
+ */
+export function scrubBreadcrumbUrl<T extends BreadcrumbLike>(breadcrumb: T): T {
+	const url = breadcrumb.data?.url;
+	if (typeof url === 'string') {
+		try {
+			const parsed = new URL(url);
+			breadcrumb.data = { ...breadcrumb.data, url: `${parsed.pathname}${parsed.search}` };
+		} catch {
+			// Not an absolute URL — nothing to strip.
+		}
+	}
+	return breadcrumb;
+}

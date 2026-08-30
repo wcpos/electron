@@ -110,6 +110,9 @@ export interface IpcInvokeChannels {
 	};
 }
 
+/** The merchant's tracking consent, as stored by the plugin's general settings. */
+export type TelemetryConsent = 'undecided' | 'allowed' | 'denied';
+
 export interface IpcSendChannels {
 	clearData: unknown;
 	'print-external-url': { externalURL: string; printJobId: string };
@@ -117,6 +120,9 @@ export interface IpcSendChannels {
 	'bluetooth-device-selected': string;
 	'serial-port-selected': string;
 	'hid-device-selected': string;
+	// The renderer forwards the store's consent so main gates its own Sentry
+	// client on the same switch (src/main/telemetry-consent.ts).
+	'telemetry-consent': TelemetryConsent;
 }
 
 export interface IpcOnChannels {
@@ -147,6 +153,7 @@ export const SEND_CHANNELS = [
 	'bluetooth-device-selected',
 	'serial-port-selected',
 	'hid-device-selected',
+	'telemetry-consent',
 ] as const satisfies readonly (keyof IpcSendChannels)[];
 
 export const ON_CHANNELS = [

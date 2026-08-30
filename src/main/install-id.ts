@@ -29,10 +29,14 @@ export function ensureInstallId(store: InstallIdStore, mint: () => string = rand
 
 let installId: string | undefined;
 
+function openStore() {
+	return new Store<{ installId?: string }>();
+}
+
 export function getInstallId(): string {
 	if (installId === undefined) {
 		try {
-			const store = new Store<{ installId?: string }>();
+			const store = openStore();
 			installId = ensureInstallId({
 				get: (key) => store.get(key),
 				set: (key, value) => store.set(key, value),
@@ -43,4 +47,17 @@ export function getInstallId(): string {
 		}
 	}
 	return installId;
+}
+
+/**
+ * Forget the id (consent withdrawn): the next `getInstallId()` mints a fresh
+ * one, so events after a later opt-in cannot be linked to events before.
+ */
+export function resetInstallId(): void {
+	installId = undefined;
+	try {
+		openStore().delete('installId');
+	} catch {
+		// Nothing persisted to forget.
+	}
 }
