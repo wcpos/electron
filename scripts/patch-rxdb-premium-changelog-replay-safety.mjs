@@ -20,6 +20,9 @@ h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909);
 h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
 return 4294967296*(2097151&h2)+(h1>>>0)+":"+raw.length
 }
+async function __wcposFlushRun(runState){
+for(var pending of runState.accessHandlers.values()){var handle=await pending;if(handle&&typeof handle.flush==="function")await handle.flush()}
+}
 `;
 
 function helpersPrelude(stampAccessExpression) {
@@ -42,6 +45,17 @@ var id=primaryRows[primaryIndex][0].slice(-primaryKeyLength);
 if(ids.has(id))return "duplicate-primary";
 ids.add(id)
 }
+return null
+}
+function __wcposReplayChangelog(indexStates,operationsByIndex){
+for(var entry of operationsByIndex.entries()){
+var indexState=indexStates[entry[0]],rows=indexState.rows,operations=entry[1];
+for(var i=0;i<operations.length;i++){
+var operation=operations[i],at=operation[1],kind=operation[2],row=operation[3];
+if(!Array.isArray(row)||typeof row[0]!=="string")return "stale-changelog-op:malformed:index-"+entry[0];
+if(kind==="A"){if(!(at>=0&&at<=rows.length)||at>0&&rows[at-1][0]>row[0]||at<rows.length&&rows[at][0]<row[0])return "stale-changelog-op:A:index-"+entry[0]}
+else if(!(at>=0&&at<rows.length)||!Array.isArray(rows[at])||rows[at][0]!==row[0])return "stale-changelog-op:"+kind+":index-"+entry[0];
+indexState.runChangelogOperation(operation)}}
 return null
 }
 async function __wcposRebuildIndexes(options){
@@ -70,6 +84,7 @@ cursor=end
 kept=Array.from(latest.values());
 for(var indexState of indexStates)indexState.rows=kept.map(function(record){return[indexState.getIndexableString(record.doc),record.start,record.end]}).sort(function(left,right){return left[0]<right[0]?-1:1});
 for(var persistIndex of indexStates)await persistIndex.persistInMemoryRows(runState);
+await __wcposFlushRun(runState);
 for(var readIndex of indexStates)await readIndex.initRead(runState);
 await changelog.empty(runState);
 var stampAccess=await ${stampAccessExpression};
@@ -107,7 +122,7 @@ const DISTS = [
 						before:
 							'export async function cleanupChangelogOperations(a,e){var t=await a.internals.statePromise,r=await t.changelog.getChangelogOperations(e),n=t.indexStates.filter((a=>{var e=r.get(a.indexId);return!(!e||0===e.length)}));for(var i of n)await i.persistInMemoryRows(e);return n.length>0&&await t.changelog.empty(e),n}',
 						after:
-							'export async function cleanupChangelogOperations(a,e){var t=await a.internals.statePromise,r=await t.changelog.getChangelogOperations(e),n=t.indexStates.filter((a=>{var e=r.get(a.indexId);return!(!e||0===e.length)}));if(n.length>0){var h=await(await t.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),f=await o(h,e),v=await f.getWritable(),x=e.storageInstance._encode(__wcposHash(t.changelog.__wcposLastRaw));await v.write(x,{at:0}),await f.truncate(x.byteLength);for(var i of n)await i.persistInMemoryRows(e);await t.changelog.empty(e),await f.truncate(0)}return n}',
+							'export async function cleanupChangelogOperations(a,e){var t=await a.internals.statePromise,r=await t.changelog.getChangelogOperations(e),n=t.indexStates.filter((a=>{var e=r.get(a.indexId);return!(!e||0===e.length)}));if(n.length>0){var h=await(await t.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),f=await o(h,e),v=await f.getWritable(),x=e.storageInstance._encode(__wcposHash(t.changelog.__wcposLastRaw));await v.write(x,{at:0}),await f.truncate(x.byteLength),await __wcposFlushRun(e);for(var i of n)await i.persistInMemoryRows(e);await __wcposFlushRun(e),await t.changelog.empty(e),await f.truncate(0)}return n}',
 					},
 				],
 			},
@@ -116,11 +131,15 @@ const DISTS = [
 				prelude: helpersPrelude('r(stampHandle,runState)'),
 				rewrites: [
 					{
+						// Every initRead must SETTLE before the verdict: Promise.all rejects on the
+						// first null row while sibling reads are still in flight, and a late one
+						// landing between the rebuild's row assignment and its persist would write
+						// the corrupt rows straight back to disk.
 						name: 'validateBoot',
 						before:
 							'if(await b.getSize()>0){var[,S]=await Promise.all([Promise.all(y.map((e=>e.initRead(n)))),v.getChangelogOperations(n)]);Array.from(S.entries()).map((([e,a])=>{var t=y[e];a.forEach((e=>t.runChangelogOperation(e)))}))}',
 						after:
-							'if(await b.getSize()>0){var E=await(await u).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await r(E,n),reason=null;try{await Promise.all(y.map((e=>e.initRead(n))));var S=await v.getChangelogOperations(n),stamp=n.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(v.__wcposLastRaw))reason="stale-changelog-after-compaction";else Array.from(S.entries()).map((([e,a])=>{var t=y[e];a.forEach((e=>t.runChangelogOperation(e)))}));if(!reason)reason=__wcposValidateRows(y,x)}catch(error){reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:n,docsAccessHandle:b,indexStates:y,changelog:v,stampHandle:E,decode:n.storageInstance._decode.bind(n.storageInstance),primaryPath:g,databaseName:d.databaseName,collectionName:d.collectionName})}',
+							'if(await b.getSize()>0){var E=await(await u).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await r(E,n),reason=null;try{var settled=await Promise.allSettled(y.map((e=>e.initRead(n)))),failed=settled.find((e=>"rejected"===e.status));if(failed)throw failed.reason;var S=await v.getChangelogOperations(n),stamp=n.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(v.__wcposLastRaw))reason="stale-changelog-after-compaction";else reason=__wcposReplayChangelog(y,S);if(!reason)reason=__wcposValidateRows(y,x)}catch(error){reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:n,docsAccessHandle:b,indexStates:y,changelog:v,stampHandle:E,decode:n.storageInstance._decode.bind(n.storageInstance),primaryPath:g,databaseName:d.databaseName,collectionName:d.collectionName})}',
 					},
 				],
 			},
@@ -150,7 +169,7 @@ const DISTS = [
 						before:
 							'async function g(e,a){var t=await e.internals.statePromise,r=await t.changelog.getChangelogOperations(a),n=t.indexStates.filter((e=>{var a=r.get(e.indexId);return!(!a||0===a.length)}));for(var i of n)await i.persistInMemoryRows(a);return n.length>0&&await t.changelog.empty(a),n}',
 						after:
-							'async function g(e,t){var r=await e.internals.statePromise,n=await r.changelog.getChangelogOperations(t),i=r.indexStates.filter((e=>{var a=n.get(e.indexId);return!(!a||0===a.length)}));if(i.length>0){var o=await(await r.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),s=await(0,a.getAccessHandle)(o,t),g=await s.getWritable(),l=t.storageInstance._encode(__wcposHash(r.changelog.__wcposLastRaw));await g.write(l,{at:0}),await s.truncate(l.byteLength);for(var h of i)await h.persistInMemoryRows(t);await r.changelog.empty(t),await s.truncate(0)}return i}',
+							'async function g(e,t){var r=await e.internals.statePromise,n=await r.changelog.getChangelogOperations(t),i=r.indexStates.filter((e=>{var a=n.get(e.indexId);return!(!a||0===a.length)}));if(i.length>0){var o=await(await r.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),s=await(0,a.getAccessHandle)(o,t),g=await s.getWritable(),l=t.storageInstance._encode(__wcposHash(r.changelog.__wcposLastRaw));await g.write(l,{at:0}),await s.truncate(l.byteLength),await __wcposFlushRun(t);for(var h of i)await h.persistInMemoryRows(t);await __wcposFlushRun(t),await r.changelog.empty(t),await s.truncate(0)}return i}',
 					},
 				],
 			},
@@ -163,7 +182,7 @@ const DISTS = [
 						before:
 							'if(await y.getSize()>0){var[,w]=await Promise.all([Promise.all(h.map((e=>e.initRead(o)))),x.getChangelogOperations(o)]);Array.from(w.entries()).map((([e,a])=>{var t=h[e];a.forEach((e=>t.runChangelogOperation(e)))}))}',
 						after:
-							'if(await y.getSize()>0){var E=await(await m).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await(0,a.getAccessHandle)(E,o),reason=null;try{await Promise.all(h.map((e=>e.initRead(o))));var w=await x.getChangelogOperations(o),stamp=o.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(x.__wcposLastRaw))reason="stale-changelog-after-compaction";else Array.from(w.entries()).map((([e,a])=>{var t=h[e];a.forEach((e=>t.runChangelogOperation(e)))}));if(!reason)reason=__wcposValidateRows(h,f)}catch(error){reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:o,docsAccessHandle:y,indexStates:h,changelog:x,stampHandle:E,decode:o.storageInstance._decode.bind(o.storageInstance),primaryPath:g,databaseName:i.databaseName,collectionName:i.collectionName})}',
+							'if(await y.getSize()>0){var E=await(await m).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await(0,a.getAccessHandle)(E,o),reason=null;try{var settled=await Promise.allSettled(h.map((e=>e.initRead(o)))),failed=settled.find((e=>"rejected"===e.status));if(failed)throw failed.reason;var w=await x.getChangelogOperations(o),stamp=o.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(x.__wcposLastRaw))reason="stale-changelog-after-compaction";else reason=__wcposReplayChangelog(h,w);if(!reason)reason=__wcposValidateRows(h,f)}catch(error){reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:o,docsAccessHandle:y,indexStates:h,changelog:x,stampHandle:E,decode:o.storageInstance._decode.bind(o.storageInstance),primaryPath:g,databaseName:i.databaseName,collectionName:i.collectionName})}',
 					},
 				],
 			},
