@@ -17,8 +17,11 @@ import {
 
 // Keep in sync with src/main/window.ts.
 const APP_VERSION_ARG_PREFIX = '--wcpos-app-version=';
+const INSTALL_ID_ARG_PREFIX = '--wcpos-install-id=';
 const versionArg = process.argv.find((arg) => arg.startsWith(APP_VERSION_ARG_PREFIX));
 const version = versionArg ? versionArg.slice(APP_VERSION_ARG_PREFIX.length) : '0.0.0';
+const installIdArg = process.argv.find((arg) => arg.startsWith(INSTALL_ID_ARG_PREFIX));
+const installId = installIdArg ? installIdArg.slice(INSTALL_ID_ARG_PREFIX.length) : '';
 
 // No trailing slash: the Expo bundle puts the slash at the start of split asset paths.
 // No `path` import here: the sandboxed preload webpack build only externalizes
@@ -30,10 +33,13 @@ const basePath = `file://${process.resourcesPath}/dist`;
  *
  * basePath is needed for the bundle splitting to work correctly.
  * version is needed for app-info utility to report correct electron version.
+ * installId lets the app bundle's error reports share the main process's
+ * per-install id (src/main/install-id.ts); '' when not supplied.
  */
 contextBridge.exposeInMainWorld('electron', {
 	basePath,
 	version,
+	installId,
 });
 
 const isRxdbStorageChannel = (channel: string) => channel.startsWith(RXDB_IPC_CHANNEL_PREFIX);
