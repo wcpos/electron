@@ -200,24 +200,36 @@ function rewriteBulk(bytes, stored, value, revision) {
 	return Buffer.from(JSON.stringify(bulk));
 }
 
+// A failed or timed-out boot read must still release the instance before the
+// caller removes the storage directory, and a close that itself hangs on the
+// wedged run is bounded rather than wedging the suite; both timers are
+// unref'd so a settled test does not retain the process.
+async function closeBounded(instance) {
+	await Promise.race([
+		instance?.close().catch(() => {}),
+		new Promise((resolve) => setTimeout(resolve, 1000).unref()),
+	]);
+}
+
 async function bootWithRecoveryEvents(runtime, basePath, prepare) {
 	const events = [];
 	const hook = (event) => events.push(event);
 	globalThis.__wcposOnStorageRecovery = hook;
+	let instance;
 	try {
-		const instance = await runtime
+		instance = await runtime
 			.getStorage({ basePath })
 			.createStorageInstance(storageParams('boot'));
 		prepare?.(instance);
 		const documents = await Promise.race([
 			instance.findDocumentsById(['order:alpha', 'order:beta'], false),
 			new Promise((_, reject) =>
-				setTimeout(() => reject(new Error('boot read never settled')), 3000)
+				setTimeout(() => reject(new Error('boot read never settled')), 3000).unref()
 			),
 		]);
-		await instance.close();
 		return { documents, events };
 	} finally {
+		await closeBounded(instance);
 		if (globalThis.__wcposOnStorageRecovery === hook) delete globalThis.__wcposOnStorageRecovery;
 	}
 }
@@ -511,19 +523,20 @@ async function bootAttachmentsWithRecoveryEvents(runtime, basePath) {
 	const events = [];
 	const hook = (event) => events.push(event);
 	globalThis.__wcposOnStorageRecovery = hook;
+	let instance;
 	try {
-		const instance = await runtime
+		instance = await runtime
 			.getStorage({ basePath })
 			.createStorageInstance(attachmentsStorageParams('boot'));
 		const documents = await Promise.race([
 			instance.findDocumentsById(['order:alpha'], false),
 			new Promise((_, reject) =>
-				setTimeout(() => reject(new Error('boot read never settled')), 3000)
+				setTimeout(() => reject(new Error('boot read never settled')), 3000).unref()
 			),
 		]);
-		await instance.close();
 		return { documents, events };
 	} finally {
+		await closeBounded(instance);
 		if (globalThis.__wcposOnStorageRecovery === hook) delete globalThis.__wcposOnStorageRecovery;
 	}
 }
@@ -563,6 +576,34 @@ for (const runtime of runtimes) {
 			assert.deepEqual(byId(documents), { 'order:alpha': 'replayed' });
 			assert.equal(readFileSync(changesFile(basePath)).length, 0);
 			assert.deepEqual(events, [], 'a valid attachment bulk replays without recovery');
+		} finally {
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+}
+
+for (const runtime of runtimes) {
+	test(`[${runtime.dist}] discards a bulk whose previous document is falsy junk instead of replaying it as an insert`, async () => {
+		const basePath = mkdtempSync(join(tmpdir(), `wcpos-salvage-falsy-previous-${runtime.dist}-`));
+		try {
+			const { writes, stored } = await seedAndUpdateInOneRun(runtime, basePath);
+			// `null`/`undefined` mean "no previous document" and every replay
+			// consumer guards on truthiness — but a damaged bulk carrying `0`,
+			// `false` or `""` is junk, and replaying it as an insert would file
+			// index rows beside the document's existing ones.
+			const bulk = JSON.parse(rewriteBulk(writes[1].bytes, stored, 'unsafe', '3-beta').toString());
+			bulk.events[0].previousDocumentData = 0;
+			const residue = Buffer.from(JSON.stringify(bulk));
+			assert.doesNotThrow(() => JSON.parse(`[${residue}]`));
+			writeFileSync(changesFile(basePath), residue);
+
+			const { documents, events } = await bootWithRecoveryEvents(runtime, basePath);
+			assert.deepEqual(byId(documents), byId(stored), 'the junk bulk was not replayed');
+			assert.equal(readFileSync(changesFile(basePath)).length, 0);
+			assert.equal(events.length, 1);
+			assert.equal(events[0].kind, 'changes-file-discarded');
+			assert.equal(events[0].reason, 'no-complete-bulk');
+			assert.match(events[0].error.message, /event bulk 0 failed validation/);
 		} finally {
 			rmSync(basePath, { recursive: true, force: true });
 		}

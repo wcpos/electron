@@ -112,7 +112,7 @@ for(var i=0;i<bulk.events.length;i++){
 var event=bulk.events[i];
 if(!event||typeof event.documentId!=="string")return false;
 if(!__wcposIsDocumentData(event.documentData,event.documentId,primaryPath,requireAttachments))return false;
-if(event.previousDocumentData&&!__wcposIsDocumentData(event.previousDocumentData,event.documentId,primaryPath,requireAttachments))return false
+if(event.previousDocumentData!==undefined&&event.previousDocumentData!==null&&!__wcposIsDocumentData(event.previousDocumentData,event.documentId,primaryPath,requireAttachments))return false
 }
 return true
 }
@@ -120,7 +120,7 @@ function __wcposSalvageEventBulks(raw,primaryPath,requireAttachments){
 var kept=[],cursor=0;
 for(;;){
 while(cursor<raw.length&&(raw[cursor]===" "||raw[cursor]==="\\n"||raw[cursor]==="\\r"||raw[cursor]==="\\t"))cursor++;
-if(kept.length>0){if(raw[cursor]!==",")break;cursor++;while(cursor<raw.length&&raw[cursor]===" ")cursor++}
+if(kept.length>0){if(raw[cursor]!==",")break;cursor++;while(cursor<raw.length&&(raw[cursor]===" "||raw[cursor]==="\\n"||raw[cursor]==="\\r"||raw[cursor]==="\\t"))cursor++}
 if(raw[cursor]!=="{")break;
 var end=__wcposScanJsonValue(raw,cursor);
 if(end<0)break;
