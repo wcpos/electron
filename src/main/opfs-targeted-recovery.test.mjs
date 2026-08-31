@@ -2014,9 +2014,13 @@ test("boots through a crash-damaged changes file instead of failing every run", 
     ).createStorageInstance(storageParams("residue-recovering"));
     const documents = await Promise.race([
       recovering.findDocumentsById([long.id, short.id], false),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("boot read never settled")), 3000),
-      ),
+      new Promise((_, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("boot read never settled")),
+          3000,
+        );
+        timer.unref();
+      }),
     ]);
     assert.deepEqual(
       documents.map((item) => [item.id, item.value]),
