@@ -24,6 +24,7 @@ import './main/serial-printer';
 import './main/usb-printer';
 import './main/printer-discovery';
 import './main/open-external-url';
+import './main/telemetry-consent';
 
 registerNovuBridge();
 
