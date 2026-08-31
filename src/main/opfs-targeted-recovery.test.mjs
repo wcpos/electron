@@ -2250,3 +2250,266 @@ test("refuses to drop a hollow row when the storage is multi-instance", async ()
     capture.stop();
   }
 });
+
+test("serves the healthy copy when a foreign row holds a stale revision of a requested document", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-stale-foreign-"));
+  const shifted = document("order:shifted", 0);
+  const victim = document("order:victim", 1);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [shifted, victim], "stale-seed")
+    ).close();
+    // Overwrite order:shifted's own bytes with a STALE revision of
+    // order:victim: the storage then serves that copy under victim's id from
+    // shifted's row, ahead of the healthy copy at victim's own row.
+    const staleVictim = {
+      ...victim,
+      value: "stale",
+      _meta: { lwt: victim._meta.lwt - 50 },
+    };
+    await corruptRecordInPlace(basePath, shifted.id, () =>
+      Buffer.from(JSON.stringify(staleVictim)),
+    );
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("stale-recovering"));
+    assert.deepEqual(
+      (await recovering.findDocumentsById([shifted.id, victim.id], true)).map(
+        (item) => [item.id, item.value],
+      ),
+      [[victim.id, victim.value]],
+      "the stale foreign copy must not shadow the healthy one",
+    );
+    assert.deepEqual(
+      capture.events.map((event) => [event.kind, event.id, event.reason]),
+      [["hollow-row-refused", shifted.id, "range-holds-foreign-bytes"]],
+    );
+    await recovering.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("filters the post-repair retry like the first read", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-retry-filter-"));
+  const broken = document("order:broken", 0);
+  const shifted = document("order:shifted", 1);
+  const victim = document("order:victim", 2);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [broken, shifted, victim], "retry-seed")
+    ).close();
+    // One repairable malformed record (so the combined read throws and the
+    // retry path runs) beside one foreign row serving victim's stale bytes.
+    await corruptRecord(basePath, broken.id);
+    const staleVictim = {
+      ...victim,
+      value: "stale",
+      _meta: { lwt: victim._meta.lwt - 50 },
+    };
+    await corruptRecordInPlace(basePath, shifted.id, () =>
+      Buffer.from(JSON.stringify(staleVictim)),
+    );
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("retry-recovering"));
+    assert.deepEqual(
+      (
+        await recovering.findDocumentsById(
+          [broken.id, shifted.id, victim.id],
+          true,
+        )
+      )
+        .map((item) => [item.id, item.value])
+        .sort(),
+      [
+        [broken.id, broken.value],
+        [victim.id, victim.value],
+      ],
+      "the retry returns each requested id at most once, from its own row",
+    );
+    assert.ok(
+      capture.events.some(
+        (event) =>
+          event.kind === "hollow-row-refused" &&
+          event.reason === "range-holds-foreign-bytes",
+      ),
+    );
+    await recovering.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+// The live corruption shape: the primary index lost one id (an applied
+// changelog delete) while its secondary rows survived (their deletes were
+// lost). A bare row-count mismatch is rebuilt from documents.json at boot,
+// so the shape that actually REACHES the write path drops a different id
+// from every secondary — equal counts, differing id sets, which the boot
+// check cannot see and reconciliation refuses to rebuild.
+async function orphanPrimaryRow(basePath, orphanId, siblingId) {
+  const directory = join(basePath, (await readdir(basePath))[0]);
+  const indexNames = (await readdir(directory))
+    .filter((name) => name.startsWith("index-"))
+    .sort();
+  // index-00000 backs the primary metaIdMap; every later file is a
+  // secondary (the schema's declared index plus premium's internal ones).
+  for (const [position, name] of indexNames.entries()) {
+    const removedId = position === 0 ? orphanId : siblingId;
+    const indexPath = join(directory, name);
+    const rows = JSON.parse(await readFile(indexPath, "utf8"));
+    const remaining = rows.filter((row) => !row[0].includes(removedId));
+    assert.equal(
+      rows.length - remaining.length,
+      1,
+      `one row for ${removedId} in ${name}`,
+    );
+    await writeFile(indexPath, JSON.stringify(remaining));
+  }
+}
+
+test("drops a stale secondary survivor before a stripped write lands as an insert", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-stale-secondary-"));
+  const orphan = document("order:orphan", 0);
+  const sibling = document("order:sibling", 1);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [orphan, sibling], "survivor-seed")
+    ).close();
+    await orphanPrimaryRow(basePath, orphan.id, sibling.id);
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("survivor-recovering"));
+    const updated = {
+      ...orphan,
+      value: "reinserted",
+      _rev: "2-orphan",
+      _meta: { lwt: orphan._meta.lwt + 100 },
+    };
+    const written = await recovering.bulkWrite(
+      [{ previous: orphan, document: updated }],
+      "update",
+    );
+    assert.deepEqual(written.error, []);
+    assert.deepEqual(capture.events, [
+      {
+        kind: "stale-secondary-dropped",
+        target: "targeted-recovery-db/products",
+        id: orphan.id,
+      },
+    ]);
+    assert.deepEqual(
+      (await recovering.findDocumentsById([orphan.id, sibling.id], false)).map(
+        (item) => [item.id, item.value],
+      ),
+      [
+        [orphan.id, "reinserted"],
+        [sibling.id, sibling.value],
+      ],
+    );
+    const state = await recovering.internals.statePromise;
+    for (const indexState of state.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(orphan.id)).length,
+        1,
+        "exactly one row per index for the re-inserted document",
+      );
+    }
+    await recovering.close();
+
+    const reopened = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("survivor-reopened"));
+    const persisted = await reopened.internals.statePromise;
+    for (const indexState of persisted.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(orphan.id)).length,
+        1,
+      );
+    }
+    await reopened.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("refuses a stripped write over a stale secondary survivor when multi-instance", async () => {
+  const basePath = await mkdtemp(
+    join(tmpdir(), "wcpos-stale-secondary-multi-"),
+  );
+  const orphan = document("order:orphan", 0);
+  const sibling = document("order:sibling", 1);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [orphan, sibling], "survivor-multi-seed")
+    ).close();
+    await orphanPrimaryRow(basePath, orphan.id, sibling.id);
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance({
+      ...storageParams("survivor-multi"),
+      multiInstance: true,
+    });
+    await assert.rejects(
+      recovering.bulkWrite(
+        [
+          {
+            previous: orphan,
+            document: {
+              ...orphan,
+              value: "reinserted",
+              _rev: "2-orphan",
+              _meta: { lwt: orphan._meta.lwt + 100 },
+            },
+          },
+        ],
+        "update",
+      ),
+      /stale secondary index rows for order:orphan .*targeted recovery refused: multi-instance/,
+    );
+    assert.deepEqual(capture.events, [
+      {
+        kind: "stale-secondary-refused",
+        target: "targeted-recovery-db/products",
+        id: orphan.id,
+        reason: "multi-instance",
+      },
+    ]);
+    // The survivors are left untouched for a future single-instance repair:
+    // every secondary still holds its stale row for the id.
+    const state = await recovering.internals.statePromise;
+    for (const indexState of state.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(orphan.id)).length,
+        indexState === state.firstIdx ? 0 : 1,
+      );
+    }
+    await recovering.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});

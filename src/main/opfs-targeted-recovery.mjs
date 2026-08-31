@@ -210,6 +210,36 @@ async function dropHollowRows(instance, documentIds) {
   });
 }
 
+// Deletes every secondary-index row still carrying a document id, through the
+// same changelog "D" operations as dropIndexRow's other callers. Used when a
+// write's `previous` is being stripped because the primary index lost the id:
+// the damage that lost the primary row can leave a secondary row standing (an
+// applied changelog add whose matching delete was lost), and the insert the
+// stripped write becomes would file a second row for the id beside the stale
+// one, so that secondary would serve both revisions from then on.
+async function dropSecondaryRowsById(instance, documentIds) {
+  const state = await instance.internals.statePromise;
+  return instance.taskQueue.runCleanup(async (runState) => {
+    const keyLength = state.firstIdx.primaryKeyLength;
+    for (const documentId of documentIds) {
+      for (const indexState of state.indexStates) {
+        if (indexState === state.firstIdx) continue;
+        let position = indexState.rows.length;
+        while (position--) {
+          if (
+            getPrimaryKeyFromIndexableString(
+              indexState.rows[position][0],
+              keyLength,
+            ) !== documentId
+          )
+            continue;
+          await dropIndexRow(state, runState, indexState, position);
+        }
+      }
+    }
+  });
+}
+
 async function reconcileSecondaryIndexes(instance) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
@@ -519,6 +549,54 @@ export function withTargetedOpfsRecovery(storage) {
         return repairBatch([...new Set(ids)]);
       };
 
+      // A refused row's range holds some other document, which the storage
+      // then serves in place of the one asked for — twice, if that document
+      // was requested too, and possibly as a STALE revision when the foreign
+      // row predates the healthy one. A read returns each requested id at
+      // most once, and the copy it returns must be the one at the id's own
+      // primary row: whichever copy the storage happened to return first must
+      // not shadow the healthy one. So when a duplicate shows up, or a
+      // refusal proved some range holds foreign bytes, every returned id is
+      // re-read singly — the storage then reads only that id's own row, so
+      // the copy that comes back is authoritative — and an id whose own row
+      // yields nothing is omitted (it is hollow or foreign there, already
+      // reported, and stays unverified). The foreign record itself stays
+      // reachable under its own id. Applied to every return path: the first
+      // read, the post-repair retry, and the singleton fallback.
+      const ownRowCopy = async (id, withDeleted) => {
+        const single = parseDocuments(
+          await findDocumentsById([id], withDeleted),
+        );
+        return single.find((row) => row?.[instance.primaryPath] === id);
+      };
+
+      const ownDocuments = async (ids, result, withDeleted, suspectForeign) => {
+        const documents = parseDocuments(result);
+        const requested = new Set(ids);
+        const served = new Set();
+        let duplicated = false;
+        const own = documents.filter((row) => {
+          const id = row?.[instance.primaryPath];
+          if (!requested.has(id)) return false;
+          if (served.has(id)) {
+            duplicated = true;
+            return false;
+          }
+          served.add(id);
+          return true;
+        });
+        if (!suspectForeign && !duplicated) {
+          if (own.length === documents.length) return result;
+          return typeof result === "string" ? JSON.stringify(own) : own;
+        }
+        const verified = [];
+        for (const row of own) {
+          const copy = await ownRowCopy(row[instance.primaryPath], withDeleted);
+          if (copy) verified.push(copy);
+        }
+        return typeof result === "string" ? JSON.stringify(verified) : verified;
+      };
+
       instance.findDocumentsById = async (ids, withDeleted) => {
         try {
           const result = await findDocumentsById(ids, withDeleted);
@@ -530,50 +608,62 @@ export function withTargetedOpfsRecovery(storage) {
           // proven clean. A hollow row is neither: the storage reports its id
           // absent while the index still carries it, so the row is dropped
           // here — after which the id really is absent, hence clean — and a
-          // refused id stays unverified for the write preflight.
+          // refused id stays unverified for the write preflight, as does an
+          // id served only by a foreign row and absent at its own.
           const hollow = await findHollowIds(ids, documents, withDeleted);
+          const refused = await dropHollowIds(hollow);
+          const suspectForeign = refused.some(
+            ({ reason }) => reason === "range-holds-foreign-bytes",
+          );
+          const own = await ownDocuments(
+            ids,
+            result,
+            withDeleted,
+            suspectForeign,
+          );
+          const returned = new Set();
+          for (const row of parseDocuments(own)) {
+            returned.add(row[instance.primaryPath]);
+          }
           if (withDeleted) {
-            const refused = new Set(
-              (await dropHollowIds(hollow)).map(({ id }) => id),
-            );
-            for (const id of ids) if (!refused.has(id)) cleanIds.add(id);
-          } else {
-            if (hollow.length > 0) await dropHollowIds(hollow);
-            for (const row of documents) {
-              cleanIds.add(row[instance.primaryPath]);
+            const refusedIds = new Set(refused.map(({ id }) => id));
+            const metaIdMap = (await instance.internals?.statePromise)?.firstIdx
+              ?.metaIdMap;
+            for (const id of ids) {
+              if (refusedIds.has(id)) continue;
+              if (returned.has(id) || !metaIdMap?.has(id)) cleanIds.add(id);
             }
+          } else {
+            for (const id of returned) cleanIds.add(id);
           }
-          // A refused row's range holds some other document, which the
-          // storage then serves in place of the one asked for — twice, if
-          // that document was requested too. A read returns each requested
-          // id at most once; the foreign record stays reachable under its
-          // own id.
-          const requested = new Set(ids);
-          const served = new Set();
-          const own = documents.filter((row) => {
-            const id = row?.[instance.primaryPath];
-            if (!requested.has(id) || served.has(id)) return false;
-            served.add(id);
-            return true;
-          });
-          if (own.length !== documents.length) {
-            return typeof result === "string" ? JSON.stringify(own) : own;
-          }
-          return result;
+          return own;
         } catch (error) {
           if (!isMalformedJson(error)) throw error;
           cleanIds.clear();
           if (await repairMalformedIds(ids))
-            return parseStorageResult(
+            return ownDocuments(
+              ids,
               await findDocumentsById(ids, withDeleted),
+              withDeleted,
+              true,
             );
           if (ids.length > 1) {
             const batches = await Promise.all(
               ids.map((id) => findDocumentsById([id], withDeleted)),
             );
-            const documents = batches.flatMap((batch) =>
-              typeof batch === "string" ? JSON.parse(batch) : batch,
-            );
+            // Each batch read exactly its own id's row, so keeping only the
+            // matching document per batch IS the own-row guarantee; a batch
+            // whose row held some other document contributes nothing.
+            const seen = new Set();
+            const documents = [];
+            ids.forEach((id, index) => {
+              if (seen.has(id)) return;
+              seen.add(id);
+              const own = parseDocuments(batches[index]).find(
+                (row) => row?.[instance.primaryPath] === id,
+              );
+              if (own) documents.push(own);
+            });
             return typeof batches[0] === "string"
               ? JSON.stringify(documents)
               : documents;
@@ -597,14 +687,59 @@ export function withTargetedOpfsRecovery(storage) {
       // changes nothing: with or without `previous`, that write is a 409.
       const withoutStalePrevious = async (documentWrites) => {
         if (!documentWrites.some((row) => row.previous)) return documentWrites;
-        const metaIdMap = (await instance.internals?.statePromise)?.firstIdx
-          ?.metaIdMap;
+        const state = await instance.internals?.statePromise;
+        const metaIdMap = state?.firstIdx?.metaIdMap;
         if (!metaIdMap) return documentWrites;
-        return documentWrites.map((row) =>
-          row.previous && !metaIdMap.has(row.document[instance.primaryPath])
-            ? { document: row.document }
-            : row,
+        const stripped = [];
+        const writes = documentWrites.map((row) => {
+          if (
+            !row.previous ||
+            metaIdMap.has(row.document[instance.primaryPath])
+          )
+            return row;
+          stripped.push(row.document[instance.primaryPath]);
+          return { document: row.document };
+        });
+        if (stripped.length === 0) return writes;
+        // The stripped write is an insert now, and premium's insert path adds
+        // rows to every index without looking for survivors — but the damage
+        // that lost the primary row can leave a secondary row standing, and
+        // the insert would then file a second row for the id beside the stale
+        // one, so that secondary serves both revisions from then on. The
+        // stale rows are dropped through the changelog first; under
+        // multi-instance the drop is refused like every positional repair —
+        // and the write is refused WITH it, loudly, because stripping without
+        // the drop corrupts the secondary while keeping `previous` corrupts
+        // the primary (position -1).
+        const keyLength = state.firstIdx.primaryKeyLength;
+        const staleIds = stripped.filter((id) =>
+          state.indexStates.some(
+            (indexState) =>
+              indexState !== state.firstIdx &&
+              indexState.rows.some(
+                (row) =>
+                  getPrimaryKeyFromIndexableString(row[0], keyLength) === id,
+              ),
+          ),
         );
+        if (staleIds.length === 0) return writes;
+        if (params.multiInstance) {
+          for (const id of staleIds) {
+            report("stale-secondary-refused", {
+              target,
+              id,
+              reason: "multi-instance",
+            });
+          }
+          throw new Error(
+            `stale secondary index rows for ${staleIds.join(", ")} in ${target}; targeted recovery refused: multi-instance`,
+          );
+        }
+        await dropSecondaryRowsById(instance, staleIds);
+        for (const id of staleIds) {
+          report("stale-secondary-dropped", { target, id });
+        }
+        return writes;
       };
 
       instance.bulkWrite = async (documentWrites, context) => {

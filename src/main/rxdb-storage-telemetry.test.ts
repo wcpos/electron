@@ -58,6 +58,8 @@ async function main() {
 		'hollow-row-refused',
 		'index-rebuilt',
 		'index-reconcile-refused',
+		'stale-secondary-dropped',
+		'stale-secondary-refused',
 		'task-queue-run-failed',
 	]);
 

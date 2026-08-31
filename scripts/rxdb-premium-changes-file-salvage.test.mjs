@@ -29,8 +29,8 @@ import {
 	DISTS,
 	MARKER,
 	MAX_SALVAGE_BYTES,
-	QUARANTINE_FILE,
 	preparePatch,
+	QUARANTINE_FILE,
 } from './patch-rxdb-premium-changes-file-salvage.mjs';
 
 const require = createRequire(import.meta.url);
@@ -155,13 +155,23 @@ async function seedAndUpdateInOneRun(runtime, basePath) {
 			[
 				{
 					previous: alpha,
-					document: { ...alpha, value: 'A'.repeat(400), _rev: '2-alpha', _meta: { lwt: Date.now() + 10 } },
+					document: {
+						...alpha,
+						value: 'A'.repeat(400),
+						_rev: '2-alpha',
+						_meta: { lwt: Date.now() + 10 },
+					},
 				},
 			],
 			'update-alpha'
 		),
 		instance.bulkWrite(
-			[{ previous: beta, document: { ...beta, value: 'B', _rev: '2-beta', _meta: { lwt: Date.now() + 11 } } }],
+			[
+				{
+					previous: beta,
+					document: { ...beta, value: 'B', _rev: '2-beta', _meta: { lwt: Date.now() + 11 } },
+				},
+			],
 			'update-beta'
 		),
 	]);
@@ -214,13 +224,19 @@ async function bootWithRecoveryEvents(runtime, basePath, prepare) {
 
 test('both dists carry the marker and every rewrite', () => {
 	for (const { dist, prelude, rewrites } of DISTS) {
-		const path = join(packageRoot, `dist/${dist}/plugins/storage-abstract-filesystem/bulk-write.js`);
+		const path = join(
+			packageRoot,
+			`dist/${dist}/plugins/storage-abstract-filesystem/bulk-write.js`
+		);
 		const source = readFileSync(path, 'utf8');
 		assert.ok(source.includes(`${MARKER}=1`), `${dist} carries the marker`);
 		for (const rewrite of rewrites) {
 			assert.ok(source.includes(rewrite.after), `${dist} carries rewrite ${rewrite.name}`);
 			if (rewrite.before !== rewrite.after) {
-				assert.ok(!source.includes(rewrite.before), `${dist} no longer carries the anchor ${rewrite.name}`);
+				assert.ok(
+					!source.includes(rewrite.before),
+					`${dist} no longer carries the anchor ${rewrite.name}`
+				);
 			}
 		}
 		assert.equal(preparePatch(path, { prelude, rewrites }).status, 'already patched');
@@ -236,6 +252,25 @@ test('preparePatch fails closed when an anchor is missing', () => {
 		assert.throws(
 			() => preparePatch(path, { prelude: DISTS[0].prelude, rewrites: DISTS[0].rewrites }),
 			/anchor getAccessHandleBinding matched 0 times/
+		);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test('preparePatch fails closed on a marker with an outdated prelude', () => {
+	const directory = mkdtempSync(join(tmpdir(), 'wcpos-salvage-stale-'));
+	try {
+		const path = join(directory, 'bulk-write.js');
+		// The shape an older revision of this script leaves behind: marker and
+		// rewrites present, but not the current prelude.
+		writeFileSync(
+			path,
+			`globalThis.${MARKER}=1;\n${DISTS[0].rewrites.map(({ after }) => after).join('\n')}`
+		);
+		assert.throws(
+			() => preparePatch(path, { prelude: DISTS[0].prelude, rewrites: DISTS[0].rewrites }),
+			/outdated prelude/
 		);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
@@ -259,7 +294,10 @@ for (const runtime of runtimes) {
 				const parsed = typeof bulk === 'string' ? JSON.parse(bulk) : bulk;
 				assert.equal(parsed.events.length, 1);
 			}
-			assert.ok(writes[0].bytes.length > writes[1].bytes.length, 'fixture: first bulk is the longer one');
+			assert.ok(
+				writes[0].bytes.length > writes[1].bytes.length,
+				'fixture: first bulk is the longer one'
+			);
 			assert.deepEqual(byId(stored), { 'order:alpha': 'A'.repeat(400), 'order:beta': 'B' });
 			assert.equal(readFileSync(changesFile(basePath)).length, 0, 'run end cleared the file');
 		} finally {
@@ -282,7 +320,10 @@ for (const runtime of runtimes) {
 			});
 
 			const { documents, events } = await bootWithRecoveryEvents(runtime, basePath);
-			assert.deepEqual(byId(documents), { 'order:alpha': 'A'.repeat(400), 'order:beta': 'from-wal' });
+			assert.deepEqual(byId(documents), {
+				'order:alpha': 'A'.repeat(400),
+				'order:beta': 'from-wal',
+			});
 			assert.equal(readFileSync(changesFile(basePath)).length, 0, 'the damaged file was cleared');
 			assert.ok(
 				readFileSync(join(collectionDirectory(basePath), QUARANTINE_FILE)).equals(residue),
@@ -320,7 +361,9 @@ for (const runtime of runtimes) {
 			assert.equal(events[0].kind, 'changes-file-discarded');
 			assert.equal(events[0].reason, 'no-complete-bulk');
 			assert.equal(events[0].keptBulks, 0);
-			assert.ok(readFileSync(join(collectionDirectory(basePath), QUARANTINE_FILE)).equals(truncated));
+			assert.ok(
+				readFileSync(join(collectionDirectory(basePath), QUARANTINE_FILE)).equals(truncated)
+			);
 		} finally {
 			rmSync(basePath, { recursive: true, force: true });
 		}
@@ -407,6 +450,119 @@ for (const runtime of runtimes) {
 				!existsSync(join(collectionDirectory(basePath), QUARANTINE_FILE)),
 				'no quarantine copy of an oversized file'
 			);
+		} finally {
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+}
+
+function attachmentsStorageParams(token) {
+	return { ...storageParams(token), schema: { ...schema, attachments: {} } };
+}
+
+/**
+ * With attachments enabled EVERY bulk rides the changes file, and the replay
+ * walks `previousDocumentData._attachments` / `documentData._attachments[k]`
+ * (premium's `clearDeletedAttachments`) BEFORE the truncate — so a replayed
+ * bulk missing those maps throws inside the run lock and recreates the exact
+ * permanent boot failure this patch removes. Seeds one document in an
+ * attachments-enabled collection, folds the seed bulk away, and returns a
+ * genuine captured update bulk against the stored document.
+ */
+async function seedAttachmentsRun(runtime, basePath) {
+	const storage = runtime.getStorage({ basePath });
+	const instance = await storage.createStorageInstance(attachmentsStorageParams('seed'));
+	const alpha = document('order:alpha', 'a', 0);
+	assert.deepEqual((await instance.bulkWrite([{ document: alpha }], 'seed')).error, []);
+	await instance.taskQueue.awaitIdle();
+	// A read run folds the seed bulk into documents.json and truncates the
+	// changes file, so the residue written below is the file's only content.
+	const [seeded] = await instance.findDocumentsById(['order:alpha'], false);
+	assert.equal(seeded.value, 'a');
+	const writes = await captureChangesFileWrites(instance);
+	assert.deepEqual(
+		(
+			await instance.bulkWrite(
+				[
+					{
+						previous: seeded,
+						document: {
+							...seeded,
+							value: 'captured',
+							_rev: '2-alpha',
+							_meta: { lwt: seeded._meta.lwt + 500 },
+						},
+					},
+				],
+				'update-alpha'
+			)
+		).error,
+		[]
+	);
+	await instance.taskQueue.awaitIdle();
+	const stored = await instance.findDocumentsById(['order:alpha'], false);
+	await instance.close();
+	assert.equal(writes.length, 1, 'the update went through the changes file');
+	assert.equal(readFileSync(changesFile(basePath)).length, 0, 'residue starts from an empty file');
+	return { bulkBytes: writes[0].bytes, stored };
+}
+
+async function bootAttachmentsWithRecoveryEvents(runtime, basePath) {
+	const events = [];
+	const hook = (event) => events.push(event);
+	globalThis.__wcposOnStorageRecovery = hook;
+	try {
+		const instance = await runtime
+			.getStorage({ basePath })
+			.createStorageInstance(attachmentsStorageParams('boot'));
+		const documents = await Promise.race([
+			instance.findDocumentsById(['order:alpha'], false),
+			new Promise((_, reject) =>
+				setTimeout(() => reject(new Error('boot read never settled')), 3000)
+			),
+		]);
+		await instance.close();
+		return { documents, events };
+	} finally {
+		if (globalThis.__wcposOnStorageRecovery === hook) delete globalThis.__wcposOnStorageRecovery;
+	}
+}
+
+for (const runtime of runtimes) {
+	test(`[${runtime.dist}] discards a bulk whose previous document lacks the attachment map the replay walks`, async () => {
+		const basePath = mkdtempSync(join(tmpdir(), `wcpos-salvage-attachments-${runtime.dist}-`));
+		try {
+			const { bulkBytes, stored } = await seedAttachmentsRun(runtime, basePath);
+			const bulk = JSON.parse(rewriteBulk(bulkBytes, stored, 'unsafe', '3-alpha').toString());
+			delete bulk.events[0].previousDocumentData._attachments;
+			const residue = Buffer.from(JSON.stringify(bulk));
+			assert.doesNotThrow(() => JSON.parse(`[${residue}]`));
+			writeFileSync(changesFile(basePath), residue);
+
+			const { documents, events } = await bootAttachmentsWithRecoveryEvents(runtime, basePath);
+			assert.deepEqual(byId(documents), byId(stored), 'the unsafe bulk was not replayed');
+			assert.equal(readFileSync(changesFile(basePath)).length, 0);
+			assert.equal(events.length, 1);
+			assert.equal(events[0].kind, 'changes-file-discarded');
+			assert.equal(events[0].reason, 'no-complete-bulk');
+			assert.match(events[0].error.message, /event bulk 0 failed validation/);
+			assert.ok(readFileSync(join(collectionDirectory(basePath), QUARANTINE_FILE)).equals(residue));
+		} finally {
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	test(`[${runtime.dist}] replays a bulk whose attachment maps are intact`, async () => {
+		const basePath = mkdtempSync(join(tmpdir(), `wcpos-salvage-attachments-ok-${runtime.dist}-`));
+		try {
+			const { bulkBytes, stored } = await seedAttachmentsRun(runtime, basePath);
+			const residue = rewriteBulk(bulkBytes, stored, 'replayed', '3-alpha');
+			writeFileSync(changesFile(basePath), residue);
+
+			const { documents, events } = await bootAttachmentsWithRecoveryEvents(runtime, basePath);
+			assert.deepEqual(byId(documents), { 'order:alpha': 'replayed' });
+			assert.equal(readFileSync(changesFile(basePath)).length, 0);
+			assert.deepEqual(events, [], 'a valid attachment bulk replays without recovery');
 		} finally {
 			rmSync(basePath, { recursive: true, force: true });
 		}

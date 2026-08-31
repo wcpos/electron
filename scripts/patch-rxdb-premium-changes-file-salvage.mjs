@@ -33,7 +33,10 @@
  *   - `resetAfterReplay`: zero it after the reader truncates the file.
  *   - `readChanges`: parse through `__wcposReadChangesFile`, which validates
  *     every bulk against what the replay dereferences (`documentData` keyed
- *     by the event's id, `_deleted`, `_meta.lwt`) and on a parse or
+ *     by the event's id, `_deleted`, `_meta.lwt`; the same shape on
+ *     `previousDocumentData` when an event carries one; and, when the schema
+ *     has attachments, the `_attachments` maps with their string digests that
+ *     `clearDeletedAttachments` walks before the truncate) and on a parse or
  *     validation failure keeps every complete leading event bulk (string- and
  *     nesting-aware scan, each candidate re-validated), copies the raw bytes
  *     to `wcpos-changes-quarantine.json` for support, reports through
@@ -91,16 +94,29 @@ if(ch==='"')inString=true;else if(ch==="{"||ch==="[")depth++;else if(ch==="}"||c
 }
 return -1
 }
-function __wcposIsEventBulk(bulk,primaryPath){
-if(!bulk||typeof bulk!=="object"||Array.isArray(bulk)||!Array.isArray(bulk.events))return false;
-for(var i=0;i<bulk.events.length;i++){
-var event=bulk.events[i],doc=event&&event.documentData;
-if(!event||typeof event.documentId!=="string"||!doc||typeof doc!=="object"||Array.isArray(doc))return false;
-if(doc[primaryPath]!==event.documentId||typeof doc._deleted!=="boolean"||!doc._meta||typeof doc._meta.lwt!=="number")return false
+function __wcposIsDocumentData(doc,documentId,primaryPath,requireAttachments){
+if(!doc||typeof doc!=="object"||Array.isArray(doc))return false;
+if(doc[primaryPath]!==documentId||typeof doc._deleted!=="boolean"||!doc._meta||typeof doc._meta.lwt!=="number")return false;
+if(!requireAttachments)return true;
+var attachments=doc._attachments;
+if(!attachments||typeof attachments!=="object"||Array.isArray(attachments))return false;
+for(var key in attachments){
+var attachment=attachments[key];
+if(!attachment||typeof attachment!=="object"||typeof attachment.digest!=="string")return false
 }
 return true
 }
-function __wcposSalvageEventBulks(raw,primaryPath){
+function __wcposIsEventBulk(bulk,primaryPath,requireAttachments){
+if(!bulk||typeof bulk!=="object"||Array.isArray(bulk)||!Array.isArray(bulk.events))return false;
+for(var i=0;i<bulk.events.length;i++){
+var event=bulk.events[i];
+if(!event||typeof event.documentId!=="string")return false;
+if(!__wcposIsDocumentData(event.documentData,event.documentId,primaryPath,requireAttachments))return false;
+if(event.previousDocumentData&&!__wcposIsDocumentData(event.previousDocumentData,event.documentId,primaryPath,requireAttachments))return false
+}
+return true
+}
+function __wcposSalvageEventBulks(raw,primaryPath,requireAttachments){
 var kept=[],cursor=0;
 for(;;){
 while(cursor<raw.length&&(raw[cursor]===" "||raw[cursor]==="\\n"||raw[cursor]==="\\r"||raw[cursor]==="\\t"))cursor++;
@@ -110,7 +126,7 @@ var end=__wcposScanJsonValue(raw,cursor);
 if(end<0)break;
 var bulk;
 try{bulk=JSON.parse(raw.slice(cursor,end))}catch(parseError){break}
-if(!__wcposIsEventBulk(bulk,primaryPath))break;
+if(!__wcposIsEventBulk(bulk,primaryPath,requireAttachments))break;
 kept.push(bulk);cursor=end
 }
 return kept
@@ -121,7 +137,7 @@ if(typeof hook==="function"){try{hook(report);return}catch(hookError){}}
 console.error("["+report.kind+"] "+report.target,report)
 }
 async function __wcposReadChangesFile(instance,runState,state,changesAccess,bytes){
-var primaryPath=instance.primaryPath,target=state.params.databaseName+"/"+state.params.collectionName;
+var primaryPath=instance.primaryPath,requireAttachments=!!(instance.schema&&instance.schema.attachments),target=state.params.databaseName+"/"+state.params.collectionName;
 if(bytes.byteLength>${MAX_SALVAGE_BYTES}){
 await changesAccess.truncate(0);
 __wcposReportRecovery({kind:"changes-file-discarded",target:target,reason:"oversized",bytes:bytes.byteLength,keptBulks:0,quarantined:false});
@@ -130,10 +146,10 @@ return null
 var raw=instance._decode(bytes),failure;
 try{
 var parsed=JSON.parse("["+raw+"]");
-for(var i=0;i<parsed.length;i++)if(!__wcposIsEventBulk(parsed[i],primaryPath))throw new Error("event bulk "+i+" failed validation");
+for(var i=0;i<parsed.length;i++)if(!__wcposIsEventBulk(parsed[i],primaryPath,requireAttachments))throw new Error("event bulk "+i+" failed validation");
 return parsed
 }catch(error){failure=error}
-var kept=__wcposSalvageEventBulks(raw,primaryPath),quarantined=false;
+var kept=__wcposSalvageEventBulks(raw,primaryPath,requireAttachments),quarantined=false;
 try{
 var quarantineHandle=await(await state.dirHandle).getFileHandle("${QUARANTINE_FILE}",{create:true}),quarantineAccess=await ${getAccessHandleExpression},quarantineWritable=await quarantineAccess.getWritable();
 await quarantineWritable.write(bytes,{at:0});await quarantineAccess.truncate(bytes.byteLength);quarantined=true
@@ -208,6 +224,14 @@ export const DISTS = [
 export function preparePatch(path, patch) {
 	const source = readFileSync(path, 'utf8');
 	if (source.includes(`${MARKER}=1`)) {
+		// A dist patched by an older revision of this script carries the marker
+		// but not the current prelude; running on with the stale prelude would
+		// silently skip newer validation, so fail loudly instead.
+		if (!source.includes(patch.prelude)) {
+			throw new Error(
+				`${path} carries the salvage patch marker but an outdated prelude — reinstall rxdb-premium so postinstall can re-apply the current patch`
+			);
+		}
 		for (const rewrite of patch.rewrites) {
 			if (!source.includes(rewrite.after)) {
 				throw new Error(`${path} carries the patch marker but rewrite ${rewrite.name} is missing`);
@@ -247,9 +271,14 @@ function main() {
 	const packageRoot = dirname(require.resolve('rxdb-premium/package.json'));
 	const prepared = [];
 	for (const { dist, prelude: distPrelude, rewrites } of DISTS) {
-		const path = join(packageRoot, `dist/${dist}/plugins/storage-abstract-filesystem/bulk-write.js`);
+		const path = join(
+			packageRoot,
+			`dist/${dist}/plugins/storage-abstract-filesystem/bulk-write.js`
+		);
 		if (!existsSync(path)) {
-			throw new Error(`rxdb-premium ${dist}/bulk-write.js not found — run after package postinstall`);
+			throw new Error(
+				`rxdb-premium ${dist}/bulk-write.js not found — run after package postinstall`
+			);
 		}
 		prepared.push({ dist, ...preparePatch(path, { prelude: distPrelude, rewrites }) });
 	}
