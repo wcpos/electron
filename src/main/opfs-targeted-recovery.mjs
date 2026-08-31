@@ -542,8 +542,8 @@ export function withTargetedOpfsRecovery(storage) {
           const hollow = await findHollowIds(batch, documents, true);
           if (hollow.length === 0) return false;
           const refused = await dropHollowIds(hollow);
-          if (refused.length === hollow.length) return false;
           onMalformedBatch?.();
+          if (refused.length === hollow.length) return false;
           return true;
         };
         return repairBatch([...new Set(ids)]);

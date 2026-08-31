@@ -2241,11 +2241,21 @@ test("refuses to drop a hollow row when the storage is multi-instance", async ()
       ).error,
       [],
     );
+    assert.deepEqual(
+      (
+        await recovering.bulkWrite(
+          [{ document: document("order:hollow", 1) }],
+          "w-again",
+        )
+      ).error,
+      [],
+    );
     assert.equal(dropped, 0);
     assert.ok(state.firstIdx.metaIdMap.has("order:hollow"));
     assert.deepEqual(
       capture.events.map((event) => [event.kind, event.reason]),
       [
+        ["hollow-row-refused", "multi-instance"],
         ["hollow-row-refused", "multi-instance"],
         ["hollow-row-refused", "multi-instance"],
       ],
