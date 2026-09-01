@@ -2,12 +2,13 @@
 	"name": "@wcpos/app-electron",
 	"license": "MIT",
 	"productName": "WCPOS",
-	"version": "1.10.5",
+	"version": "1.10.6",
 	"description": "WCPOS desktop client",
 	"author": "Paul Kilmurray <paul@wcpos.com>",
 	"packageManager": "pnpm@10.31.0",
 	"pnpm": {
 		"onlyBuiltDependencies": [
+			"@sentry/cli",
 			"@serialport/bindings-cpp",
 			"electron",
 			"electron-winstaller",
