@@ -40,6 +40,12 @@ export const createWindow = (): BrowserWindow => {
 			sandbox: false, // Required for preload script to work
 			nodeIntegration: false, // Prevent Node.js integration for security reasons
 			contextIsolation: true, // Protect against prototype pollution
+			// A POS must keep syncing while minimised or covered by another window.
+			// Chromium's default throttles a hidden renderer's timers to 1/minute
+			// (macOS occlusion counts as hidden), which batches every sync lane into
+			// one burst per minute and starves the token refresh — the renderer's own
+			// visibility handling decides how much to slow down, not Chromium.
+			backgroundThrottling: false,
 			additionalArguments: [
 				`${APP_VERSION_ARG_PREFIX}${app.getVersion()}`,
 				`${INSTALL_ID_ARG_PREFIX}${getInstallId()}`,
