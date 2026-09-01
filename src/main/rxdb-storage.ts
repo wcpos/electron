@@ -16,6 +16,7 @@ import {
 } from '../rxdb-ipc-attachments';
 import { logger } from './log';
 import { withTargetedOpfsRecovery } from './opfs-targeted-recovery.mjs';
+import { installRxdbStorageTelemetry } from './rxdb-storage-telemetry';
 
 // rxdb-premium 17.0.0 is installed but rxdb is 17.1.0. storage-abstract-filesystem
 // (used by filesystem-node) calls checkVersion() on every createStorageInstance, which
@@ -116,6 +117,9 @@ export async function getMainRxdbStorage() {
 	if (!storagePromise) {
 		storagePromise = (async () => {
 			try {
+				// The storage's repair paths report through globalThis seams; route
+				// them to Sentry before the first instance can fire one.
+				installRxdbStorageTelemetry();
 				const basePath = await ensureFilesystemNodeBasePath();
 				logger.info('Initialising RxDB filesystem-node storage bridge', { basePath });
 				// filesystem-node shares the abstract-filesystem on-disk format with the
