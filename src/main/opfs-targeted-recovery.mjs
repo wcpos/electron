@@ -685,18 +685,35 @@ export function withTargetedOpfsRecovery(storage) {
       // may be cached as verified precisely because it is absent. A
       // multi-instance peer inserting the id between this check and the run
       // changes nothing: with or without `previous`, that write is a 409.
+      //
+      // The map lags the storage: an insert reaches it only when the storage
+      // flushes pending writes (end of a write run, or before the next task
+      // touching the id), so an update that follows its own insert inside
+      // that window finds the id absent — and stripping `previous` then
+      // makes it a second insert, which the storage, having flushed the first
+      // by the time it categorizes the write, refuses as a 409 (the embedded
+      // web boot after Clear All Local Data: credentials upsert, then the
+      // store-links patch, milliseconds apart on a fresh collection). A read
+      // of the absent ids runs behind that flush, so the map is current when
+      // re-checked; only an id still absent after the probe is a stale
+      // `previous`. The probe costs a flush, but only on this rare path.
       const withoutStalePrevious = async (documentWrites) => {
         if (!documentWrites.some((row) => row.previous)) return documentWrites;
         const state = await instance.internals?.statePromise;
         const metaIdMap = state?.firstIdx?.metaIdMap;
         if (!metaIdMap) return documentWrites;
+        const isAbsent = (row) =>
+          Boolean(row.previous) &&
+          !metaIdMap.has(row.document[instance.primaryPath]);
+        const unflushed = documentWrites
+          .filter(isAbsent)
+          .map((row) => row.document[instance.primaryPath]);
+        if (unflushed.length > 0) {
+          await findDocumentsById([...new Set(unflushed)], true);
+        }
         const stripped = [];
         const writes = documentWrites.map((row) => {
-          if (
-            !row.previous ||
-            metaIdMap.has(row.document[instance.primaryPath])
-          )
-            return row;
+          if (!isAbsent(row)) return row;
           stripped.push(row.document[instance.primaryPath]);
           return { document: row.document };
         });

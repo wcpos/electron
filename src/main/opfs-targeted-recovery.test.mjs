@@ -765,6 +765,55 @@ test("repairs a malformed record before retrying its pending write", async () =>
   }
 });
 
+// The storage files an insert into its in-memory indexes only when it flushes
+// pending writes — at the end of a write run, or before the next task that
+// touches the same id. An update that follows its own insert inside that
+// window sees the primary index without the id; stripping `previous` there
+// turns the update into a second insert, which the storage — having flushed
+// the first by the time it categorizes the write — reports as a 409. This is
+// the embedded web boot after Clear All Local Data: the credentials upsert
+// and the store-links patch land milliseconds apart on a fresh collection.
+test("keeps `previous` on an update that follows its own unflushed insert", async () => {
+  const basePath = await mkdtemp(
+    join(tmpdir(), "wcpos-targeted-pending-insert-"),
+  );
+  const credentials = document("credentials:fresh", 0);
+
+  try {
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const storage = withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    );
+    const instance = await storage.createStorageInstance(
+      storageParams("pending-insert"),
+    );
+    const insert = await instance.bulkWrite(
+      [{ document: credentials }],
+      "insert",
+    );
+    assert.deepEqual(insert.error, []);
+    const linked = {
+      ...credentials,
+      value: "linked",
+      _rev: "2-linked",
+      _meta: { lwt: credentials._meta.lwt + 1 },
+    };
+    // No additional flush or delay between the two writes: the update must
+    // reach the wrapper while the insert is still pending in the storage.
+    const update = await instance.bulkWrite(
+      [{ document: linked, previous: credentials }],
+      "update",
+    );
+    assert.deepEqual(update.error, []);
+    const current = await instance.findDocumentsById([credentials.id], false);
+    assert.equal(current[0]?._rev, "2-linked");
+    await instance.close();
+  } finally {
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
 test("refuses to recover a matching nested object as the whole document", async () => {
   const basePath = await mkdtemp(join(tmpdir(), "wcpos-targeted-refusal-"));
   const id = "product:nested";
