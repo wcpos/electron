@@ -774,7 +774,9 @@ test("repairs a malformed record before retrying its pending write", async () =>
 // the embedded web boot after Clear All Local Data: the credentials upsert
 // and the store-links patch land milliseconds apart on a fresh collection.
 test("keeps `previous` on an update that follows its own unflushed insert", async () => {
-  const basePath = await mkdtemp(join(tmpdir(), "wcpos-targeted-pending-insert-"));
+  const basePath = await mkdtemp(
+    join(tmpdir(), "wcpos-targeted-pending-insert-"),
+  );
   const credentials = document("credentials:fresh", 0);
 
   try {
@@ -797,8 +799,8 @@ test("keeps `previous` on an update that follows its own unflushed insert", asyn
       _rev: "2-linked",
       _meta: { lwt: credentials._meta.lwt + 1 },
     };
-    // No await between the two writes: the update must reach the wrapper
-    // while the insert is still pending in the storage.
+    // No additional flush or delay between the two writes: the update must
+    // reach the wrapper while the insert is still pending in the storage.
     const update = await instance.bulkWrite(
       [{ document: linked, previous: credentials }],
       "update",
