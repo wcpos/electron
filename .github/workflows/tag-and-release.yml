@@ -122,6 +122,10 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Uploads main-process source maps (webpack.main.config.ts). Unset →
+          # the build is byte-for-byte the pre-Sentry-maps build, so a missing
+          # secret degrades stack traces, never the release.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: pnpm run publish-app
 
   publish-macos-arm64:
@@ -193,6 +197,7 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           ARCH: arm64
         run: pnpm run publish-app -- --arch=arm64 --platform=darwin
 
@@ -260,6 +265,7 @@ jobs:
       - name: 🚀 Publish Windows release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: pnpm run publish-app
 
   validate-flathub-extra-data:
@@ -335,6 +341,7 @@ jobs:
       - name: 🚀 Publish Linux release (.deb / .rpm)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: pnpm run publish-app
 
       # --- Non-blocking Flatpak attempt below: every step is continue-on-error ---

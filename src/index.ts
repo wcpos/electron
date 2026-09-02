@@ -1,4 +1,4 @@
-import { app, BrowserWindow, net, powerMonitor } from 'electron';
+import { app, BrowserWindow, net, powerMonitor, session } from 'electron';
 
 import { type AppContext, boot, type BootDeps, recreateMainWindow } from './main/boot';
 import { initAuthHandler } from './main/auth-handler';
@@ -6,6 +6,7 @@ import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
 import { registerBluetoothSelection } from './main/bluetooth-select';
 import { registerScannerDeviceSelection } from './main/device-select';
+import { registerFrameHeaderRelaxation } from './main/frame-headers';
 import { logger } from './main/log';
 import { registerNovuBridge } from './main/novu';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
@@ -24,6 +25,7 @@ import './main/serial-printer';
 import './main/usb-printer';
 import './main/printer-discovery';
 import './main/open-external-url';
+import './main/telemetry-consent';
 
 registerNovuBridge();
 
@@ -47,6 +49,7 @@ if (require('electron-squirrel-startup')) {
 const bootDeps: BootDeps = {
 	whenReady: () =>
 		app.whenReady().then(() => {
+			registerFrameHeaderRelaxation(session.defaultSession);
 			// Route every main-process global fetch consumer (Novu SDK REST, translation
 			// catalogs, image cache) through Chromium's stack — system proxy + OS trust
 			// store — instead of Node's undici. net.fetch is only callable after ready.

@@ -85,6 +85,7 @@ async function main() {
 			configurable: true,
 		});
 		process.argv.push(`${APP_VERSION_ARG_PREFIX}0.0.0-test`);
+		process.argv.push('--wcpos-install-id=install-test');
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		require('./preload');
 	} finally {
@@ -102,6 +103,11 @@ async function main() {
 		exposedElectron.version,
 		'0.0.0-test',
 		'preload should expose the app version from Electron additionalArguments'
+	);
+	assert.equal(
+		exposedElectron.installId,
+		'install-test',
+		'preload should expose the install id from Electron additionalArguments'
 	);
 
 	const exposedIpcRenderer = exposures.ipcRenderer;

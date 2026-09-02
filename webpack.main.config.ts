@@ -1,9 +1,33 @@
+import { sentryWebpackPlugin } from '@sentry/webpack-plugin';
+
+import pkg from './package.json';
 import { rules } from './webpack.rules';
 
 import type { WebpackConfiguration } from '@electron-forge/plugin-webpack/dist/Config';
 
+// Main-process source maps for Sentry. Without a token every production stack
+// frame is `index.js:2:1953030` (what all 1.10.x reports look like). The publish
+// steps of .github/workflows/tag-and-release.yml supply SENTRY_AUTH_TOKEN; then
+// the maps are generated hidden (no sourceMappingURL comment), uploaded under
+// the same release name src/main/log.ts pins, and deleted before packaging so
+// they never ship. Any other build — dev, the CI smoke package — is unchanged.
+const SENTRY_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN;
+
 export const mainConfig: WebpackConfiguration = {
 	stats: 'errors-only',
+	...(SENTRY_AUTH_TOKEN ? { devtool: 'hidden-source-map' } : {}),
+	plugins: SENTRY_AUTH_TOKEN
+		? [
+				sentryWebpackPlugin({
+					authToken: SENTRY_AUTH_TOKEN,
+					org: 'wcpos',
+					project: 'woocommerce-pos',
+					release: { name: `WCPOS@${pkg.version}` },
+					sourcemaps: { filesToDeleteAfterUpload: ['.webpack/main/**/*.map'] },
+					telemetry: false,
+				}),
+			]
+		: [],
 	/**
 	 * This is the main entry point for your application, it's the first file
 	 * that runs in the main process.
