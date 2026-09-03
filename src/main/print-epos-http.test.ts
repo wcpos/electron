@@ -51,6 +51,7 @@ class FakeRequest extends EventEmitter {
 
 	destroy(): this {
 		this.destroyed = true;
+		queueMicrotask(() => this.emit('error', new Error('socket hang up')));
 		return this;
 	}
 }
@@ -58,6 +59,7 @@ class FakeRequest extends EventEmitter {
 const handlers = new Map<string, Handler>();
 const requests: { transport: 'http' | 'https'; request: FakeRequest }[] = [];
 const infoLogs: unknown[][] = [];
+const warnLogs: unknown[][] = [];
 let nextMode: 'success' | 'stream' = 'success';
 let nextResponseBody = Buffer.from('<ok/>');
 
@@ -96,7 +98,9 @@ mutableModule._load = function patchedLoad(
 				info(...args: unknown[]) {
 					infoLogs.push(args);
 				},
-				warn() {},
+				warn(...args: unknown[]) {
+					warnLogs.push(args);
+				},
 				debug() {},
 			},
 		};
@@ -189,6 +193,12 @@ const validRequest = {
 		const timedOut = requests[requests.length - 1]?.request;
 		assert.ok(timedOut);
 		assert.equal(timedOut.destroyed, true, 'requests are destroyed at the absolute deadline');
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.deepEqual(
+			warnLogs.map(([message]) => message),
+			['[print-epos-http] timeout'],
+			'a timed-out request should log exactly one terminal outcome'
+		);
 
 		console.log('print-epos-http assertions passed');
 	} finally {

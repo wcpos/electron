@@ -58,6 +58,7 @@ function detectVendor(service: MdnsServiceLike): 'epson' | 'star' | 'generic' {
 	return 'generic';
 }
 
+/** Maps an mDNS service advertisement to the raw TCP endpoint used for printing. */
 export function mapMdnsServiceToPrinter(service: MdnsServiceLike): DiscoveredNetworkPrinter | null {
 	const address = pickAddress(service);
 	if (!address) return null;
@@ -105,15 +106,11 @@ async function discoverPrinters(timeoutMs: number): Promise<DiscoveredNetworkPri
 	let upEvents = 0;
 	logger.info('[printer-discovery] scan started', { timeoutMs, serviceTypes: SERVICE_TYPES });
 
-	const bonjour = new Bonjour();
-	const browsers = SERVICE_TYPES.map((type) => bonjour.find({ type, protocol: 'tcp' }));
-	const printers = new Map<string, DiscoveredNetworkPrinter>();
 	const logMdnsError = (error: Error) =>
 		logger.warn('[printer-discovery] mDNS error', { message: error.message });
-	const bonjourEmitter = bonjour as Bonjour & {
-		on?: (event: string, listener: (error: Error) => void) => void;
-	};
-	bonjourEmitter.on?.('error', logMdnsError);
+	const bonjour = new Bonjour({}, logMdnsError);
+	const browsers = SERVICE_TYPES.map((type) => bonjour.find({ type, protocol: 'tcp' }));
+	const printers = new Map<string, DiscoveredNetworkPrinter>();
 
 	const stop = () => {
 		for (const browser of browsers) {
@@ -124,7 +121,6 @@ async function discoverPrinters(timeoutMs: number): Promise<DiscoveredNetworkPri
 	activeScan = { stop };
 
 	for (const browser of browsers) {
-		browser.on('error', logMdnsError);
 		browser.on('up', (service: MdnsServiceLike) => {
 			upEvents += 1;
 			logger.debug('[printer-discovery] service up', {

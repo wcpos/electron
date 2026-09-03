@@ -5,22 +5,28 @@ import Module from 'node:module';
 const handledChannels: string[] = [];
 const handlers = new Map<string, (event: unknown, args: unknown) => Promise<unknown>>();
 const infoLogs: unknown[][] = [];
+const warnLogs: unknown[][] = [];
 
 class FakeBrowser extends EventEmitter {
 	stop() {}
 }
 
-class FakeBonjour extends EventEmitter {
+class FakeBonjour {
 	static latest: FakeBonjour;
 	readonly browsers: FakeBrowser[] = [];
-	constructor() {
-		super();
+	constructor(
+		_options: Record<string, unknown> = {},
+		private readonly onError?: (error: Error) => void
+	) {
 		FakeBonjour.latest = this;
 	}
 	find() {
 		const browser = new FakeBrowser();
 		this.browsers.push(browser);
 		return browser;
+	}
+	triggerError(error: Error) {
+		this.onError?.(error);
 	}
 	destroy() {}
 }
@@ -54,7 +60,9 @@ mutableModule._load = function patchedLoad(
 				info(...args: unknown[]) {
 					infoLogs.push(args);
 				},
-				warn() {},
+				warn(...args: unknown[]) {
+					warnLogs.push(args);
+				},
 				debug() {},
 			},
 		};
@@ -166,6 +174,12 @@ try {
 	const handler = handlers.get('printer-discovery');
 	assert.ok(handler);
 	const scan = handler(null, { action: 'start', timeoutMs: 250 });
+	FakeBonjour.latest.triggerError(new Error('socket failed'));
+	assert.deepEqual(
+		warnLogs,
+		[['[printer-discovery] mDNS error', { message: 'socket failed' }]],
+		'a shared mDNS error should be logged once through the Bonjour error callback'
+	);
 	FakeBonjour.latest.browsers[0].emit('up', {
 		name: 'Logged printer',
 		type: 'ipp',

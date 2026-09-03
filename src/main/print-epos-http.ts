@@ -40,6 +40,7 @@ handleIpc('print-epos-http', async (_event, args) => {
 
 	return new Promise<{ status: number; body: string }>((resolve, reject) => {
 		let deadline: ReturnType<typeof setTimeout> | undefined;
+		let completed = false;
 		const clearDeadline = () => deadline && clearTimeout(deadline);
 		const warn = (outcome: string, error: unknown) =>
 			logger.warn(`[print-epos-http] ${outcome}`, {
@@ -72,11 +73,15 @@ handleIpc('print-epos-http', async (_event, args) => {
 					bodyBytes += capped.length;
 				});
 				response.on('error', (error) => {
+					if (completed) return;
+					completed = true;
 					clearDeadline();
 					warn('socket error', error);
 					reject(error);
 				});
 				response.on('end', () => {
+					if (completed) return;
+					completed = true;
 					clearDeadline();
 					const status = response.statusCode ?? 0;
 					const body = Buffer.concat(chunks, bodyBytes).toString('utf8');
@@ -96,11 +101,15 @@ handleIpc('print-epos-http', async (_event, args) => {
 		);
 
 		request.on('error', (error) => {
+			if (completed) return;
+			completed = true;
 			clearDeadline();
 			warn('socket error', error);
 			reject(error);
 		});
 		deadline = setTimeout(() => {
+			if (completed) return;
+			completed = true;
 			request.destroy();
 			const error = new Error(`EPOS HTTP request to ${host}:${port} timed out`);
 			warn('timeout', error);
