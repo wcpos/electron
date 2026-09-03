@@ -37,7 +37,7 @@
 		"publish-app": "pnpm run patch:premium && electron-forge publish",
 		"lint": "eslint src --ext .js,.jsx,.ts,.tsx",
 		"lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
-		"test": "pnpm run test:resurrection-patch && pnpm run test:containment-patch && pnpm run test:replay-safety-patch && pnpm run test:changes-file-salvage-patch && pnpm run test:dev-expo && pnpm run test:smoke-packaged-unit && pnpm run test:http-bridge && pnpm run test:preload && pnpm run test:novu && pnpm run test:printer-discovery && pnpm run test:winspool-printer && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache && pnpm run test:external-window-isolation && pnpm run test:frame-headers && pnpm run test:package-runtime-externals && pnpm run test:bluetooth-select && pnpm run test:device-select && pnpm run test:serial-printer && pnpm run test:raw-print && pnpm run test:print-raw-tcp && pnpm run test:print-epos-http && pnpm run test:boot && pnpm run test:opfs-recovery && pnpm run test:storage-measure && pnpm run test:rxdb-storage-telemetry && pnpm run test:sentry-hygiene",
+		"test": "pnpm run test:resurrection-patch && pnpm run test:containment-patch && pnpm run test:replay-safety-patch && pnpm run test:changes-file-salvage-patch && pnpm run test:dev-expo && pnpm run test:smoke-packaged-unit && pnpm run test:http-bridge && pnpm run test:preload && pnpm run test:novu && pnpm run test:printer-discovery && pnpm run test:winspool-printer && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache && pnpm run test:external-window-isolation && pnpm run test:frame-headers && pnpm run test:package-runtime-externals && pnpm run test:bluetooth-select && pnpm run test:device-select && pnpm run test:serial-printer && pnpm run test:raw-print && pnpm run test:print-raw-tcp && pnpm run test:print-epos-http && pnpm run test:boot && pnpm run test:opfs-recovery && pnpm run test:storage-measure && pnpm run test:rxdb-storage-telemetry && pnpm run test:sentry-hygiene && pnpm run test:renderer-log",
 		"ts:check": "tsc --noEmit",
 		"test:http-bridge": "ts-node src/main/http-bridge.test.ts",
 		"test:preload": "ts-node src/preload.test.ts",
@@ -59,6 +59,7 @@
 		"test:print-epos-http": "ts-node src/main/print-epos-http.test.ts",
 		"test:boot": "ts-node src/main/boot.test.ts",
 		"test:sentry-hygiene": "ts-node --files src/main/sentry-hygiene.test.ts",
+		"test:renderer-log": "ts-node src/main/log.test.ts",
 		"test:opfs-recovery": "node --test src/main/opfs-targeted-recovery.cleanup.test.mjs src/main/opfs-targeted-recovery.test.mjs",
 		"test:smoke-packaged": "node scripts/smoke-packaged-app.mjs"
 	},
