@@ -62,7 +62,9 @@ function setSentryEnabled(enabled: boolean): void {
 export const enableSentry = () => setSentryEnabled(true);
 export const disableSentry = () => setSentryEnabled(false);
 
-logger.transports.file.level = isDevelopment ? 'debug' : 'error';
+// Production keeps info so the printer handlers' one-line-per-job diagnostics (Spec F,
+// wcpos/monorepo#1597) reach a merchant's main.log; the chatty http-bridge lines are debug.
+logger.transports.file.level = isDevelopment ? 'debug' : 'info';
 logger.transports.console.level = isDevelopment ? 'debug' : 'error';
 
 // Prevent EPIPE errors on stdout/stderr from becoming uncaught exceptions.
