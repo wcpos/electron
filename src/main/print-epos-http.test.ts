@@ -51,12 +51,15 @@ class FakeRequest extends EventEmitter {
 
 	destroy(): this {
 		this.destroyed = true;
+		queueMicrotask(() => this.emit('error', new Error('socket hang up')));
 		return this;
 	}
 }
 
 const handlers = new Map<string, Handler>();
 const requests: { transport: 'http' | 'https'; request: FakeRequest }[] = [];
+const infoLogs: unknown[][] = [];
+const warnLogs: unknown[][] = [];
 let nextMode: 'success' | 'stream' = 'success';
 let nextResponseBody = Buffer.from('<ok/>');
 
@@ -89,7 +92,18 @@ mutableModule._load = function patchedLoad(
 		};
 	}
 	if (request === './log') {
-		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
+		return {
+			logger: {
+				error() {},
+				info(...args: unknown[]) {
+					infoLogs.push(args);
+				},
+				warn(...args: unknown[]) {
+					warnLogs.push(args);
+				},
+				debug() {},
+			},
+		};
 	}
 	if (request === 'http') return fakeTransport('http');
 	if (request === 'https') return fakeTransport('https');
@@ -151,6 +165,21 @@ const validRequest = {
 		const capped = (await handler(null, validRequest)) as { body: string };
 		assert.equal(Buffer.byteLength(capped.body), 1024 * 1024);
 
+		nextResponseBody = Buffer.from('<response success="true" code="OK" status="printed"/>');
+		await handler(null, validRequest);
+		assert.ok(
+			infoLogs.some(
+				([message, fields]) =>
+					message === '[print-epos-http] outcome' &&
+					(fields as { httpStatus?: number }).httpStatus === 201 &&
+					(fields as { success?: string }).success === 'true' &&
+					(fields as { code?: string }).code === 'OK' &&
+					(fields as { status?: string }).status === 'printed' &&
+					typeof (fields as { elapsedMs?: number }).elapsedMs === 'number'
+			),
+			'EPOS HTTP outcome should be logged'
+		);
+
 		nextMode = 'stream';
 		await assert.rejects(
 			Promise.race([
@@ -164,6 +193,12 @@ const validRequest = {
 		const timedOut = requests[requests.length - 1]?.request;
 		assert.ok(timedOut);
 		assert.equal(timedOut.destroyed, true, 'requests are destroyed at the absolute deadline');
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.deepEqual(
+			warnLogs.map(([message]) => message),
+			['[print-epos-http] timeout'],
+			'a timed-out request should log exactly one terminal outcome'
+		);
 
 		console.log('print-epos-http assertions passed');
 	} finally {

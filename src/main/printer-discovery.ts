@@ -58,6 +58,7 @@ function detectVendor(service: MdnsServiceLike): 'epson' | 'star' | 'generic' {
 	return 'generic';
 }
 
+/** Maps an mDNS service advertisement to the raw TCP endpoint used for printing. */
 export function mapMdnsServiceToPrinter(service: MdnsServiceLike): DiscoveredNetworkPrinter | null {
 	const address = pickAddress(service);
 	if (!address) return null;
@@ -101,8 +102,13 @@ function stopActiveScan(): void {
 
 async function discoverPrinters(timeoutMs: number): Promise<DiscoveredNetworkPrinter[]> {
 	stopActiveScan();
+	const startedAt = Date.now();
+	let upEvents = 0;
+	logger.info('[printer-discovery] scan started', { timeoutMs, serviceTypes: SERVICE_TYPES });
 
-	const bonjour = new Bonjour();
+	const logMdnsError = (error: Error) =>
+		logger.warn('[printer-discovery] mDNS error', { message: error.message });
+	const bonjour = new Bonjour({}, logMdnsError);
 	const browsers = SERVICE_TYPES.map((type) => bonjour.find({ type, protocol: 'tcp' }));
 	const printers = new Map<string, DiscoveredNetworkPrinter>();
 
@@ -116,8 +122,22 @@ async function discoverPrinters(timeoutMs: number): Promise<DiscoveredNetworkPri
 
 	for (const browser of browsers) {
 		browser.on('up', (service: MdnsServiceLike) => {
+			upEvents += 1;
+			logger.debug('[printer-discovery] service up', {
+				type: service.type,
+				name: service.name,
+				host: service.host,
+				port: service.port,
+				ipv4: service.addresses?.find(isIpv4),
+				txtTy: service.txt?.ty,
+			});
 			const printer = mapMdnsServiceToPrinter(service);
 			if (printer) printers.set(printer.id, printer);
+			else
+				logger.debug('[printer-discovery] service dropped', {
+					type: service.type,
+					name: service.name,
+				});
 		});
 	}
 
@@ -131,7 +151,13 @@ async function discoverPrinters(timeoutMs: number): Promise<DiscoveredNetworkPri
 			stop: () => {
 				clearTimeout(timer);
 				stop();
-				resolve([...printers.values()]);
+				const result = [...printers.values()];
+				logger.info('[printer-discovery] scan ended', {
+					elapsedMs: Date.now() - startedAt,
+					upEvents,
+					printersMapped: result.length,
+				});
+				resolve(result);
 			},
 		};
 	});
@@ -148,7 +174,7 @@ handleIpc('printer-discovery', async (_event, args) => {
 		return await discoverPrinters(request.timeoutMs);
 	} catch (error) {
 		stopActiveScan();
-		logger.error('Printer discovery failed', error);
+		logger.error('[printer-discovery] failed', error);
 		throw error;
 	}
 });

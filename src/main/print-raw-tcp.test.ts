@@ -38,6 +38,7 @@ class FakeSocket extends EventEmitter {
 }
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
+const infoLogs: unknown[][] = [];
 const mutableModule = Module as ModuleWithMutableLoad;
 const originalLoad = mutableModule._load;
 
@@ -57,7 +58,16 @@ mutableModule._load = function patchedLoad(
 		};
 	}
 	if (request === './log') {
-		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
+		return {
+			logger: {
+				error() {},
+				info(...args: unknown[]) {
+					infoLogs.push(args);
+				},
+				warn() {},
+				debug() {},
+			},
+		};
 	}
 	return originalLoad.call(this, request, parent, isMain);
 };
@@ -108,6 +118,16 @@ mutableModule._load = function patchedLoad(
 		// Invalid payloads are rejected before a socket exists, so nothing leaks.
 		const handler = handlers.get('print-raw-tcp');
 		assert.ok(handler, 'print-raw-tcp handler should be registered');
+		await handler(null, { host: '192.168.1.50', port: 9100, data: [0x1b, 0x40] });
+		assert.ok(
+			infoLogs.some(
+				([message, fields]) =>
+					message === '[print-raw-tcp] outcome' &&
+					(fields as { outcome?: string }).outcome === 'ok' &&
+					typeof (fields as { elapsedMs?: number }).elapsedMs === 'number'
+			),
+			'raw TCP outcome should be logged'
+		);
 		const before = FakeSocket.instances.length;
 		await assert.rejects(
 			Promise.resolve(handler(null, { host: '192.168.1.50', port: 9100, data: 'not-bytes' })),

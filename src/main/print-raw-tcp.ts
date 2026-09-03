@@ -1,6 +1,7 @@
 import * as net from 'net';
 
 import { handleIpc } from './ipc';
+import { logger } from './log';
 import { type Delivery, sendRawPrint } from './raw-print';
 
 const TCP_PRINT_TIMEOUT_MS = 10_000;
@@ -66,5 +67,15 @@ handleIpc('print-raw-tcp', async (_event, args) => {
 	if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
 		throw new Error('Invalid port: must be an integer between 1 and 65535');
 	}
-	return sendRawPrint({ data }, createTcpDelivery(host, port));
+	const startedAt = Date.now();
+	try {
+		await sendRawPrint({ data }, createTcpDelivery(host, port));
+		logger.info('[print-raw-tcp] outcome', { outcome: 'ok', elapsedMs: Date.now() - startedAt });
+	} catch (error) {
+		logger.info('[print-raw-tcp] outcome', {
+			outcome: error instanceof Error ? error.name : 'Error',
+			elapsedMs: Date.now() - startedAt,
+		});
+		throw error;
+	}
 });
