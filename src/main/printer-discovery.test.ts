@@ -1,12 +1,35 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import Module from 'node:module';
 
 const handledChannels: string[] = [];
+const handlers = new Map<string, (event: unknown, args: unknown) => Promise<unknown>>();
+const infoLogs: unknown[][] = [];
+
+class FakeBrowser extends EventEmitter {
+	stop() {}
+}
+
+class FakeBonjour extends EventEmitter {
+	static latest: FakeBonjour;
+	readonly browsers: FakeBrowser[] = [];
+	constructor() {
+		super();
+		FakeBonjour.latest = this;
+	}
+	find() {
+		const browser = new FakeBrowser();
+		this.browsers.push(browser);
+		return browser;
+	}
+	destroy() {}
+}
 
 const electronMock = {
 	ipcMain: {
-		handle(channel: string) {
+		handle(channel: string, handler: (event: unknown, args: unknown) => Promise<unknown>) {
 			handledChannels.push(channel);
+			handlers.set(channel, handler);
 		},
 	},
 };
@@ -23,8 +46,18 @@ mutableModule._load = function patchedLoad(
 	isMain: boolean
 ) {
 	if (request === 'electron') return electronMock;
+	if (request === 'bonjour-service') return FakeBonjour;
 	if (request === './log') {
-		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
+		return {
+			logger: {
+				error() {},
+				info(...args: unknown[]) {
+					infoLogs.push(args);
+				},
+				warn() {},
+				debug() {},
+			},
+		};
 	}
 	return originalLoad.call(this, request, parent, isMain);
 };
@@ -129,8 +162,34 @@ try {
 		null,
 		'services without host/address should be ignored'
 	);
+
+	const handler = handlers.get('printer-discovery');
+	assert.ok(handler);
+	const scan = handler(null, { action: 'start', timeoutMs: 250 });
+	FakeBonjour.latest.browsers[0].emit('up', {
+		name: 'Logged printer',
+		type: 'ipp',
+		port: 631,
+		addresses: ['192.168.1.80'],
+	});
+	scan
+		.then(() => {
+			assert.ok(
+				infoLogs.some(
+					([message, fields]) =>
+						message === '[printer-discovery] scan ended' &&
+						(fields as { upEvents?: number }).upEvents === 1 &&
+						(fields as { printersMapped?: number }).printersMapped === 1 &&
+						typeof (fields as { elapsedMs?: number }).elapsedMs === 'number'
+				),
+				'scan outcome should be logged'
+			);
+			console.log('printer discovery assertions passed');
+		})
+		.catch((error) => {
+			console.error(error);
+			process.exitCode = 1;
+		});
 } finally {
 	mutableModule._load = originalLoad;
 }
-
-console.log('printer discovery assertions passed');

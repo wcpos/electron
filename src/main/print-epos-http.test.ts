@@ -57,6 +57,7 @@ class FakeRequest extends EventEmitter {
 
 const handlers = new Map<string, Handler>();
 const requests: { transport: 'http' | 'https'; request: FakeRequest }[] = [];
+const infoLogs: unknown[][] = [];
 let nextMode: 'success' | 'stream' = 'success';
 let nextResponseBody = Buffer.from('<ok/>');
 
@@ -89,7 +90,16 @@ mutableModule._load = function patchedLoad(
 		};
 	}
 	if (request === './log') {
-		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
+		return {
+			logger: {
+				error() {},
+				info(...args: unknown[]) {
+					infoLogs.push(args);
+				},
+				warn() {},
+				debug() {},
+			},
+		};
 	}
 	if (request === 'http') return fakeTransport('http');
 	if (request === 'https') return fakeTransport('https');
@@ -150,6 +160,21 @@ const validRequest = {
 		nextResponseBody = Buffer.alloc(1024 * 1024 + 20, 97);
 		const capped = (await handler(null, validRequest)) as { body: string };
 		assert.equal(Buffer.byteLength(capped.body), 1024 * 1024);
+
+		nextResponseBody = Buffer.from('<response success="true" code="OK" status="printed"/>');
+		await handler(null, validRequest);
+		assert.ok(
+			infoLogs.some(
+				([message, fields]) =>
+					message === '[print-epos-http] outcome' &&
+					(fields as { httpStatus?: number }).httpStatus === 201 &&
+					(fields as { success?: string }).success === 'true' &&
+					(fields as { code?: string }).code === 'OK' &&
+					(fields as { status?: string }).status === 'printed' &&
+					typeof (fields as { elapsedMs?: number }).elapsedMs === 'number'
+			),
+			'EPOS HTTP outcome should be logged'
+		);
 
 		nextMode = 'stream';
 		await assert.rejects(
