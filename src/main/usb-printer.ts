@@ -14,6 +14,8 @@ import {
 	parseTarget,
 } from '@wcpos/printer/transport/device-key';
 
+import { ipcMain } from 'electron';
+
 import { handleIpc } from './ipc';
 import { logger } from './log';
 import { type Delivery, rawPrintBufferFromData, sendRawBytes } from './raw-print';
@@ -164,7 +166,10 @@ function findUsbDevice(key: string): Device | undefined {
 	);
 }
 
-handleIpc('usb-query-model', async (_event, args: { device: string }): Promise<string | null> => {
+// Registered on ipcMain directly: the typed channel ('usb-query-model' in
+// packages/printer/src/ipc/channels.cts) lands with wcpos/monorepo#1884; until that merges the
+// renderer allowlist does not carry it and the helper simply gets null.
+ipcMain.handle('usb-query-model', async (_event, args: { device: string }): Promise<string | null> => {
 	const startedAt = Date.now();
 	const device = findUsbDevice(args.device);
 	if (!device) {
