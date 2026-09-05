@@ -1,3 +1,4 @@
+import { ipcMain } from 'electron';
 import {
 	type Device,
 	type Endpoint,
@@ -13,8 +14,6 @@ import {
 	connectionTypeForTarget,
 	parseTarget,
 } from '@wcpos/printer/transport/device-key';
-
-import { ipcMain } from 'electron';
 
 import { handleIpc } from './ipc';
 import { logger } from './log';
