@@ -23,32 +23,31 @@ const countWindows = () => {
 
 /**
  * Sentry is off until the merchant opts in (src/main/telemetry-consent.ts).
- * The SDK is initialised once — @sentry/electron registers IPC and protocol
- * handlers that cannot be registered twice — and afterwards toggled through
+ * The SDK is initialised disabled at module load, before app ready. Its IPC and protocol
+ * handlers cannot be registered twice; afterwards it is toggled through
  * the client's `enabled` option, which every capture and envelope send checks.
  */
-let sentryInitialised = false;
+if (!isDevelopment) {
+	Sentry.init({
+		enabled: false,
+		dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733',
+		// Pinned rather than left to the SDK's `${app.name}@${version}` default so it
+		// is identical by construction to the release the main-process source maps
+		// are uploaded under (webpack.main.config.ts).
+		release: `WCPOS@${app.getVersion()}`,
+		sendDefaultPii: false,
+		beforeSend(event) {
+			return shouldDropEvent(event, { quitting, windowsAlive: countWindows() }) ? null : event;
+		},
+		// electron.net breadcrumbs carry the full request URL, i.e. the merchant's
+		// store hostname. Keep the path, drop the origin.
+		beforeBreadcrumb: scrubBreadcrumbUrl,
+	});
+}
 
 function setSentryEnabled(enabled: boolean): void {
 	if (isDevelopment) {
 		return;
-	}
-	if (enabled && !sentryInitialised) {
-		Sentry.init({
-			dsn: 'https://39233e9d1e5046cbb67dae52f807de5f@o159038.ingest.sentry.io/1220733',
-			// Pinned rather than left to the SDK's `${app.name}@${version}` default so it
-			// is identical by construction to the release the main-process source maps
-			// are uploaded under (webpack.main.config.ts).
-			release: `WCPOS@${app.getVersion()}`,
-			sendDefaultPii: false,
-			beforeSend(event) {
-				return shouldDropEvent(event, { quitting, windowsAlive: countWindows() }) ? null : event;
-			},
-			// electron.net breadcrumbs carry the full request URL, i.e. the merchant's
-			// store hostname. Keep the path, drop the origin.
-			beforeBreadcrumb: scrubBreadcrumbUrl,
-		});
-		sentryInitialised = true;
 	}
 	const client = Sentry.getClient();
 	if (client) {

@@ -17,6 +17,7 @@ import { logger, Sentry } from './log';
  * class of damage can be tracked per release under the `rxdb-fs` subsystem.
  */
 const SUBSYSTEM = 'rxdb-fs';
+const capturedEvents = new Set<string>();
 
 /**
  * The kind vocabulary and how each reports. The producers cannot import this
@@ -24,14 +25,15 @@ const SUBSYSTEM = 'rxdb-fs';
  * a minified string), so this is the registry: a kind missing here reports at
  * `error`, which is the safe default for anything unrecognised.
  *
- *   - healed outcomes are warnings: the storage repaired itself
- *   - refusals, discards and terminal failures are errors: data or a write was
+ *   - healed outcomes and disposable log-row discards are warnings
+ *   - refusals, other discards and terminal failures are errors: data or a write was
  *     lost, or a run died
  */
 export const KIND_LEVELS: Readonly<Record<string, 'warning' | 'error'>> = {
 	'index-rebuilt': 'warning',
 	'changes-file-salvage': 'warning',
 	'hollow-row-dropped': 'warning',
+	'log-row-discarded': 'warning',
 	'stale-secondary-dropped': 'warning',
 	'count-recovery': 'warning',
 	'changes-file-discarded': 'error',
@@ -134,6 +136,9 @@ function report(
 	const collection = target.split('/')[1] ?? 'unknown';
 	const extra = { target, ...redactDetails(details), cause: describe(error) };
 	logger[level === 'error' ? 'error' : 'warn'](`[${SUBSYSTEM}] ${code}`, extra);
+	const key = JSON.stringify([code, target, details.id ?? describe(error)]);
+	if (capturedEvents.has(key)) return;
+	capturedEvents.add(key);
 	return capture(event, {
 		level,
 		tags: {

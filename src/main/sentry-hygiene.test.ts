@@ -23,6 +23,9 @@ class FakeStore {
 // electron-log, dialog) at import; stub both so the pure transition is testable.
 const ipcListeners = new Map<string, (...args: unknown[]) => void>();
 const electronStub = {
+	app: { on() {}, getVersion: () => 'test' },
+	BrowserWindow: { getAllWindows: (): unknown[] => [] },
+	dialog: {},
 	ipcMain: {
 		on(channel: string, listener: (...args: unknown[]) => void) {
 			ipcListeners.set(channel, listener);
@@ -36,6 +39,20 @@ const logStub = {
 	logger: { warn: (message: string) => logCalls.push(`warn:${message}`), info() {}, error() {} },
 };
 
+const initCalls: { enabled?: boolean }[] = [];
+const users: unknown[] = [];
+const sentryStub = {
+	init: (options: { enabled?: boolean }) => initCalls.push(options),
+	getClient: () => ({ getOptions: () => initCalls[0] }),
+	setUser: (user: unknown) => users.push(user),
+};
+const loggerStub = {
+	transports: { file: {}, console: {} },
+	initialize() {},
+	errorHandler: { startCatching() {} },
+	error() {},
+};
+const originalNodeEnv = process.env.NODE_ENV;
 const mutableModule = Module as ModuleWithMutableLoad;
 const originalLoad = mutableModule._load;
 mutableModule._load = function patchedLoad(
@@ -43,6 +60,8 @@ mutableModule._load = function patchedLoad(
 	parent: NodeModule | null,
 	isMain: boolean
 ) {
+	if (request === '@sentry/electron/main') return sentryStub;
+	if (request === 'electron-log/main') return loggerStub;
 	if (request === 'electron-store') {
 		return { __esModule: true, default: FakeStore };
 	}
@@ -210,7 +229,27 @@ try {
 		'never drops other errors, even during shutdown'
 	);
 
+	// Loading log must initialise disabled before any later consent transition.
+	process.env.NODE_ENV = 'production';
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- load real log after stubbing dependencies
+	const { enableSentry, disableSentry } = require('./log.ts') as typeof import('./log');
+	assert.equal(initCalls.length, 1, 'initialises at module load');
+	assert.equal(initCalls[0].enabled, false);
+	enableSentry();
+	assert.equal(initCalls.length, 1, 'consent never reinitialises the SDK');
+	assert.equal(initCalls[0].enabled, true);
+	assert.deepEqual(users, [{ id: getInstallId() }]);
+	disableSentry();
+	assert.equal(initCalls[0].enabled, false);
+	assert.equal(users[1], null);
+	assert.equal(initCalls.length, 1);
+
 	console.log('sentry-hygiene tests passed');
+} catch (error) {
+	console.error(error);
+	process.exitCode = 1;
 } finally {
 	mutableModule._load = originalLoad;
+	if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+	else process.env.NODE_ENV = originalNodeEnv;
 }

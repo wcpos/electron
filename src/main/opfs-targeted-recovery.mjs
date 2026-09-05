@@ -181,7 +181,8 @@ async function dropWhitespaceRows(instance) {
 // range holds something other than whitespace (a foreign document or junk
 // that happened to parse): that is a stale-range problem, not a hollow row,
 // and is refused rather than guessed.
-async function dropHollowRows(instance, documentIds) {
+// Disposable log rows may also be discarded when their range holds foreign bytes.
+async function dropHollowRows(instance, documentIds, discardLogRows = false) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const outcomes = new Map();
@@ -193,7 +194,10 @@ async function dropHollowRows(instance, documentIds) {
         continue;
       }
       const [, start, end] = primaryRow;
-      if (instance._decode(await accessHandle.read(start, end)).trim() !== "") {
+      if (
+        !discardLogRows &&
+        instance._decode(await accessHandle.read(start, end)).trim() !== ""
+      ) {
         outcomes.set(documentId, "range-holds-foreign-bytes");
         continue;
       }
@@ -498,7 +502,13 @@ export function withTargetedOpfsRecovery(storage) {
           return refused;
         }
         for (const [id, outcome] of await dropHollowRows(instance, hollow)) {
-          if (typeof outcome === "string") {
+          if (
+            params.collectionName === "logs" &&
+            outcome === "range-holds-foreign-bytes"
+          ) {
+            await dropHollowRows(instance, [id], true);
+            report("log-row-discarded", { target, id, reason: outcome });
+          } else if (typeof outcome === "string") {
             refused.push({ id, reason: outcome });
             report("hollow-row-refused", { target, id, reason: outcome });
           } else if (outcome) {
@@ -522,6 +532,18 @@ export function withTargetedOpfsRecovery(storage) {
             onMalformedBatch?.();
             if (batch.length === 1) {
               const failure = await repairDocument(instance, batch[0]);
+              if (
+                params.collectionName === "logs" &&
+                failure === "no-valid-document"
+              ) {
+                await dropHollowRows(instance, batch, true);
+                report("log-row-discarded", {
+                  target,
+                  id: batch[0],
+                  reason: failure,
+                });
+                return true;
+              }
               if (typeof failure === "string") {
                 error.message += `; targeted recovery failed for ${batch[0]}: ${failure}`;
                 throw error;

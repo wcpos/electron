@@ -24,7 +24,7 @@ mutableModule._load = function patchedLoad(
 		return loggerStub;
 	}
 	if (request === '@sentry/electron/main') {
-		return { getClient: (): undefined => undefined, setUser(): void {} };
+		return { init(): void {}, getClient: (): undefined => undefined, setUser(): void {} };
 	}
 	if (request === 'electron') {
 		return {

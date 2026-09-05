@@ -58,6 +58,7 @@ async function main() {
 		'hollow-row-refused',
 		'index-rebuilt',
 		'index-reconcile-refused',
+		'log-row-discarded',
 		'stale-secondary-dropped',
 		'stale-secondary-refused',
 		'task-queue-run-failed',
@@ -192,6 +193,20 @@ async function main() {
 		logged.map(({ level }) => level),
 		['error', 'warn', 'warn', 'error', 'warn', 'error', 'error', 'error']
 	);
+
+	const discarded = {
+		kind: 'log-row-discarded',
+		target: 'store_v6_abc/logs',
+		id: 'first',
+		reason: 'no-valid-document',
+	};
+	seams.__wcposOnStorageRecovery!(discarded);
+	seams.__wcposOnStorageRecovery!(discarded);
+	assert.equal(captured.length, 9, 'identical reports capture once');
+	assert.equal(captured[8].context.level, 'warning');
+	seams.__wcposOnStorageRecovery!({ ...discarded, id: 'second' });
+	assert.equal(captured.length, 10, 'a distinct id captures again');
+	assert.equal(logged.length, 11, 'every report still logs');
 
 	delete seams.__wcposOnStorageRunFailure;
 	delete seams.__wcposOnIndexRebuild;
