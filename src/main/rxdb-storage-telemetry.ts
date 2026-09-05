@@ -17,6 +17,16 @@ import { logger, Sentry } from './log';
  * class of damage can be tracked per release under the `rxdb-fs` subsystem.
  */
 const SUBSYSTEM = 'rxdb-fs';
+/**
+ * One Sentry capture per distinct event per process: the electron-log line
+ * fires every time, the capture only the first. Keyed on the code, target and
+ * the redacted details, so two damaged rows in one collection are two events
+ * but one row reported on every cleanup pass is one. Cleared when it reaches
+ * the cap — a process that has produced a thousand distinct storage events is
+ * already reporting far more than Sentry needs, and forgetting the oldest
+ * keys costs at most a repeated capture, never a lost one.
+ */
+const CAPTURED_EVENT_KEYS_MAX = 1000;
 const capturedEvents = new Set<string>();
 
 /**
@@ -136,8 +146,13 @@ function report(
 	const collection = target.split('/')[1] ?? 'unknown';
 	const extra = { target, ...redactDetails(details), cause: describe(error) };
 	logger[level === 'error' ? 'error' : 'warn'](`[${SUBSYSTEM}] ${code}`, extra);
-	const key = JSON.stringify([code, target, details.id ?? describe(error)]);
+	// Reporting is consent-gated (log.ts): while the client is disabled nothing
+	// is sent, so the key must not be recorded either or the first event after
+	// consent would be swallowed as a duplicate.
+	if (Sentry.getClient?.()?.getOptions().enabled === false) return;
+	const key = JSON.stringify([code, target, extra]);
 	if (capturedEvents.has(key)) return;
+	if (capturedEvents.size >= CAPTURED_EVENT_KEYS_MAX) capturedEvents.clear();
 	capturedEvents.add(key);
 	return capture(event, {
 		level,

@@ -101,7 +101,8 @@ for (const collectionName of ["logs", "orders"]) {
         },
         internals: { statePromise: Promise.resolve(state) },
         taskQueue: {
-          runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
+          runCleanup: async (operation) =>
+            operation({ accessHandlers: new Map() }),
         },
         _decode: (value) => value.toString(),
       };
@@ -132,13 +133,21 @@ for (const collectionName of ["logs", "orders"]) {
         assert.equal(operations.length, collectionName === "logs" ? 2 : 0);
         if (collectionName === "logs") {
           assert.ok(operations.every((operation) => operation[2] === "D"));
-          assert.deepEqual(events, [{
-            kind: "log-row-discarded", target: "store_v6_test/logs", id, reason,
-          }]);
+          assert.deepEqual(events, [
+            {
+              kind: "log-row-discarded",
+              target: "store_v6_test/logs",
+              id,
+              reason,
+            },
+          ]);
         } else if (reason === "range-holds-foreign-bytes") {
-          assert.ok(events.some((event) =>
-            event.kind === "hollow-row-refused" && event.reason === reason,
-          ));
+          assert.ok(
+            events.some(
+              (event) =>
+                event.kind === "hollow-row-refused" && event.reason === reason,
+            ),
+          );
         }
       } finally {
         globalThis.__wcposOnStorageRecovery = previousHook;
