@@ -169,63 +169,66 @@ function findUsbDevice(key: string): Device | undefined {
 // Registered on ipcMain directly: the typed channel ('usb-query-model' in
 // packages/printer/src/ipc/channels.cts) lands with wcpos/monorepo#1884; until that merges the
 // renderer allowlist does not carry it and the helper simply gets null.
-ipcMain.handle('usb-query-model', async (_event, args: { device: string }): Promise<string | null> => {
-	const startedAt = Date.now();
-	const device = findUsbDevice(args.device);
-	if (!device) {
-		logger.info(`[usb] model query: ${args.device} not present`);
-		return null;
-	}
-	let iface: UsbInterface | undefined;
-	let claimed = false;
-	try {
-		device.open();
-		iface = device.interfaces?.find((i) => i.descriptor.bInterfaceClass === USB_PRINTER_CLASS);
-		if (!iface) throw new Error('no printer-class interface');
-		if (process.platform === 'linux' && iface.isKernelDriverActive()) iface.detachKernelDriver();
-		iface.claim();
-		claimed = true;
-		const out = iface.endpoints.find(
-			(e: Endpoint) => e.direction === 'out' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
-		) as OutEndpoint | undefined;
-		const inEndpoint = iface.endpoints.find(
-			(e: Endpoint) => e.direction === 'in' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
-		) as InEndpoint | undefined;
-		if (!out || !inEndpoint) throw new Error('no bulk IN/OUT endpoint pair');
-		inEndpoint.timeout = USB_MODEL_QUERY_TIMEOUT_MS;
-		await new Promise<void>((resolve, reject) => {
-			out.transfer(GS_I_MODEL_NAME, (err) => (err ? reject(err) : resolve()));
-		});
-		const reply = await new Promise<Buffer>((resolve, reject) => {
-			inEndpoint.transfer(USB_MODEL_REPLY_BYTES, (err, data) =>
-				err ? reject(err) : resolve(data ?? Buffer.alloc(0))
-			);
-		});
-		const model = parseUsbModelReply(reply);
-		logger.info(
-			`[usb] model query ${args.device}: ${model ?? '(no answer)'} in ${Date.now() - startedAt}ms`
-		);
-		return model;
-	} catch (err) {
-		logger.info(`[usb] model query ${args.device} failed: ${String(err)}`);
-		return null;
-	} finally {
-		if (iface && claimed) {
-			await new Promise<void>((resolve) => {
-				try {
-					iface?.release(true, () => resolve());
-				} catch {
-					resolve();
-				}
-			});
+ipcMain.handle(
+	'usb-query-model',
+	async (_event, args: { device: string }): Promise<string | null> => {
+		const startedAt = Date.now();
+		const device = findUsbDevice(args.device);
+		if (!device) {
+			logger.info(`[usb] model query: ${args.device} not present`);
+			return null;
 		}
+		let iface: UsbInterface | undefined;
+		let claimed = false;
 		try {
-			device.close();
-		} catch {
-			// already closed
+			device.open();
+			iface = device.interfaces?.find((i) => i.descriptor.bInterfaceClass === USB_PRINTER_CLASS);
+			if (!iface) throw new Error('no printer-class interface');
+			if (process.platform === 'linux' && iface.isKernelDriverActive()) iface.detachKernelDriver();
+			iface.claim();
+			claimed = true;
+			const out = iface.endpoints.find(
+				(e: Endpoint) => e.direction === 'out' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
+			) as OutEndpoint | undefined;
+			const inEndpoint = iface.endpoints.find(
+				(e: Endpoint) => e.direction === 'in' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
+			) as InEndpoint | undefined;
+			if (!out || !inEndpoint) throw new Error('no bulk IN/OUT endpoint pair');
+			inEndpoint.timeout = USB_MODEL_QUERY_TIMEOUT_MS;
+			await new Promise<void>((resolve, reject) => {
+				out.transfer(GS_I_MODEL_NAME, (err) => (err ? reject(err) : resolve()));
+			});
+			const reply = await new Promise<Buffer>((resolve, reject) => {
+				inEndpoint.transfer(USB_MODEL_REPLY_BYTES, (err, data) =>
+					err ? reject(err) : resolve(data ?? Buffer.alloc(0))
+				);
+			});
+			const model = parseUsbModelReply(reply);
+			logger.info(
+				`[usb] model query ${args.device}: ${model ?? '(no answer)'} in ${Date.now() - startedAt}ms`
+			);
+			return model;
+		} catch (err) {
+			logger.info(`[usb] model query ${args.device} failed: ${String(err)}`);
+			return null;
+		} finally {
+			if (iface && claimed) {
+				await new Promise<void>((resolve) => {
+					try {
+						iface?.release(true, () => resolve());
+					} catch {
+						resolve();
+					}
+				});
+			}
+			try {
+				device.close();
+			} catch {
+				// already closed
+			}
 		}
 	}
-});
+);
 
 handleIpc('usb-discovery', async (event): Promise<UsbPrinterInfo[]> => {
 	// Windows: libusb can enumerate USB printers but cannot claim them — plug-and-play
