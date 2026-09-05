@@ -39,11 +39,22 @@ const logStub = {
 	logger: { warn: (message: string) => logCalls.push(`warn:${message}`), info() {}, error() {} },
 };
 
-const initCalls: { enabled?: boolean }[] = [];
+type TransportFactory = (options: object) => {
+	send: (envelope: unknown) => Promise<unknown>;
+	flush: (timeout?: number) => Promise<boolean>;
+};
+const initCalls: { enabled?: boolean; transport?: TransportFactory }[] = [];
 const users: unknown[] = [];
+const sentEnvelopes: unknown[] = [];
 const sentryStub = {
-	init: (options: { enabled?: boolean }) => initCalls.push(options),
-	getClient: () => ({ getOptions: () => initCalls[0] }),
+	init: (options: { enabled?: boolean; transport?: TransportFactory }) => initCalls.push(options),
+	makeElectronOfflineTransport: (): TransportFactory => () => ({
+		send: (envelope: unknown) => {
+			sentEnvelopes.push(envelope);
+			return Promise.resolve({});
+		},
+		flush: () => Promise.resolve(true),
+	}),
 	setUser: (user: unknown) => users.push(user),
 };
 const loggerStub = {
@@ -229,18 +240,30 @@ try {
 		'never drops other errors, even during shutdown'
 	);
 
-	// Loading log must initialise disabled before any later consent transition.
+	// Loading log must initialise ONCE at module load (before app ready), with the
+	// client enabled so its integrations install, and hold every envelope back at
+	// the transport until consent flips reporting on.
 	process.env.NODE_ENV = 'production';
 	// eslint-disable-next-line @typescript-eslint/no-require-imports -- load real log after stubbing dependencies
-	const { enableSentry, disableSentry } = require('./log.ts') as typeof import('./log');
+	const { enableSentry, disableSentry, isSentryReporting } =
+		require('./log.ts') as typeof import('./log');
 	assert.equal(initCalls.length, 1, 'initialises at module load');
-	assert.equal(initCalls[0].enabled, false);
+	assert.notEqual(initCalls[0].enabled, false, 'the client is enabled so integrations install');
+	assert.ok(initCalls[0].transport, 'consent is enforced at the transport');
+	const transport = initCalls[0].transport({});
+	assert.equal(isSentryReporting(), false, 'reporting is off until consent');
+	void transport.send({ envelope: 'before-consent' });
+	assert.deepEqual(sentEnvelopes, [], 'nothing leaves the process before consent');
 	enableSentry();
 	assert.equal(initCalls.length, 1, 'consent never reinitialises the SDK');
-	assert.equal(initCalls[0].enabled, true);
+	assert.equal(isSentryReporting(), true);
+	void transport.send({ envelope: 'after-consent' });
+	assert.deepEqual(sentEnvelopes, [{ envelope: 'after-consent' }], 'consent releases envelopes');
 	assert.deepEqual(users, [{ id: getInstallId() }]);
 	disableSentry();
-	assert.equal(initCalls[0].enabled, false);
+	assert.equal(isSentryReporting(), false);
+	void transport.send({ envelope: 'after-revoke' });
+	assert.equal(sentEnvelopes.length, 1, 'revoking consent drops envelopes again');
 	assert.equal(users[1], null);
 	assert.equal(initCalls.length, 1);
 

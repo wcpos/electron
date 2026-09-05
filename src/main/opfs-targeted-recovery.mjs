@@ -94,7 +94,11 @@ function extractDocument(text, primaryPath, expectedId) {
   }
 }
 
-async function repairDocument(instance, documentId) {
+// With `discardInvalid` (disposable collections only — `logs`) a range that
+// holds no recoverable document is dropped in the SAME cleanup run that read
+// it, outcome "discarded-no-valid-document" — see dropHollowRows for why the
+// two steps must not straddle a queue release.
+async function repairDocument(instance, documentId, { discardInvalid = false } = {}) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const primaryRow = state.firstIdx.metaIdMap.get(documentId);
@@ -118,7 +122,13 @@ async function repairDocument(instance, documentId) {
       instance.primaryPath,
       documentId,
     );
-    if (!document) return "no-valid-document";
+    if (!document) {
+      if (!discardInvalid) return "no-valid-document";
+      await dropIndexRowsById(state, runState, documentId, {
+        includePrimary: true,
+      });
+      return "discarded-no-valid-document";
+    }
     try {
       if (
         indexRows.some(
@@ -181,8 +191,12 @@ async function dropWhitespaceRows(instance) {
 // range holds something other than whitespace (a foreign document or junk
 // that happened to parse): that is a stale-range problem, not a hollow row,
 // and is refused rather than guessed.
-// Disposable log rows may also be discarded when their range holds foreign bytes.
-async function dropHollowRows(instance, documentIds, discardLogRows = false) {
+// With `discardForeign` (disposable collections only — `logs`) a foreign-bytes
+// range is dropped in the SAME cleanup run that detected it, outcome
+// "discarded-foreign-bytes": detection and deletion must not straddle a queue
+// release, or a healthy write for the same id landing in between would be
+// deleted as if it were the damaged row.
+async function dropHollowRows(instance, documentIds, { discardForeign = false } = {}) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const outcomes = new Map();
@@ -194,24 +208,58 @@ async function dropHollowRows(instance, documentIds, discardLogRows = false) {
         continue;
       }
       const [, start, end] = primaryRow;
-      if (
-        !discardLogRows &&
-        instance._decode(await accessHandle.read(start, end)).trim() !== ""
-      ) {
+      const foreign =
+        instance._decode(await accessHandle.read(start, end)).trim() !== "";
+      if (foreign && !discardForeign) {
         outcomes.set(documentId, "range-holds-foreign-bytes");
         continue;
       }
-      for (const indexState of state.indexStates) {
-        const position = indexState.rows.findIndex(
-          (row) => row[1] === start && row[2] === end,
-        );
-        if (position >= 0)
-          await dropIndexRow(state, runState, indexState, position);
+      if (foreign) {
+        await dropIndexRowsById(state, runState, documentId, {
+          includePrimary: true,
+        });
+      } else {
+        await dropIndexRowsForRange(state, runState, start, end);
       }
-      outcomes.set(documentId, true);
+      outcomes.set(documentId, foreign ? "discarded-foreign-bytes" : true);
     }
     return outcomes;
   });
+}
+
+// Drops every index row (primary and secondary) pointing at one byte range,
+// inside the caller's cleanup run. Only safe for a range nothing else can
+// share — a hollow (whitespace) range; a range holding a foreign document is
+// also indexed by that document's own rows, so those are dropped BY ID.
+async function dropIndexRowsForRange(state, runState, start, end) {
+  for (const indexState of state.indexStates) {
+    const position = indexState.rows.findIndex(
+      (row) => row[1] === start && row[2] === end,
+    );
+    if (position >= 0) await dropIndexRow(state, runState, indexState, position);
+  }
+}
+
+// Drops every index row whose indexable string carries `documentId`, inside
+// the caller's cleanup run: the primary row when `includePrimary`, and every
+// secondary row either way. Identity, not offsets, so a row whose range holds
+// a sibling's bytes never takes the sibling with it.
+async function dropIndexRowsById(state, runState, documentId, { includePrimary }) {
+  const keyLength = state.firstIdx.primaryKeyLength;
+  for (const indexState of state.indexStates) {
+    if (!includePrimary && indexState === state.firstIdx) continue;
+    let position = indexState.rows.length;
+    while (position--) {
+      if (
+        getPrimaryKeyFromIndexableString(
+          indexState.rows[position][0],
+          keyLength,
+        ) !== documentId
+      )
+        continue;
+      await dropIndexRow(state, runState, indexState, position);
+    }
+  }
 }
 
 // Deletes every secondary-index row still carrying a document id, through the
@@ -224,22 +272,10 @@ async function dropHollowRows(instance, documentIds, discardLogRows = false) {
 async function dropSecondaryRowsById(instance, documentIds) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
-    const keyLength = state.firstIdx.primaryKeyLength;
     for (const documentId of documentIds) {
-      for (const indexState of state.indexStates) {
-        if (indexState === state.firstIdx) continue;
-        let position = indexState.rows.length;
-        while (position--) {
-          if (
-            getPrimaryKeyFromIndexableString(
-              indexState.rows[position][0],
-              keyLength,
-            ) !== documentId
-          )
-            continue;
-          await dropIndexRow(state, runState, indexState, position);
-        }
-      }
+      await dropIndexRowsById(state, runState, documentId, {
+        includePrimary: false,
+      });
     }
   });
 }
@@ -501,13 +537,16 @@ export function withTargetedOpfsRecovery(storage) {
           }
           return refused;
         }
-        for (const [id, outcome] of await dropHollowRows(instance, hollow)) {
-          if (
-            params.collectionName === "logs" &&
-            outcome === "range-holds-foreign-bytes"
-          ) {
-            await dropHollowRows(instance, [id], true);
-            report("log-row-discarded", { target, id, reason: outcome });
+        const outcomes = await dropHollowRows(instance, hollow, {
+          discardForeign: params.collectionName === "logs",
+        });
+        for (const [id, outcome] of outcomes) {
+          if (outcome === "discarded-foreign-bytes") {
+            report("log-row-discarded", {
+              target,
+              id,
+              reason: "range-holds-foreign-bytes",
+            });
           } else if (typeof outcome === "string") {
             refused.push({ id, reason: outcome });
             report("hollow-row-refused", { target, id, reason: outcome });
@@ -531,16 +570,14 @@ export function withTargetedOpfsRecovery(storage) {
             }
             onMalformedBatch?.();
             if (batch.length === 1) {
-              const failure = await repairDocument(instance, batch[0]);
-              if (
-                params.collectionName === "logs" &&
-                failure === "no-valid-document"
-              ) {
-                await dropHollowRows(instance, batch, true);
+              const failure = await repairDocument(instance, batch[0], {
+                discardInvalid: params.collectionName === "logs",
+              });
+              if (failure === "discarded-no-valid-document") {
                 report("log-row-discarded", {
                   target,
                   id: batch[0],
-                  reason: failure,
+                  reason: "no-valid-document",
                 });
                 return true;
               }

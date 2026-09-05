@@ -69,13 +69,22 @@ for (const collectionName of ["logs", "orders"]) {
       );
       const operations = [];
       const events = [];
+      // In the foreign-bytes case the range belongs to a healthy sibling
+      // ("foreign") whose own rows share the damaged row's offsets and sort
+      // first: a discard must remove "damaged" by identity and leave the
+      // sibling standing (an offset lookup would take the sibling instead).
+      const ids =
+        reason === "range-holds-foreign-bytes" ? ["foreign", id] : [id];
       const indexes = ["primary", "secondary"].map((indexId) => ({
         indexId,
-        rows: [[`0${id}`, 0, bytes.length]],
-        metaIdMap: new Map([[id, [`0${id}`, 0, bytes.length]]]),
+        primaryKeyLength: id.length,
+        rows: ids.map((rowId) => [`0${rowId}`, 0, bytes.length]),
+        metaIdMap: new Map(
+          ids.map((rowId) => [rowId, [`0${rowId}`, 0, bytes.length]]),
+        ),
         runChangelogOperation([, position]) {
-          this.rows.splice(position, 1);
-          this.metaIdMap.delete(id);
+          const [row] = this.rows.splice(position, 1);
+          this.metaIdMap.delete(row[0].slice(1));
         },
       }));
       const state = {
@@ -126,9 +135,18 @@ for (const collectionName of ["logs", "orders"]) {
         } else {
           assert.equal(await recovering.cleanup(0), true);
         }
+        const sibling = ids.length - 1;
         for (const index of indexes) {
-          assert.equal(index.rows.length, collectionName === "logs" ? 0 : 1);
+          assert.equal(
+            index.rows.length,
+            collectionName === "logs" ? sibling : sibling + 1,
+          );
           assert.equal(index.metaIdMap.has(id), collectionName !== "logs");
+          assert.equal(
+            index.metaIdMap.has("foreign"),
+            sibling === 1,
+            "the healthy sibling sharing the range is never touched",
+          );
         }
         assert.equal(operations.length, collectionName === "logs" ? 2 : 0);
         if (collectionName === "logs") {

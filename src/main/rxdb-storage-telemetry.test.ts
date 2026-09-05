@@ -7,6 +7,8 @@ type ModuleWithMutableLoad = typeof Module & {
 
 const logged: { level: string; args: unknown[] }[] = [];
 const mutableModule = Module as ModuleWithMutableLoad;
+// Mirrors log.ts's consent gate: while false the transport drops every envelope.
+let reporting = true;
 const originalLoad = mutableModule._load;
 mutableModule._load = function patchedLoad(
 	request: string,
@@ -15,6 +17,7 @@ mutableModule._load = function patchedLoad(
 ) {
 	if (request === './log') {
 		return {
+			isSentryReporting: () => reporting,
 			logger: {
 				error: (...args: unknown[]) => logged.push({ level: 'error', args }),
 				warn: (...args: unknown[]) => logged.push({ level: 'warn', args }),
@@ -207,6 +210,18 @@ async function main() {
 	seams.__wcposOnStorageRecovery!({ ...discarded, id: 'second' });
 	assert.equal(captured.length, 10, 'a distinct id captures again');
 	assert.equal(logged.length, 11, 'every report still logs');
+	seams.__wcposOnStorageRecovery!({ ...discarded, reason: 'range-holds-foreign-bytes' });
+	assert.equal(captured.length, 11, 'the same id with a different reason is a distinct event');
+
+	// Before consent the transport drops everything, so a report seen then must
+	// not be remembered as captured: the first report after consent has to send.
+	reporting = false;
+	seams.__wcposOnStorageRecovery!({ ...discarded, id: 'third' });
+	assert.equal(captured.length, 11, 'no capture while reporting is off');
+	assert.equal(logged.length, 13, 'still logged locally while reporting is off');
+	reporting = true;
+	seams.__wcposOnStorageRecovery!({ ...discarded, id: 'third' });
+	assert.equal(captured.length, 12, 'the first report after consent is captured');
 
 	delete seams.__wcposOnStorageRunFailure;
 	delete seams.__wcposOnIndexRebuild;

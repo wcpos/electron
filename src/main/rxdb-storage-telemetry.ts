@@ -1,4 +1,4 @@
-import { logger, Sentry } from './log';
+import { isSentryReporting, logger, Sentry } from './log';
 
 /**
  * Sentry reporting for the filesystem-node storage's repair machinery.
@@ -146,10 +146,10 @@ function report(
 	const collection = target.split('/')[1] ?? 'unknown';
 	const extra = { target, ...redactDetails(details), cause: describe(error) };
 	logger[level === 'error' ? 'error' : 'warn'](`[${SUBSYSTEM}] ${code}`, extra);
-	// Reporting is consent-gated (log.ts): while the client is disabled nothing
-	// is sent, so the key must not be recorded either or the first event after
-	// consent would be swallowed as a duplicate.
-	if (Sentry.getClient?.()?.getOptions().enabled === false) return;
+	// Reporting is consent-gated (log.ts): while it is off the transport drops
+	// every envelope, so the key must not be recorded either or the first event
+	// after consent would be swallowed as a duplicate.
+	if (!isSentryReporting()) return;
 	const key = JSON.stringify([code, target, extra]);
 	if (capturedEvents.has(key)) return;
 	if (capturedEvents.size >= CAPTURED_EVENT_KEYS_MAX) capturedEvents.clear();
