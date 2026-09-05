@@ -23,6 +23,9 @@ class FakeStore {
 // electron-log, dialog) at import; stub both so the pure transition is testable.
 const ipcListeners = new Map<string, (...args: unknown[]) => void>();
 const electronStub = {
+	app: { on() {}, getVersion: () => 'test' },
+	BrowserWindow: { getAllWindows: (): unknown[] => [] },
+	dialog: {},
 	ipcMain: {
 		on(channel: string, listener: (...args: unknown[]) => void) {
 			ipcListeners.set(channel, listener);
@@ -36,6 +39,31 @@ const logStub = {
 	logger: { warn: (message: string) => logCalls.push(`warn:${message}`), info() {}, error() {} },
 };
 
+type TransportFactory = (options: object) => {
+	send: (envelope: unknown) => Promise<unknown>;
+	flush: (timeout?: number) => Promise<boolean>;
+};
+const initCalls: { enabled?: boolean; transport?: TransportFactory }[] = [];
+const users: unknown[] = [];
+const sentEnvelopes: unknown[] = [];
+const sentryStub = {
+	init: (options: { enabled?: boolean; transport?: TransportFactory }) => initCalls.push(options),
+	makeElectronOfflineTransport: (): TransportFactory => () => ({
+		send: (envelope: unknown) => {
+			sentEnvelopes.push(envelope);
+			return Promise.resolve({});
+		},
+		flush: () => Promise.resolve(true),
+	}),
+	setUser: (user: unknown) => users.push(user),
+};
+const loggerStub = {
+	transports: { file: {}, console: {} },
+	initialize() {},
+	errorHandler: { startCatching() {} },
+	error() {},
+};
+const originalNodeEnv = process.env.NODE_ENV;
 const mutableModule = Module as ModuleWithMutableLoad;
 const originalLoad = mutableModule._load;
 mutableModule._load = function patchedLoad(
@@ -43,6 +71,8 @@ mutableModule._load = function patchedLoad(
 	parent: NodeModule | null,
 	isMain: boolean
 ) {
+	if (request === '@sentry/electron/main') return sentryStub;
+	if (request === 'electron-log/main') return loggerStub;
 	if (request === 'electron-store') {
 		return { __esModule: true, default: FakeStore };
 	}
@@ -210,7 +240,39 @@ try {
 		'never drops other errors, even during shutdown'
 	);
 
+	// Loading log must initialise ONCE at module load (before app ready), with the
+	// client enabled so its integrations install, and hold every envelope back at
+	// the transport until consent flips reporting on.
+	process.env.NODE_ENV = 'production';
+
+	const { enableSentry, disableSentry, isSentryReporting } =
+		require('./log.ts') as typeof import('./log');
+	assert.equal(initCalls.length, 1, 'initialises at module load');
+	assert.notEqual(initCalls[0].enabled, false, 'the client is enabled so integrations install');
+	assert.ok(initCalls[0].transport, 'consent is enforced at the transport');
+	const transport = initCalls[0].transport({});
+	assert.equal(isSentryReporting(), false, 'reporting is off until consent');
+	void transport.send({ envelope: 'before-consent' });
+	assert.deepEqual(sentEnvelopes, [], 'nothing leaves the process before consent');
+	enableSentry();
+	assert.equal(initCalls.length, 1, 'consent never reinitialises the SDK');
+	assert.equal(isSentryReporting(), true);
+	void transport.send({ envelope: 'after-consent' });
+	assert.deepEqual(sentEnvelopes, [{ envelope: 'after-consent' }], 'consent releases envelopes');
+	assert.deepEqual(users, [{ id: getInstallId() }]);
+	disableSentry();
+	assert.equal(isSentryReporting(), false);
+	void transport.send({ envelope: 'after-revoke' });
+	assert.equal(sentEnvelopes.length, 1, 'revoking consent drops envelopes again');
+	assert.equal(users[1], null);
+	assert.equal(initCalls.length, 1);
+
 	console.log('sentry-hygiene tests passed');
+} catch (error) {
+	console.error(error);
+	process.exitCode = 1;
 } finally {
 	mutableModule._load = originalLoad;
+	if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+	else process.env.NODE_ENV = originalNodeEnv;
 }

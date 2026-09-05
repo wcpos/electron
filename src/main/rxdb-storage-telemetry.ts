@@ -1,4 +1,4 @@
-import { logger, Sentry } from './log';
+import { isSentryReporting, logger, Sentry } from './log';
 
 /**
  * Sentry reporting for the filesystem-node storage's repair machinery.
@@ -17,6 +17,17 @@ import { logger, Sentry } from './log';
  * class of damage can be tracked per release under the `rxdb-fs` subsystem.
  */
 const SUBSYSTEM = 'rxdb-fs';
+/**
+ * One Sentry capture per distinct event per process: the electron-log line
+ * fires every time, the capture only the first. Keyed on the code, target and
+ * the redacted details, so two damaged rows in one collection are two events
+ * but one row reported on every cleanup pass is one. Cleared when it reaches
+ * the cap — a process that has produced a thousand distinct storage events is
+ * already reporting far more than Sentry needs, and forgetting the oldest
+ * keys costs at most a repeated capture, never a lost one.
+ */
+const CAPTURED_EVENT_KEYS_MAX = 1000;
+const capturedEvents = new Set<string>();
 
 /**
  * The kind vocabulary and how each reports. The producers cannot import this
@@ -24,14 +35,15 @@ const SUBSYSTEM = 'rxdb-fs';
  * a minified string), so this is the registry: a kind missing here reports at
  * `error`, which is the safe default for anything unrecognised.
  *
- *   - healed outcomes are warnings: the storage repaired itself
- *   - refusals, discards and terminal failures are errors: data or a write was
+ *   - healed outcomes and disposable log-row discards are warnings
+ *   - refusals, other discards and terminal failures are errors: data or a write was
  *     lost, or a run died
  */
 export const KIND_LEVELS: Readonly<Record<string, 'warning' | 'error'>> = {
 	'index-rebuilt': 'warning',
 	'changes-file-salvage': 'warning',
 	'hollow-row-dropped': 'warning',
+	'log-row-discarded': 'warning',
 	'stale-secondary-dropped': 'warning',
 	'count-recovery': 'warning',
 	'changes-file-discarded': 'error',
@@ -134,6 +146,14 @@ function report(
 	const collection = target.split('/')[1] ?? 'unknown';
 	const extra = { target, ...redactDetails(details), cause: describe(error) };
 	logger[level === 'error' ? 'error' : 'warn'](`[${SUBSYSTEM}] ${code}`, extra);
+	// Reporting is consent-gated (log.ts): while it is off the transport drops
+	// every envelope, so the key must not be recorded either or the first event
+	// after consent would be swallowed as a duplicate.
+	if (!isSentryReporting()) return;
+	const key = JSON.stringify([code, target, extra]);
+	if (capturedEvents.has(key)) return;
+	if (capturedEvents.size >= CAPTURED_EVENT_KEYS_MAX) capturedEvents.clear();
+	capturedEvents.add(key);
 	return capture(event, {
 		level,
 		tags: {
