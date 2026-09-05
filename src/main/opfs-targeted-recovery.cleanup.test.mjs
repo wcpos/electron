@@ -173,3 +173,72 @@ for (const collectionName of ["logs", "orders"]) {
     });
   }
 }
+
+test("drops every index row sharing one whitespace range, not just the first", async () => {
+  // Damage can leave two ids pointing at the same hollow range; recovering
+  // one of them must clear both rows or the survivor fails the next read.
+  const bytes = Buffer.from("        ");
+  const ids = ["first", "second"];
+  const operations = [];
+  const indexes = ["primary", "secondary"].map((indexId) => ({
+    indexId,
+    primaryKeyLength: 6,
+    rows: ids.map((rowId) => [`0${rowId}`, 0, bytes.length]),
+    metaIdMap: new Map(
+      ids.map((rowId) => [rowId, [`0${rowId}`, 0, bytes.length]]),
+    ),
+    runChangelogOperation([, position]) {
+      const [row] = this.rows.splice(position, 1);
+      this.metaIdMap.delete(row[0].slice(1));
+    },
+  }));
+  const state = {
+    firstIdx: indexes[0],
+    indexStates: indexes,
+    documentFileHandle: {
+      createAccessHandle: async () => ({ read: async () => bytes }),
+    },
+    changelog: {
+      addChangelogOperations: async (_, ops) => operations.push(...ops),
+    },
+  };
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => "[]",
+    bulkWrite: async () => ({ error: [] }),
+    query: async () => ({ documents: [] }),
+    getChangedDocumentsSince: async () => ({ documents: [] }),
+    cleanup: async () => true,
+    internals: { statePromise: Promise.resolve(state) },
+    taskQueue: {
+      runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
+    },
+    _decode: (value) => value.toString(),
+  };
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance({
+    databaseName: "store_v6_test",
+    collectionName: "orders",
+    multiInstance: false,
+  });
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = () => {};
+  try {
+    // Reading only "first" finds it hollow and drops its range.
+    await recovering.findDocumentsById(["first"], true);
+    for (const index of indexes) {
+      assert.equal(
+        index.rows.length,
+        0,
+        `${index.indexId}: no row left on the range`,
+      );
+    }
+    assert.equal(
+      operations.filter((operation) => operation[2] === "D").length,
+      4,
+    );
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
+  }
+});

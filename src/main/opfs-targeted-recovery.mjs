@@ -241,11 +241,14 @@ async function dropHollowRows(
 // also indexed by that document's own rows, so those are dropped BY ID.
 async function dropIndexRowsForRange(state, runState, start, end) {
   for (const indexState of state.indexStates) {
-    const position = indexState.rows.findIndex(
-      (row) => row[1] === start && row[2] === end,
-    );
-    if (position >= 0)
+    // Every row on the range, not just the first: damage can leave two rows
+    // pointing at one whitespace range, and a survivor fails the next read.
+    let position = indexState.rows.length;
+    while (position--) {
+      const row = indexState.rows[position];
+      if (row[1] !== start || row[2] !== end) continue;
       await dropIndexRow(state, runState, indexState, position);
+    }
   }
 }
 
