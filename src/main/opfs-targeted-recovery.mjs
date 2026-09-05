@@ -98,7 +98,11 @@ function extractDocument(text, primaryPath, expectedId) {
 // holds no recoverable document is dropped in the SAME cleanup run that read
 // it, outcome "discarded-no-valid-document" — see dropHollowRows for why the
 // two steps must not straddle a queue release.
-async function repairDocument(instance, documentId, { discardInvalid = false } = {}) {
+async function repairDocument(
+  instance,
+  documentId,
+  { discardInvalid = false } = {},
+) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const primaryRow = state.firstIdx.metaIdMap.get(documentId);
@@ -196,7 +200,11 @@ async function dropWhitespaceRows(instance) {
 // "discarded-foreign-bytes": detection and deletion must not straddle a queue
 // release, or a healthy write for the same id landing in between would be
 // deleted as if it were the damaged row.
-async function dropHollowRows(instance, documentIds, { discardForeign = false } = {}) {
+async function dropHollowRows(
+  instance,
+  documentIds,
+  { discardForeign = false } = {},
+) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const outcomes = new Map();
@@ -236,7 +244,8 @@ async function dropIndexRowsForRange(state, runState, start, end) {
     const position = indexState.rows.findIndex(
       (row) => row[1] === start && row[2] === end,
     );
-    if (position >= 0) await dropIndexRow(state, runState, indexState, position);
+    if (position >= 0)
+      await dropIndexRow(state, runState, indexState, position);
   }
 }
 
@@ -244,7 +253,12 @@ async function dropIndexRowsForRange(state, runState, start, end) {
 // the caller's cleanup run: the primary row when `includePrimary`, and every
 // secondary row either way. Identity, not offsets, so a row whose range holds
 // a sibling's bytes never takes the sibling with it.
-async function dropIndexRowsById(state, runState, documentId, { includePrimary }) {
+async function dropIndexRowsById(
+  state,
+  runState,
+  documentId,
+  { includePrimary },
+) {
   const keyLength = state.firstIdx.primaryKeyLength;
   for (const indexState of state.indexStates) {
     if (!includePrimary && indexState === state.firstIdx) continue;

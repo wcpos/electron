@@ -244,7 +244,7 @@ try {
 	// client enabled so its integrations install, and hold every envelope back at
 	// the transport until consent flips reporting on.
 	process.env.NODE_ENV = 'production';
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- load real log after stubbing dependencies
+
 	const { enableSentry, disableSentry, isSentryReporting } =
 		require('./log.ts') as typeof import('./log');
 	assert.equal(initCalls.length, 1, 'initialises at module load');

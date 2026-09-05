@@ -35,9 +35,7 @@ const countWindows = () => {
  */
 let reportingEnabled = false;
 
-const consentGatedTransport: ReturnType<typeof Sentry.makeElectronOfflineTransport> = (
-	options
-) => {
+const consentGatedTransport: ReturnType<typeof Sentry.makeElectronOfflineTransport> = (options) => {
 	const inner = Sentry.makeElectronOfflineTransport()(options);
 	return {
 		send: (envelope) => (reportingEnabled ? inner.send(envelope) : Promise.resolve({})),
