@@ -8,6 +8,8 @@ import {
 	SEND_CHANNELS,
 } from '@wcpos/printer/ipc-channels';
 
+import { PRELOAD_EXTRA_INVOKE_CHANNELS } from './preload-channels';
+
 import {
 	deserializeRxdbIpcMessage,
 	hasBulkWriteAttachmentBlobs,
