@@ -111,10 +111,7 @@ const ipc = {
 		// From main to render.
 		on: ON_CHANNELS, // System events from main process
 		// From render to main and back again.
-		// 'usb-query-model' is served by main (src/main/usb-printer.ts) ahead of its typed entry in
-		// @wcpos/printer's INVOKE_CHANNELS (wcpos/monorepo#1884); listing it here keeps the allowlist
-		// honest on either side of that merge.
-		invoke: [...INVOKE_CHANNELS, 'usb-query-model'] as const,
+		invoke: [...INVOKE_CHANNELS, ...PRELOAD_EXTRA_INVOKE_CHANNELS] as const,
 		// From main to render, once
 		once: [] as const, // We'll handle dynamic channels separately
 	},
