@@ -1,4 +1,11 @@
-import { type Device, type Endpoint, getDeviceList, type InEndpoint, type OutEndpoint, usb } from 'usb';
+import {
+	type Device,
+	type Endpoint,
+	getDeviceList,
+	type InEndpoint,
+	type OutEndpoint,
+	usb,
+} from 'usb';
 
 import type { UsbPrinterInfo } from '@wcpos/printer/ipc-channels';
 import {
