@@ -231,13 +231,14 @@ ipcMain.handle(
 						resolve();
 					}
 				});
-				// release() does not give usblp its interface back; a query must leave Linux as it found it.
-				if (detachedKernelDriver) {
-					try {
-						iface.attachKernelDriver();
-					} catch (attachErr) {
-						logger.debug(`[usb] could not reattach the kernel driver: ${String(attachErr)}`);
-					}
+			}
+			// release() does not give usblp its interface back, and a claim that threw after the
+			// detach left it just as bare: a query must leave Linux as it found it either way.
+			if (iface && detachedKernelDriver) {
+				try {
+					iface.attachKernelDriver();
+				} catch (attachErr) {
+					logger.debug(`[usb] could not reattach the kernel driver: ${String(attachErr)}`);
 				}
 			}
 			try {
