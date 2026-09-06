@@ -142,7 +142,11 @@ async function readProductName(d: Device): Promise<string | null> {
 		d.open();
 		try {
 			return await new Promise<string | null>((resolve) => {
-				d.getStringDescriptor(index, (err, value) => resolve(err || !value ? null : value.trim()));
+				d.getStringDescriptor(index, (err, value) => {
+					// A whitespace-only descriptor must fall back to the generic label, not a blank row.
+					const name = value?.trim();
+					resolve(err || !name ? null : name);
+				});
 			});
 		} finally {
 			d.close();
@@ -174,16 +178,20 @@ ipcMain.handle(
 		const startedAt = Date.now();
 		const device = findUsbDevice(args.device);
 		if (!device) {
-			logger.info(`[usb] model query: ${args.device} not present`);
+			logger.info(`[usb] model query: ${args.device} not present (${Date.now() - startedAt}ms)`);
 			return null;
 		}
 		let iface: UsbInterface | undefined;
 		let claimed = false;
+		let detachedKernelDriver = false;
 		try {
 			device.open();
 			iface = device.interfaces?.find((i) => i.descriptor.bInterfaceClass === USB_PRINTER_CLASS);
 			if (!iface) throw new Error('no printer-class interface');
-			if (process.platform === 'linux' && iface.isKernelDriverActive()) iface.detachKernelDriver();
+			if (process.platform === 'linux' && iface.isKernelDriverActive()) {
+				iface.detachKernelDriver();
+				detachedKernelDriver = true;
+			}
 			iface.claim();
 			claimed = true;
 			const out = iface.endpoints.find(
@@ -193,6 +201,8 @@ ipcMain.handle(
 				(e: Endpoint) => e.direction === 'in' && e.transferType === usb.LIBUSB_TRANSFER_TYPE_BULK
 			) as InEndpoint | undefined;
 			if (!out || !inEndpoint) throw new Error('no bulk IN/OUT endpoint pair');
+			// Both directions get the cap: a printer that stalls while receiving must not hang setup.
+			out.timeout = USB_MODEL_QUERY_TIMEOUT_MS;
 			inEndpoint.timeout = USB_MODEL_QUERY_TIMEOUT_MS;
 			await new Promise<void>((resolve, reject) => {
 				out.transfer(GS_I_MODEL_NAME, (err) => (err ? reject(err) : resolve()));
@@ -208,7 +218,9 @@ ipcMain.handle(
 			);
 			return model;
 		} catch (err) {
-			logger.info(`[usb] model query ${args.device} failed: ${String(err)}`);
+			logger.info(
+				`[usb] model query ${args.device} failed after ${Date.now() - startedAt}ms: ${String(err)}`
+			);
 			return null;
 		} finally {
 			if (iface && claimed) {
@@ -219,6 +231,14 @@ ipcMain.handle(
 						resolve();
 					}
 				});
+				// release() does not give usblp its interface back; a query must leave Linux as it found it.
+				if (detachedKernelDriver) {
+					try {
+						iface.attachKernelDriver();
+					} catch (attachErr) {
+						logger.debug(`[usb] could not reattach the kernel driver: ${String(attachErr)}`);
+					}
+				}
 			}
 			try {
 				device.close();
