@@ -8,6 +8,7 @@ import {
 	SEND_CHANNELS,
 } from '@wcpos/printer/ipc-channels';
 
+import { PRELOAD_EXTRA_INVOKE_CHANNELS } from './preload-channels';
 import {
 	deserializeRxdbIpcMessage,
 	hasBulkWriteAttachmentBlobs,
@@ -111,7 +112,7 @@ const ipc = {
 		// From main to render.
 		on: ON_CHANNELS, // System events from main process
 		// From render to main and back again.
-		invoke: INVOKE_CHANNELS,
+		invoke: [...INVOKE_CHANNELS, ...PRELOAD_EXTRA_INVOKE_CHANNELS] as const,
 		// From main to render, once
 		once: [] as const, // We'll handle dynamic channels separately
 	},

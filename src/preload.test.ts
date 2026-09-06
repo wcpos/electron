@@ -8,6 +8,8 @@ import { IPC_RENDERER_KEY_PREFIX } from 'rxdb/plugins/electron';
 import { INVOKE_CHANNELS, SEND_CHANNELS } from '@wcpos/printer/ipc-channels';
 import type { TypedIpcRenderer } from '@wcpos/printer/ipc-channels';
 
+import { PRELOAD_EXTRA_INVOKE_CHANNELS } from './preload-channels';
+
 const exposures: Record<string, any> = {};
 const onCalls: {
 	channel: string;
@@ -329,7 +331,7 @@ async function main() {
 	);
 	for (const channel of registeredInvokeChannels) {
 		assert.ok(
-			(INVOKE_CHANNELS as readonly string[]).includes(channel),
+			[...INVOKE_CHANNELS, ...PRELOAD_EXTRA_INVOKE_CHANNELS].includes(channel as never),
 			`main registers invoke channel '${channel}' but the preload allowlist does not permit it — ` +
 				'the renderer will get "Channel ' +
 				channel +
