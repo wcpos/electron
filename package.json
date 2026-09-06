@@ -41,7 +41,7 @@
 		"ts:check": "tsc --noEmit",
 		"test:http-bridge": "ts-node src/main/http-bridge.test.ts",
 		"test:preload": "ts-node src/preload.test.ts",
-		"test:usb-model-reply": "tsx --test src/main/usb-model-reply.test.ts",
+		"test:usb-model-reply": "ts-node src/main/usb-model-reply.test.ts",
 		"test:novu": "ts-node src/main/novu.test.ts",
 		"test:rxdb-ipc-attachments": "ts-node src/rxdb-ipc-attachments.test.ts",
 		"test:image-cache": "ts-node src/main/image-cache.test.ts",
