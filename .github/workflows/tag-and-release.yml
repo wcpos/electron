@@ -317,6 +317,11 @@ jobs:
       # failure on those packages can't block the .deb/.rpm publish.
       - name: 🐧 Install Linux build dependencies
         run: |
+          # The runner image ships Google Chrome, Microsoft and other vendor apt
+          # sources that are periodically mid-publish ("Hash Sum mismatch"),
+          # which fails apt-get update and with it the whole Linux publish
+          # (desktop 1.10.10). Everything here comes from Ubuntu's own archive.
+          sudo find /etc/apt/sources.list.d -type f ! -name 'ubuntu.sources' -delete
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
