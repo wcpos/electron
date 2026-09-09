@@ -1,20 +1,15 @@
 import { SerialPort } from 'serialport';
 
-import type { DiscoveredSerialPrinter, SerialPrinterInfo } from '@wcpos/printer/ipc-channels';
-import {
-	buildSerialKey,
-	connectionTypeForTarget,
-	parseTarget,
-	SERIAL_PREFIX,
-} from '@wcpos/printer/transport/device-key';
-
+import { buildSerialKey, connectionTypeForTarget, parseTarget, SERIAL_PREFIX } from './device-key';
 import { handleIpc } from './ipc';
 import { logger } from './log';
 import { type Delivery, sendRawPrint } from './raw-print';
 
+import type { DiscoveredSerialPrinter, SerialPrinterInfo } from '../ipc-channels';
+
 export { SERIAL_PREFIX };
 
-export type { DiscoveredSerialPrinter, SerialPrinterInfo } from '@wcpos/printer/ipc-channels';
+export type { DiscoveredSerialPrinter, SerialPrinterInfo } from '../ipc-channels';
 
 // macOS ships virtual ports that can never be a printer; /dev/tty.* are the
 // blocking call-in devices — we only offer the call-out /dev/cu.* counterparts.

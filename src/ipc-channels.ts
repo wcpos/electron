@@ -1,9 +1,11 @@
 /**
- * Shared Electron IPC channel registry.
+ * The Electron side of the IPC contract: the preload allowlist and the request/response
+ * types the main-process handlers implement.
  *
- * This module is intentionally electron-free: it contains only const string literals and
- * structural request/response types so both the Electron preload/main process and renderer
- * packages can import it without pulling native Electron dependencies into web builds.
+ * The renderer declares its own copy in wcpos/monorepo (packages/printer/src/ipc/channels.cts).
+ * Nothing is shared between the two repos on purpose; the packaged-app smoke test
+ * (scripts/smoke-packaged-app.mjs) is what proves the two declarations still agree, and a
+ * channel rename must ship as an alias for one release before the old name goes.
  */
 
 export interface DiscoveredNetworkPrinter {
@@ -71,8 +73,7 @@ export type NovuBridgeRequest =
 	| { type: 'getUnreadCount' };
 
 export type NovuBridgeResponse =
-	| { success: true; result: unknown }
-	| { success: false; message: string };
+	{ success: true; result: unknown } | { success: false; message: string };
 
 export type NovuBridgeEvent =
 	| { kind: 'notification_received'; notification: unknown }
@@ -88,7 +89,10 @@ export interface IpcInvokeChannels {
 	// data crosses IPC as a structured-cloned Uint8Array; number[] is the legacy
 	// wire shape, still accepted by main (wcpos/electron#353).
 	'print-raw-tcp': { req: { host: string; port: number; data: Uint8Array | number[] }; res: void };
-	'print-epos-http': { req: { host: string; port: number; path: string; xml: string; timeoutMs: number }; res: { status: number; body: string } };
+	'print-epos-http': {
+		req: { host: string; port: number; path: string; xml: string; timeoutMs: number };
+		res: { status: number; body: string };
+	};
 	'print-raw-usb': { req: { device: string; data: Uint8Array | number[] }; res: void };
 	'print-raw-serial': { req: { device: string; data: Uint8Array | number[] }; res: void };
 	'printer-discovery': {
@@ -101,7 +105,7 @@ export interface IpcInvokeChannels {
 	// named 'axios' until the library left the main process (wcpos/electron#354); the
 	// 'sqlite' channel went with the storage rewrite. Both were removed in 1.10.0.
 	'http-request': { req: unknown; res: unknown };
-	'novu': { req: NovuBridgeRequest; res: NovuBridgeResponse };
+	novu: { req: NovuBridgeRequest; res: NovuBridgeResponse };
 	'auth:prompt': { req: AuthPromptParams; res: AuthResult };
 	'storage:measure': {
 		req: undefined;
@@ -128,9 +132,9 @@ export interface IpcSendChannels {
 
 export interface IpcOnChannels {
 	'system-resume': [];
-	'bluetooth-devices': [Array<{ id: string; name: string }>];
-	'serial-ports': [Array<{ id: string; name: string }>];
-	'hid-devices': [Array<{ id: string; name: string }>];
+	'bluetooth-devices': [{ id: string; name: string }[]];
+	'serial-ports': [{ id: string; name: string }[]];
+	'hid-devices': [{ id: string; name: string }[]];
 	'novu:event': [NovuBridgeEvent];
 }
 
@@ -166,10 +170,12 @@ export const ON_CHANNELS = [
 	'novu:event',
 ] as const satisfies readonly (keyof IpcOnChannels)[];
 
-type ExactChannelKeys<RegistryKeys extends string, ArrayKeys extends string> =
-	[Exclude<RegistryKeys, ArrayKeys>, Exclude<ArrayKeys, RegistryKeys>] extends [never, never]
-		? true
-		: false;
+type ExactChannelKeys<RegistryKeys extends string, ArrayKeys extends string> = [
+	Exclude<RegistryKeys, ArrayKeys>,
+	Exclude<ArrayKeys, RegistryKeys>,
+] extends [never, never]
+	? true
+	: false;
 type AssertExactChannelKeys<T extends true> = T;
 
 type _InvokeChannelsCoverRegistry = AssertExactChannelKeys<
@@ -206,7 +212,10 @@ export interface TypedIpcRenderer {
 	): () => void;
 	// Dynamic per-job channels (onBeforePrint-/onAfterPrint-/onPrintError-) stay string-based.
 	on(channel: string, listener: (...args: unknown[]) => void): () => void;
-	once<C extends keyof IpcOnChannels>(channel: C, listener: (...args: IpcOnChannels[C]) => void): void;
+	once<C extends keyof IpcOnChannels>(
+		channel: C,
+		listener: (...args: IpcOnChannels[C]) => void
+	): void;
 	once(channel: string, listener: (...args: unknown[]) => void): void;
 	removeListener(channel: string, listener: (...args: unknown[]) => void): void;
 	postMessage(channel: string, message: unknown): void;

@@ -1,11 +1,11 @@
 import { BrowserWindow, ipcMain } from 'electron';
 
-import type { AuthPromptParams, AuthResult } from '@wcpos/printer/ipc-channels';
-
 import { logger as log } from './log';
 import { getMainWindow } from './window';
 
-export type { AuthPromptParams, AuthResult } from '@wcpos/printer/ipc-channels';
+import type { AuthPromptParams, AuthResult } from '../ipc-channels';
+
+export type { AuthPromptParams, AuthResult } from '../ipc-channels';
 
 /**
  * Parse auth tokens from a redirect URL

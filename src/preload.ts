@@ -6,8 +6,7 @@ import {
 	ON_CHANNELS,
 	RXDB_IPC_CHANNEL_PREFIX,
 	SEND_CHANNELS,
-} from '@wcpos/printer/ipc-channels';
-
+} from './ipc-channels';
 import { PRELOAD_EXTRA_INVOKE_CHANNELS } from './preload-channels';
 import {
 	deserializeRxdbIpcMessage,

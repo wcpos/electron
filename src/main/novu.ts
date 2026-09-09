@@ -1,14 +1,10 @@
 import { Novu } from '@novu/js';
 
-import type {
-	NovuBridgeEvent,
-	NovuBridgeRequest,
-	NovuBridgeResponse,
-} from '@wcpos/printer/ipc-channels';
-
 import { handleIpc } from './ipc';
 import { logger } from './log';
 import { getMainWindow } from './window';
+
+import type { NovuBridgeEvent, NovuBridgeRequest, NovuBridgeResponse } from '../ipc-channels';
 
 type Unsubscribe = () => void;
 type SdkResult<T> = { data?: T; error?: unknown };

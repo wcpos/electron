@@ -5,10 +5,10 @@ import path from 'node:path';
 
 import { IPC_RENDERER_KEY_PREFIX } from 'rxdb/plugins/electron';
 
-import { INVOKE_CHANNELS, SEND_CHANNELS } from '@wcpos/printer/ipc-channels';
-import type { TypedIpcRenderer } from '@wcpos/printer/ipc-channels';
-
+import { INVOKE_CHANNELS, SEND_CHANNELS } from './ipc-channels';
 import { PRELOAD_EXTRA_INVOKE_CHANNELS } from './preload-channels';
+
+import type { TypedIpcRenderer } from './ipc-channels';
 
 const exposures: Record<string, any> = {};
 const onCalls: {

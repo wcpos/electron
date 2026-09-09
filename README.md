@@ -44,8 +44,6 @@
 
 WCPOS requires [WooCommerce](https://woocommerce.com) and the [WooCommerce POS plugin for WordPress](https://github.com/wcpos/woocommerce-pos) as its backend. This repository builds and ships the desktop installers — see the [latest release](https://github.com/wcpos/electron/releases/latest) to download.
 
-> This repo is also a submodule of the [WCPOS monorepo](https://github.com/wcpos/monorepo) at `apps/electron`. The UI it renders lives in the monorepo's `@wcpos/main` package, so building from source requires a monorepo checkout (see [Development](#-development)).
-
 ## 🛠 How it works
 
 The app is split across Electron's three process types. The **renderer** is the WCPOS Expo web build — in development it points at the local Expo dev server, and in production it serves the static `expo export` bundle from disk via [`electron-serve`](https://github.com/sindresorhus/electron-serve) under the `wcpos://` scheme. The **main** process owns all native integrations and talks to the renderer over a tightly whitelisted **preload** bridge.
@@ -103,7 +101,7 @@ flathub/              # Flathub manifest & metadata for the Linux Flatpak
 
 ## 👩‍💻 Development
 
-The renderer (`@wcpos/main`) lives in the [WCPOS monorepo](https://github.com/wcpos/monorepo), so develop this app from inside a monorepo checkout where this repo is the `apps/electron` submodule.
+This repo is standalone, no longer a submodule. The renderer (`@wcpos/main`) is built in a separate [WCPOS monorepo](https://github.com/wcpos/monorepo) checkout; this repo only consumes its prebuilt export in `dist/` for packaging.
 
 **Prerequisites**
 
@@ -114,28 +112,27 @@ The renderer (`@wcpos/main`) lives in the [WCPOS monorepo](https://github.com/wc
 
 **Run the app**
 
+In the monorepo checkout, start the renderer (port `8088`, with `ELECTRON=true`):
+
 ```bash
-# from the monorepo root, with this repo checked out at apps/electron
-cd apps/electron
+pnpm dev:electron-renderer
+```
+
+In this repo, in a separate terminal:
+
+```bash
 pnpm install
-
-# rebuild native modules against the bundled Electron ABI
 pnpm rebuild:all
-
-# start the Expo dev server + Electron together
 pnpm dev
 ```
 
-`pnpm dev` runs two processes concurrently:
-
-- `dev:expo` — serves `@wcpos/main` as a web app on port `8088` (override with `EXPO_PORT`).
-- `dev:electron` — launches Electron via `electron-forge start`, which loads `http://localhost:8088`.
+Electron loads `http://localhost:8088`; override its port with `EXPO_PORT` to match the renderer server.
 
 **Useful scripts**
 
 | Script | Description |
 | --- | --- |
-| `pnpm dev` | Run the Expo dev server and Electron together |
+| `pnpm dev` | Launch Electron against the separately running renderer |
 | `pnpm lint` / `pnpm lint:fix` | Lint the `src/` tree |
 | `pnpm ts:check` | Type-check with `tsc --noEmit` |
 | `pnpm test` | Run the main/preload test suite (see below) |
@@ -161,10 +158,12 @@ CI ([`.github/workflows/test.yml`](./.github/workflows/test.yml)) runs `pnpm lin
 
 Packaging is driven by [Electron Forge](https://www.electronforge.io/) ([`forge.config.ts`](./forge.config.ts)). Because the UI is built separately, a production build is a two-step process:
 
-1. **Build the renderer** (from the monorepo) and place the export in this repo's `dist/`:
+1. **Build the renderer** in the monorepo, then import its export into this repo's `dist/`:
    ```bash
-   pnpm --filter @wcpos/main build:electron   # -> apps/main/electron-build
-   # copy/move that output to apps/electron/dist
+   # In the monorepo checkout
+   pnpm --filter @wcpos/main build:electron
+   # In this repo (replace <monorepo> with your checkout path)
+   pnpm renderer:import <monorepo>/apps/main/electron-build
    ```
    Forge bundles `dist/` into the app via `extraResource`, and `electron-serve` serves it under `wcpos://`.
 2. **Make the installers:**

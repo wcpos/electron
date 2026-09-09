@@ -4,11 +4,7 @@ import { unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import {
-	buildWinspoolKey,
-	WINSPOOL_PREFIX as DEVICE_KEY_WINSPOOL_PREFIX,
-} from '@wcpos/printer/transport/device-key';
-
+import { buildWinspoolKey, WINSPOOL_PREFIX as DEVICE_KEY_WINSPOOL_PREFIX } from './device-key';
 import { type Delivery, sendRawBytes } from './raw-print';
 
 import type { WebContents } from 'electron';
