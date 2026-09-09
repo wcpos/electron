@@ -6,6 +6,11 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      monorepo_ref:
+        description: "wcpos/monorepo ref to build the renderer from; empty = the ref in .monorepo-ref"
+        type: string
+        required: false
+        default: ""
       platform:
         description: "Select the platform to build and publish"
         required: true
@@ -31,13 +36,39 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
+      - name: Resolve monorepo ref
+        id: pin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MONOREPO_REF_INPUT: ${{ github.event.inputs.monorepo_ref }}
+        run: |
+          set -euo pipefail
+          ref="$MONOREPO_REF_INPUT"
+          if [ -z "$ref" ]; then
+            ref=$(gh api "repos/$GITHUB_REPOSITORY/contents/.monorepo-ref?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw")
+          fi
+          ref=$(printf '%s' "$ref" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          if [ -z "$ref" ]; then
+            echo "::error::Monorepo ref is empty"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: 📥 Check out the Monorepo repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: wcpos/monorepo
+          ref: ${{ steps.pin.outputs.ref }}
           persist-credentials: false
 
+      - name: Report monorepo source
+        env:
+          MONOREPO_REF: ${{ steps.pin.outputs.ref }}
+        run: |
+          printf 'Monorepo ref: %s\nMonorepo SHA: %s\n' "$MONOREPO_REF" "$(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: 🏗 Setup Monorepo
+        # A uses: ref cannot be an expression, so setup tracks main while source tracks the pin.
         uses: wcpos/monorepo/.github/actions/setup-monorepo@main
         with:
           rxdb-license-key: ${{ secrets.RXDB_LICENSE_KEY }}
@@ -404,8 +435,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Fill the (draft) release body once any platform has published assets.
-  # The desktop release notes mirror the WCPOS app release of the same version
-  # (created earlier in the release train on wcpos/monorepo), plus a desktop
+  # The desktop release notes mirror the WCPOS app release at .monorepo-ref
+  # (when it names a release tag in wcpos/monorepo), plus a desktop
   # footer. A non-empty body is never overwritten, so hand-curated notes and
   # re-runs of failed platform jobs are safe.
   release-notes:
@@ -448,25 +479,32 @@ jobs:
           # rate-limit, or other API errors so we never publish incomplete
           # notes silently.
           notes_file=$(mktemp)
-          set +e
-          resp=$(gh api "repos/wcpos/monorepo/releases/tags/$tag" 2>&1)
-          rc=$?
-          set -e
-          if [ "$rc" -eq 0 ]; then
-            printf '%s' "$resp" | jq -r '.body // ""' > "$notes_file"
-            if [ -s "$notes_file" ]; then
-              echo "" >> "$notes_file"
+          app_ref=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' .monorepo-ref)
+          app_version="$app_ref"
+          if [[ "$app_ref" =~ ^v[0-9] ]]; then
+            app_version="${app_ref#v}"
+            set +e
+            resp=$(gh api "repos/wcpos/monorepo/releases/tags/$app_ref" 2>&1)
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              printf '%s' "$resp" | jq -r '.body // ""' > "$notes_file"
+              if [ -s "$notes_file" ]; then
+                echo "" >> "$notes_file"
+              else
+                echo "::warning title=App notes empty::wcpos/monorepo release $app_ref exists but has an empty body; using the desktop footer only."
+              fi
+            elif printf '%s' "$resp" | grep -q "HTTP 404"; then
+              echo "::warning title=App notes missing::No wcpos/monorepo release $app_ref; using the desktop footer only."
+              : > "$notes_file"
             else
-              echo "::warning title=App notes empty::wcpos/monorepo release $tag exists but has an empty body; using the desktop footer only."
+              echo "::error title=App notes lookup failed::gh api exited $rc: $resp"
+              exit 1
             fi
-          elif printf '%s' "$resp" | grep -q "HTTP 404"; then
-            echo "::warning title=App notes missing::No wcpos/monorepo release $tag; using the desktop footer only."
-            : > "$notes_file"
           else
-            echo "::error title=App notes lookup failed::gh api exited $rc: $resp"
-            exit 1
+            echo "::warning title=App notes skipped::wcpos/monorepo ref $app_ref is not a release tag; using the desktop footer only."
           fi
-          echo "Desktop build of WCPOS app **$version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
+          echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
 
           # Re-check right before writing: GitHub has no conditional release
           # update, so this narrows the window in which a concurrent manual
@@ -477,4 +515,4 @@ jobs:
             exit 0
           fi
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$notes_file"
-          echo "Release notes set on $tag from wcpos/monorepo $tag."
+          echo "Release notes set on $tag from wcpos/monorepo $app_ref."
