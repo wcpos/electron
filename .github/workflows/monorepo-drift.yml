@@ -1,0 +1,24 @@
+name: Monorepo Drift
+
+on:
+  pull_request:
+  push:
+    branches: [main, next]
+  # A commit in the other repo can cause drift without firing anything here.
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash scripts/check-monorepo-drift.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

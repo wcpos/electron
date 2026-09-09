@@ -183,6 +183,8 @@ Packaging is driven by [Electron Forge](https://www.electronforge.io/) ([`forge.
 
 ## 🚀 Releases & auto-update
 
+The desktop build's renderer comes from wcpos/monorepo at the ref in [`.monorepo-ref`](./.monorepo-ref); bump it in the same PR as the version bump.
+
 Pushes to `main` trigger the [Publish workflow](./.github/workflows/tag-and-release.yml): it builds the Expo renderer, then builds, signs and publishes platform installers to [GitHub Releases](https://github.com/wcpos/electron/releases). Installed apps check for updates against `https://updates.wcpos.com` and apply new release assets in place. Changes are tracked in [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## 🤝 Contributing
