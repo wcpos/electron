@@ -1,5 +1,3 @@
-import path from 'path';
-
 import type { ModuleOptions } from 'webpack';
 
 export const rules: Required<ModuleOptions>['rules'] = [
@@ -27,7 +25,7 @@ export const rules: Required<ModuleOptions>['rules'] = [
 			loader: 'ts-loader',
 			options: {
 				compilerOptions: {
-					rootDir: path.resolve(__dirname, '../..'),
+					rootDir: __dirname,
 				},
 				transpileOnly: true,
 			},

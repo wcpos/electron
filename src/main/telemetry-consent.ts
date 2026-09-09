@@ -1,10 +1,10 @@
 import { ipcMain } from 'electron';
 import Store from 'electron-store';
 
-import type { TelemetryConsent } from '@wcpos/printer/ipc-channels';
-
 import { resetInstallId } from './install-id';
 import { disableSentry, enableSentry, logger } from './log';
+
+import type { TelemetryConsent } from '../ipc-channels';
 
 /**
  * Gates the main-process Sentry client on the merchant's tracking consent.

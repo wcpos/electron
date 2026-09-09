@@ -8,18 +8,14 @@ import {
 	usb,
 } from 'usb';
 
-import type { UsbPrinterInfo } from '@wcpos/printer/ipc-channels';
-import {
-	buildUsbKey,
-	connectionTypeForTarget,
-	parseTarget,
-} from '@wcpos/printer/transport/device-key';
-
+import { buildUsbKey, connectionTypeForTarget, parseTarget } from './device-key';
 import { handleIpc } from './ipc';
 import { logger } from './log';
 import { type Delivery, rawPrintBufferFromData, sendRawBytes } from './raw-print';
 import { parseUsbModelReply } from './usb-model-reply';
 import { listSpoolerPrinters, printRawToSpooler } from './winspool-printer';
+
+import type { UsbPrinterInfo } from '../ipc-channels';
 
 const USB_PRINTER_CLASS = 0x07;
 const USB_PRINT_TIMEOUT_MS = 20_000;
@@ -30,7 +26,7 @@ const USB_MODEL_REPLY_BYTES = 64;
 const GS_I_MODEL_NAME = Buffer.from([0x1d, 0x49, 0x43]);
 type UsbInterface = NonNullable<Device['interfaces']>[number];
 
-export type { UsbPrinterInfo } from '@wcpos/printer/ipc-channels';
+export type { UsbPrinterInfo } from '../ipc-channels';
 
 function deviceKey(d: Device): string {
 	const { idVendor, idProduct } = d.deviceDescriptor;

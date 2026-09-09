@@ -1,6 +1,6 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 
-import type { IpcInvokeChannels } from '@wcpos/printer/ipc-channels';
+import type { IpcInvokeChannels } from '../ipc-channels';
 
 export function handleIpc<C extends keyof IpcInvokeChannels>(
 	channel: C,

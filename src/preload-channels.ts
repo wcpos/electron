@@ -1,5 +1,5 @@
 /**
- * Invoke channels main serves ahead of their typed entry in @wcpos/printer's INVOKE_CHANNELS.
+ * Invoke channels main serves ahead of their typed entry in src/ipc-channels.ts's INVOKE_CHANNELS.
  * Each one names the companion PR that adds the typed entry; remove it once that lands.
  */
 export const PRELOAD_EXTRA_INVOKE_CHANNELS = [

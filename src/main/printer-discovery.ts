@@ -1,9 +1,9 @@
 import Bonjour from 'bonjour-service';
 
-import type { DiscoveredNetworkPrinter, IpcInvokeChannels } from '@wcpos/printer/ipc-channels';
-
 import { handleIpc } from './ipc';
 import { logger } from './log';
+
+import type { DiscoveredNetworkPrinter, IpcInvokeChannels } from '../ipc-channels';
 
 interface MdnsServiceLike {
 	name: string;
@@ -14,7 +14,7 @@ interface MdnsServiceLike {
 	txt?: Record<string, unknown>;
 }
 
-export type { DiscoveredNetworkPrinter } from '@wcpos/printer/ipc-channels';
+export type { DiscoveredNetworkPrinter } from '../ipc-channels';
 
 type PrinterDiscoveryRequest = IpcInvokeChannels['printer-discovery']['req'];
 
