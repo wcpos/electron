@@ -28,6 +28,7 @@ type ChallengeModule = {
 	createChallengeClearer(deps: {
 		getCookies(url: string): Promise<CookieLike[]>;
 		createWindow(host: string): ChallengeWindow;
+		userAgent(): string;
 		silentSolveMs?: number;
 		interactiveSolveMs?: number;
 		failureCooldownMs?: number;
@@ -36,6 +37,7 @@ type ChallengeModule = {
 	}): {
 		cookieHeaderFor(url: string): Promise<string | undefined>;
 		clear(url: string): Promise<boolean>;
+		userAgent(): string;
 	};
 };
 
@@ -138,8 +140,11 @@ async function main() {
 		const clearer = mod.createChallengeClearer({
 			getCookies: async () => jar,
 			createWindow: (host) => createWindow(host),
+			userAgent: () => 'Mozilla/5.0 (test) Chrome/150.0.0.0 Electron/43.4.0',
 			...timing,
 		});
+		// The bridge sends this UA with every clearance; it is the window's, verbatim.
+		assert.equal(clearer.userAgent(), 'Mozilla/5.0 (test) Chrome/150.0.0.0 Electron/43.4.0');
 		assert.equal(await clearer.cookieHeaderFor(STORE), undefined);
 		jar = [
 			{ name: 'wordpress_logged_in_abc', value: 'nope' },

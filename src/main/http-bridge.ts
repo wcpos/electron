@@ -87,6 +87,10 @@ type AxiosFailure = {
 	response?: SerializedResponse;
 };
 
+// A Cookie header value that carries Cloudflare's clearance (not merely its
+// bot-management cookies, which can outlive it).
+const CLEARANCE_COOKIE = /(?:^|;\s*)cf_clearance=/;
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return Object.prototype.toString.call(value) === '[object Object]';
 }
@@ -222,6 +226,16 @@ export function createAxiosChannelHandler(
 			if (!cookie) return;
 			const existing = headers.get('cookie');
 			headers.set('cookie', existing ? `${existing}; ${cookie}` : cookie);
+			// The clearance is bound to the User-Agent that solved the challenge. The
+			// renderer stamps a product UA (`WCPOS/x.y.z (electron …)`) on its
+			// requests; with that UA the cookie is rejected and the replay is
+			// challenged again (1.10.11 shipped exactly this and never connected).
+			// A request that carries the cookie must therefore present the window's UA.
+			// Only the clearance triggers it: __cf_bm / _cfuvid can outlive it, and a
+			// request without a clearance keeps the caller's UA.
+			if (CLEARANCE_COOKIE.test(cookie)) {
+				headers.set('user-agent', challengeClearer.userAgent());
+			}
 		} catch (error) {
 			logger.debug('Cloudflare clearance lookup failed', {
 				message: error instanceof Error ? error.message : String(error),
@@ -302,6 +316,14 @@ export function createAxiosChannelHandler(
 					else headers.set('cookie', callerCookie);
 					await attachClearance(requestUrl, headers);
 					response = await fetchImpl(requestUrl, init);
+					// Said out loud: without this line the log reads "cleared" followed
+					// by a bare 403, which is how the 1.10.11 failure hid for a release.
+					if (isChallengeResponse(response.headers)) {
+						logger.warn('Cloudflare challenge persisted after clearing; returning it', {
+							request: requestLabel(config),
+							clearanceAttached: CLEARANCE_COOKIE.test(headers.get('cookie') || ''),
+						});
+					}
 				}
 			}
 			const serialized: SerializedResponse = {
