@@ -161,6 +161,18 @@ async function responseData(response: Response, responseType?: AxiosConfig['resp
 	}
 }
 
+async function serializeResponse(
+	response: Response,
+	responseType?: AxiosConfig['responseType']
+): Promise<SerializedResponse> {
+	return {
+		data: await responseData(response, responseType),
+		status: response.status,
+		statusText: response.statusText,
+		headers: Object.fromEntries(response.headers.entries()),
+	};
+}
+
 function logFailure(config: AxiosConfig, failure: AxiosFailure): void {
 	if (isDevelopment) {
 		logger.debug(`${requestLabel(config)} FAILED`, {
@@ -257,7 +269,9 @@ export function createAxiosChannelHandler(
 		const config = obj.config || {};
 		const controller = new AbortController();
 		if (obj.requestId) activeRequests.set(obj.requestId, controller);
-		// Tracks the current fetch timeout (renewed for replay), not the solve wait.
+		// The timeout governing the current fetch: cleared while a challenge is
+		// being solved and renewed for the replay, so the catch below classifies
+		// only a fetch that actually timed out as ECONNABORTED.
 		// Assigned inside try: a malformed timeout must resolve the failure shape,
 		// never reject the IPC promise (the always-resolve contract).
 		let timeoutSignal: AbortSignal | undefined;
@@ -308,25 +322,32 @@ export function createAxiosChannelHandler(
 			await attachClearance(requestUrl, headers);
 			const init = { method, headers, body, signal };
 			let response = await fetchImpl(requestUrl, init);
+			let serialized: SerializedResponse | undefined;
 			// A Cloudflare challenge is not the store's answer: solve it in a real
 			// Chromium window and ask once more. A second challenge is returned as-is.
 			if (isChallengeResponse(response.headers)) {
 				logger.warn('Cloudflare challenged request; clearing', { request: requestLabel(config) });
-				// The clearer bounds the wait: 15 s silently + 120 s interactively,
-				// so only caller cancellation may interrupt it, not the fetch timeout.
+				// Read the challenge now: its body was fetched under the request's
+				// timeout, which may expire during the solve, and a failed solve hands
+				// this answer (403 + cf-mitigated) back to the renderer.
+				serialized = await serializeResponse(response, config.responseType);
+				// The solve is not the caller's request. The clearer bounds it (15 s
+				// silently + 120 s interactively); only cancellation may interrupt it,
+				// and an expired fetch timeout must not label its failure ECONNABORTED.
+				timeoutSignal = undefined;
 				if (await untilAborted(challengeClearer.clear(requestUrl), controller.signal)) {
 					if (callerCookie === null) headers.delete('cookie');
 					else headers.set('cookie', callerCookie);
 					await attachClearance(requestUrl, headers);
-					// The discarded challenge body must not hold the connection.
-					void response.body?.cancel().catch(() => {});
-					if (timeoutSignal) {
+					// The replay is a fresh request and gets the caller's full timeout.
+					if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
 						timeoutSignal = AbortSignal.timeout(Math.min(timeoutMs, 2 ** 31 - 1));
 					}
 					const replaySignal = timeoutSignal
 						? AbortSignal.any([controller.signal, timeoutSignal])
 						: controller.signal;
 					response = await fetchImpl(requestUrl, { ...init, signal: replaySignal });
+					serialized = undefined;
 					// Said out loud: without this line the log reads "cleared" followed
 					// by a bare 403, which is how the 1.10.11 failure hid for a release.
 					if (isChallengeResponse(response.headers)) {
@@ -337,12 +358,7 @@ export function createAxiosChannelHandler(
 					}
 				}
 			}
-			const serialized: SerializedResponse = {
-				data: await responseData(response, config.responseType),
-				status: response.status,
-				statusText: response.statusText,
-				headers: Object.fromEntries(response.headers.entries()),
-			};
+			if (!serialized) serialized = await serializeResponse(response, config.responseType);
 			if (config.validateStatus !== null && (response.status < 200 || response.status >= 300)) {
 				return serializeFailure(config, {
 					message: `Request failed with status code ${response.status}`,

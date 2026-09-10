@@ -455,20 +455,11 @@ async function main() {
 		resetCalls();
 		clearerSolves = true;
 		let challengesServed = 0;
-		let challengeBodyCancels = 0;
 		responder = (url, init) => {
 			const cookie = (init?.headers as Headers | undefined)?.get('cookie') || '';
 			if (!cookie.includes('cf_clearance=minted')) {
 				challengesServed += 1;
-				const response = challengeResponse();
-				Object.defineProperty(response, 'body', {
-					value: {
-						cancel: async () => {
-							challengeBodyCancels += 1;
-						},
-					},
-				});
-				return response;
+				return challengeResponse();
 			}
 			return new Response(JSON.stringify({ id: 7 }), {
 				status: 200,
@@ -487,7 +478,6 @@ async function main() {
 		assert.deepEqual(cleared.data, { id: 7 });
 		assert.equal(challengesServed, 1);
 		assert.equal(fetchCalls.length, 2, 'exactly one replay');
-		assert.equal(challengeBodyCancels, 1, 'release the challenge body before discarding it');
 		assert.deepEqual(clearerCalls.clear, ['https://store.test/wp-json/wcpos/v1/orders']);
 		assert.equal(fetchCalls[1]?.init?.body, '{"total":"1.00"}', 'replay carries the same body');
 		assert.equal((fetchCalls[1]?.init?.headers as Headers).get('cookie'), 'cf_clearance=minted');
@@ -585,6 +575,23 @@ async function main() {
 		assert.equal(timedOut.success, false);
 		assert.equal(timedOut.code, 'ECONNABORTED');
 		assert.equal(fetchCalls.length, 2);
+
+		// A solve that fails after the request's own timeout expired still hands
+		// back the challenge (403 + cf-mitigated) it read up front, not a
+		// spurious ECONNABORTED: the renderer needs that header to say "HOST121".
+		resetCalls();
+		clearerSolves = false;
+		clearerDelayMs = 60;
+		responder = () => challengeResponse();
+		const failedLate = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/wp-json/', timeout: 30 },
+		});
+		assert.equal(failedLate.success, false);
+		assert.equal(failedLate.code, 'ERR_BAD_REQUEST');
+		assert.equal(failedLate.response?.status, 403);
+		assert.equal(failedLate.response?.headers['cf-mitigated'], 'challenge');
+		assert.equal(fetchCalls.length, 1, 'no replay without clearance');
 
 		// A challenge that persists after clearing is returned as-is, not retried again.
 		resetCalls();
