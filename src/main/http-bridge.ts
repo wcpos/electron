@@ -200,7 +200,7 @@ function serializeFailure(config: AxiosConfig, failure: AxiosFailure) {
 	};
 }
 
-// A cancelled or timed-out request stops waiting for the challenge solve; the
+// Only caller cancellation stops waiting for the challenge solve; the
 // origin-level solve itself carries on for whichever requests still want it.
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 	if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
@@ -257,6 +257,7 @@ export function createAxiosChannelHandler(
 		const config = obj.config || {};
 		const controller = new AbortController();
 		if (obj.requestId) activeRequests.set(obj.requestId, controller);
+		// Tracks the current fetch timeout (renewed for replay), not the solve wait.
 		// Assigned inside try: a malformed timeout must resolve the failure shape,
 		// never reject the IPC promise (the always-resolve contract).
 		let timeoutSignal: AbortSignal | undefined;
@@ -311,13 +312,21 @@ export function createAxiosChannelHandler(
 			// Chromium window and ask once more. A second challenge is returned as-is.
 			if (isChallengeResponse(response.headers)) {
 				logger.warn('Cloudflare challenged request; clearing', { request: requestLabel(config) });
-				if (await untilAborted(challengeClearer.clear(requestUrl), signal)) {
+				// The clearer bounds the wait: 15 s silently + 120 s interactively,
+				// so only caller cancellation may interrupt it, not the fetch timeout.
+				if (await untilAborted(challengeClearer.clear(requestUrl), controller.signal)) {
 					if (callerCookie === null) headers.delete('cookie');
 					else headers.set('cookie', callerCookie);
 					await attachClearance(requestUrl, headers);
 					// The discarded challenge body must not hold the connection.
 					void response.body?.cancel().catch(() => {});
-					response = await fetchImpl(requestUrl, init);
+					if (timeoutSignal) {
+						timeoutSignal = AbortSignal.timeout(Math.min(timeoutMs, 2 ** 31 - 1));
+					}
+					const replaySignal = timeoutSignal
+						? AbortSignal.any([controller.signal, timeoutSignal])
+						: controller.signal;
+					response = await fetchImpl(requestUrl, { ...init, signal: replaySignal });
 					// Said out loud: without this line the log reads "cleared" followed
 					// by a bare 403, which is how the 1.10.11 failure hid for a release.
 					if (isChallengeResponse(response.headers)) {
