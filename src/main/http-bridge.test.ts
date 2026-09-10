@@ -34,9 +34,47 @@ type BridgeResult = {
 
 type AxiosHandler = (event: unknown, message: BridgeMessage) => Promise<BridgeResult>;
 
-type AxiosModule = {
-	createAxiosChannelHandler(fetchImpl?: FetchImpl): AxiosHandler;
+type ChallengeClearer = {
+	cookieHeaderFor(url: string): Promise<string | undefined>;
+	clear(url: string): Promise<boolean>;
+	userAgent(): string;
 };
+
+type AxiosModule = {
+	createAxiosChannelHandler(fetchImpl?: FetchImpl, clearer?: ChallengeClearer): AxiosHandler;
+};
+
+// Cloudflare clearance stand-in: no cookies and nothing to solve unless a test
+// says otherwise, so existing scenarios see the bridge exactly as before.
+const clearerCalls: { cookieHeaderFor: string[]; clear: string[] } = {
+	cookieHeaderFor: [],
+	clear: [],
+};
+let clearerCookie: string | undefined;
+let clearerSolves = false;
+let clearerHangs = false;
+// The UA the (fake) challenge window presents; a clearance is bound to it.
+const WINDOW_UA = 'Mozilla/5.0 (test) WCPOS/1.10.12 Chrome/150.0.0.0 Electron/43.4.0';
+// What the renderer stamps on every non-HEAD request (AppInfo.userAgentHeader).
+const PRODUCT_UA = 'WCPOS/1.10.10 (electron 1.10.11)';
+const fakeClearer: ChallengeClearer = {
+	userAgent: () => WINDOW_UA,
+	async cookieHeaderFor(url) {
+		clearerCalls.cookieHeaderFor.push(url);
+		return clearerCookie;
+	},
+	async clear(url) {
+		clearerCalls.clear.push(url);
+		if (clearerHangs) return new Promise<boolean>(() => undefined);
+		if (clearerSolves) clearerCookie = 'cf_clearance=minted';
+		return clearerSolves;
+	},
+};
+const challengeResponse = () =>
+	new Response('<!DOCTYPE html><title>Just a moment...</title>', {
+		status: 403,
+		headers: { 'Content-Type': 'text/html; charset=UTF-8', 'cf-mitigated': 'challenge' },
+	});
 
 let registeredHandler: AxiosHandler | undefined;
 let responder: (url: string, init?: RequestInit) => Promise<Response> | Response = () =>
@@ -64,9 +102,13 @@ const electronMock = {
 	net: { fetch: fakeFetch },
 };
 
+const warnCalls: unknown[][] = [];
 const loggerMock = {
 	debug(...args: unknown[]) {
 		debugCalls.push(args);
+	},
+	warn(...args: unknown[]) {
+		warnCalls.push(args);
 	},
 	error(...args: unknown[]) {
 		errorCalls.push(args);
@@ -101,6 +143,11 @@ function loadAxiosModule(): AxiosModule {
 
 function resetCalls(): void {
 	fetchCalls.length = 0;
+	clearerCalls.cookieHeaderFor.length = 0;
+	clearerCalls.clear.length = 0;
+	clearerCookie = undefined;
+	clearerSolves = false;
+	clearerHangs = false;
 	debugCalls.length = 0;
 	errorCalls.length = 0;
 }
@@ -112,7 +159,7 @@ async function main() {
 	try {
 		const axiosModule = loadAxiosModule();
 		assert.ok(registeredHandler, 'http-request IPC handler should be registered');
-		let handler = axiosModule.createAxiosChannelHandler(fakeFetch);
+		let handler = axiosModule.createAxiosChannelHandler(fakeFetch, fakeClearer);
 
 		const success = await handler(undefined, {
 			type: 'request',
@@ -147,7 +194,7 @@ async function main() {
 		resetCalls();
 		process.env.WCPOS_LOG_HTTP_BODIES = '1';
 		registeredHandler = undefined;
-		handler = loadAxiosModule().createAxiosChannelHandler(fakeFetch);
+		handler = loadAxiosModule().createAxiosChannelHandler(fakeFetch, fakeClearer);
 		assert.ok(registeredHandler, 'http-request IPC handler should be re-registered');
 
 		await handler(undefined, {
@@ -379,6 +426,227 @@ async function main() {
 		});
 		assert.equal(fetchCalls[0]?.init?.body, '{"total":"1.00"}');
 		assert.equal((fetchCalls[0]?.init?.headers as Headers).get('content-type'), 'application/json');
+
+		// Cloudflare clearance: an existing cookie rides on every request as a
+		// Cookie header (net.fetch sends no session cookies), merged after any
+		// caller-supplied cookie.
+		resetCalls();
+		clearerCookie = 'cf_clearance=tok; __cf_bm=bm';
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://store.test/wp-json/wcpos/v1/products',
+				headers: { cookie: 'a=1' },
+			},
+		});
+		assert.equal(fetchCalls.length, 1);
+		assert.equal(
+			(fetchCalls[0]?.init?.headers as Headers).get('cookie'),
+			'a=1; cf_clearance=tok; __cf_bm=bm'
+		);
+		assert.deepEqual(clearerCalls.clear, [], 'a 200 never triggers a solve');
+
+		// A challenge response is solved in the window and the request replayed
+		// once with the minted cookie; the caller sees only the store's answer.
+		resetCalls();
+		clearerSolves = true;
+		let challengesServed = 0;
+		responder = (url, init) => {
+			const cookie = (init?.headers as Headers | undefined)?.get('cookie') || '';
+			if (!cookie.includes('cf_clearance=minted')) {
+				challengesServed += 1;
+				return challengeResponse();
+			}
+			return new Response(JSON.stringify({ id: 7 }), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		};
+		const cleared = await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'post',
+				url: 'https://store.test/wp-json/wcpos/v1/orders',
+				data: { total: '1.00' },
+			},
+		});
+		assert.equal(cleared.success, true);
+		assert.deepEqual(cleared.data, { id: 7 });
+		assert.equal(challengesServed, 1);
+		assert.equal(fetchCalls.length, 2, 'exactly one replay');
+		assert.deepEqual(clearerCalls.clear, ['https://store.test/wp-json/wcpos/v1/orders']);
+		assert.equal(fetchCalls[1]?.init?.body, '{"total":"1.00"}', 'replay carries the same body');
+		assert.equal((fetchCalls[1]?.init?.headers as Headers).get('cookie'), 'cf_clearance=minted');
+
+		// A stale clearance is the usual reason for a challenge: the replay must
+		// carry only the fresh one, after the caller's own cookies.
+		resetCalls();
+		clearerCookie = 'cf_clearance=stale';
+		clearerSolves = true;
+		// The bridge mutates one Headers object across both attempts, so the cookie
+		// is captured as each fetch sees it.
+		const cookiesSeen: string[] = [];
+		responder = (url, init) => {
+			const cookie = (init?.headers as Headers | undefined)?.get('cookie') || '';
+			cookiesSeen.push(cookie);
+			return cookie.includes('cf_clearance=minted')
+				? new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+				: challengeResponse();
+		};
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://store.test/wp-json/wcpos/v1/products',
+				headers: { cookie: 'a=1' },
+			},
+		});
+		assert.deepEqual(cookiesSeen, ['a=1; cf_clearance=stale', 'a=1; cf_clearance=minted']);
+
+		// If the challenge cannot be cleared the original 403 is returned, once.
+		resetCalls();
+		clearerSolves = false;
+		responder = () => challengeResponse();
+		const stuck = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/wp-json/' },
+		});
+		assert.equal(stuck.success, false);
+		assert.equal(stuck.response?.status, 403);
+		assert.equal(stuck.response?.headers['cf-mitigated'], 'challenge');
+		assert.equal(fetchCalls.length, 1, 'no replay without clearance');
+		assert.equal(clearerCalls.clear.length, 1);
+
+		// The request's own timeout still applies while the challenge is being
+		// solved: the caller gets its timeout, not a two-minute wait, and no replay.
+		resetCalls();
+		clearerHangs = true;
+		responder = () => challengeResponse();
+		// AbortSignal.timeout uses an unref'd timer: with the solve hanging, only
+		// this ref'd timer keeps Node alive long enough for the timeout to fire.
+		const keepAlive = setTimeout(() => undefined, 5_000);
+		const timedOut = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/wp-json/', timeout: 30 },
+		});
+		assert.equal(timedOut.success, false);
+		clearTimeout(keepAlive);
+		assert.equal(timedOut.code, 'ECONNABORTED');
+		assert.equal(fetchCalls.length, 1);
+
+		// A challenge that persists after clearing is returned as-is, not retried again.
+		resetCalls();
+		clearerSolves = true;
+		const persistent = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/wp-json/' },
+		});
+		assert.equal(persistent.success, false);
+		assert.equal(persistent.response?.status, 403);
+		assert.equal(fetchCalls.length, 2);
+		assert.ok(
+			warnCalls.some(([message]) => String(message).includes('persisted after clearing')),
+			'a replay that is still challenged is logged, not returned silently'
+		);
+
+		// The 1.10.11 regression: the renderer's product UA rides on the request,
+		// but the clearance was minted under the window's UA and Cloudflare binds
+		// the cookie to the exact string. Whenever the cookie is attached the
+		// request must present the window's UA instead — on the first send and on
+		// the replay alike — and a request without a clearance keeps the caller's UA.
+		resetCalls();
+		clearerCookie = 'cf_clearance=tok';
+		responder = (_url, init) => {
+			const h = init?.headers as Headers;
+			return h.get('user-agent') === WINDOW_UA && (h.get('cookie') || '').includes('cf_clearance')
+				? new Response('{"ok":true}', {
+						status: 200,
+						headers: { 'Content-Type': 'application/json' },
+					})
+				: challengeResponse();
+		};
+		const withClearance = await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://store.test/wp-json/wcpos/v2/site',
+				headers: { 'User-Agent': PRODUCT_UA, 'X-WCPOS': '1' },
+			},
+		});
+		assert.equal(withClearance.success, true, 'product UA is replaced when the cookie is attached');
+		assert.equal((fetchCalls[0]?.init?.headers as Headers).get('user-agent'), WINDOW_UA);
+		assert.equal(
+			(fetchCalls[0]?.init?.headers as Headers).get('x-wcpos'),
+			'1',
+			'other headers kept'
+		);
+
+		resetCalls();
+		clearerSolves = true;
+		// The bridge reuses one Headers object for the replay, so the UA is
+		// captured per call rather than read back from fetchCalls afterwards.
+		const uasSeen: (string | null)[] = [];
+		responder = (_url, init) => {
+			const h = init?.headers as Headers;
+			uasSeen.push(h.get('user-agent'));
+			return h.get('user-agent') === WINDOW_UA && (h.get('cookie') || '').includes('cf_clearance')
+				? new Response('{"ok":true}', {
+						status: 200,
+						headers: { 'Content-Type': 'application/json' },
+					})
+				: challengeResponse();
+		};
+		const solvedWithProductUa = await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://store.test/wp-json/wcpos/v2/site',
+				headers: { 'User-Agent': PRODUCT_UA },
+			},
+		});
+		assert.equal(solvedWithProductUa.success, true, 'replay after a solve presents the window UA');
+		assert.deepEqual(
+			uasSeen,
+			[PRODUCT_UA, WINDOW_UA],
+			'first send keeps the caller UA, replay uses the window UA'
+		);
+
+		// Bot-management cookies (__cf_bm, _cfuvid) can outlive the clearance; on
+		// their own they are forwarded but do not trigger the UA override.
+		resetCalls();
+		clearerCookie = '__cf_bm=bm; _cfuvid=uv';
+		responder = () =>
+			new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://store.test/wp-json/',
+				headers: { 'User-Agent': PRODUCT_UA },
+			},
+		});
+		assert.equal((fetchCalls[0]?.init?.headers as Headers).get('cookie'), '__cf_bm=bm; _cfuvid=uv');
+		assert.equal(
+			(fetchCalls[0]?.init?.headers as Headers).get('user-agent'),
+			PRODUCT_UA,
+			'no cf_clearance, no UA override'
+		);
+
+		resetCalls();
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://plain.test/wp-json/',
+				headers: { 'User-Agent': PRODUCT_UA },
+			},
+		});
+		assert.equal(
+			(fetchCalls[0]?.init?.headers as Headers).get('user-agent'),
+			PRODUCT_UA,
+			'no clearance, no UA override'
+		);
 
 		// A silent early exit (an unsettled await draining the event loop) would look
 		// identical to a pass, so completion is asserted with an explicit marker.
