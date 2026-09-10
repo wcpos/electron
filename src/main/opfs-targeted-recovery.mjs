@@ -175,12 +175,12 @@ async function repairDocument(
   });
 }
 
-// Dropping a row is a positional "D" operation; under multi-instance two
-// peers that each detect the same blank row would apply the other's deletion
-// at a shifted position (see dropHollowRows), so this pass refuses there for
-// whitespace and NUL alike and the retry fails into the refusing repair path.
-async function dropWhitespaceRows(instance, target, multiInstance) {
-  if (multiInstance) return;
+// A blank range is whitespace (compaction's own fill) or NUL (a Windows
+// zero-fill after a crash); both drop the same way. The positional "D" op is
+// broadcast like any other storage op, so peers apply the same deletion —
+// unlike the per-id hollow probe, which several peers can run concurrently
+// and which therefore refuses under multi-instance (see dropHollowRows).
+async function dropWhitespaceRows(instance, target) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const accessHandle = await documentsAccessHandle(state, runState);
@@ -1038,7 +1038,7 @@ export function withTargetedOpfsRecovery(storage) {
         } catch (initialError) {
           let failure;
           try {
-            await dropWhitespaceRows(instance, target, params.multiInstance);
+            await dropWhitespaceRows(instance, target);
             return await cleanup(minimumDeletedTime);
           } catch (retryError) {
             failure = retryError;

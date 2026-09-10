@@ -1711,7 +1711,7 @@ for (const [filler, fill] of [
   ["whitespace", 0x20],
 ]) {
   for (const operation of ["read", "cleanup"]) {
-    test(`${operation}: ${filler} blank-range repair remains refused in multi-instance mode`, async () => {
+    test(`${operation}: a ${filler} blank range under multi-instance is refused on read, dropped by cleanup`, async () => {
       const basePath = await mkdtemp(join(tmpdir(), "wcpos-blank-multi-"));
       const damaged = document("order:damaged", 0);
       let recovering;
@@ -1732,30 +1732,40 @@ for (const [filler, fill] of [
         const before = structuredClone(
           state.indexStates.map((index) => index.rows),
         );
-        // A NUL range fails JSON parsing, so the repair path refuses it by
-        // name. A whitespace range parses to nothing: a read reports the
-        // document absent and the hollow drop is refused silently, while the
-        // compaction walk dereferences the missing document. Either way no
-        // row moved.
-        const attempt = () =>
-          operation === "cleanup"
-            ? recovering.cleanup(0)
-            : recovering.findDocumentsById([damaged.id], true);
-        if (filler === "whitespace" && operation === "read") {
-          assert.deepEqual(await attempt(), []);
-        } else {
+        if (operation === "cleanup") {
+          // The cleanup pass drops a blank row and broadcasts the positional
+          // op, NUL or whitespace alike (see the cleanup suite's broadcast
+          // test); the retry then completes.
+          await recovering.cleanup(0);
+          assert.equal(state.firstIdx.metaIdMap.has(damaged.id), false);
+          for (const index of state.indexStates) {
+            assert.equal(index.rows.length, 0);
+          }
+        } else if (filler === "NUL") {
+          // A NUL range fails JSON parsing, so the per-id repair path refuses
+          // it by name under multi-instance and no row moves.
           await assert.rejects(
-            attempt,
-            filler === "whitespace"
-              ? /Cannot read properties of undefined/
-              : /targeted recovery refused: multi-instance/,
+            () => recovering.findDocumentsById([damaged.id], true),
+            /targeted recovery refused: multi-instance/,
           );
+          assert.deepEqual(
+            state.indexStates.map((index) => index.rows),
+            before,
+          );
+          assert.equal(state.firstIdx.metaIdMap.has(damaged.id), true);
+        } else {
+          // A whitespace range parses to nothing: the read reports the
+          // document absent and the hollow drop is refused silently.
+          assert.deepEqual(
+            await recovering.findDocumentsById([damaged.id], true),
+            [],
+          );
+          assert.deepEqual(
+            state.indexStates.map((index) => index.rows),
+            before,
+          );
+          assert.equal(state.firstIdx.metaIdMap.has(damaged.id), true);
         }
-        assert.deepEqual(
-          state.indexStates.map((index) => index.rows),
-          before,
-        );
-        assert.equal(state.firstIdx.metaIdMap.has(damaged.id), true);
       } finally {
         await recovering?.close();
         await rm(basePath, { recursive: true, force: true });
