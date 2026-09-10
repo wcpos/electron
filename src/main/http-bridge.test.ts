@@ -53,6 +53,7 @@ const clearerCalls: { cookieHeaderFor: string[]; clear: string[] } = {
 let clearerCookie: string | undefined;
 let clearerSolves = false;
 let clearerHangs = false;
+let clearerDelayMs = 0;
 // The UA the (fake) challenge window presents; a clearance is bound to it.
 const WINDOW_UA = 'Mozilla/5.0 (test) WCPOS/1.10.12 Chrome/150.0.0.0 Electron/43.4.0';
 // What the renderer stamps on every non-HEAD request (AppInfo.userAgentHeader).
@@ -66,6 +67,7 @@ const fakeClearer: ChallengeClearer = {
 	async clear(url) {
 		clearerCalls.clear.push(url);
 		if (clearerHangs) return new Promise<boolean>(() => undefined);
+		if (clearerDelayMs) await new Promise((resolve) => setTimeout(resolve, clearerDelayMs));
 		if (clearerSolves) clearerCookie = 'cf_clearance=minted';
 		return clearerSolves;
 	},
@@ -148,6 +150,7 @@ function resetCalls(): void {
 	clearerCookie = undefined;
 	clearerSolves = false;
 	clearerHangs = false;
+	clearerDelayMs = 0;
 	debugCalls.length = 0;
 	errorCalls.length = 0;
 }
@@ -452,20 +455,11 @@ async function main() {
 		resetCalls();
 		clearerSolves = true;
 		let challengesServed = 0;
-		let challengeBodyCancels = 0;
 		responder = (url, init) => {
 			const cookie = (init?.headers as Headers | undefined)?.get('cookie') || '';
 			if (!cookie.includes('cf_clearance=minted')) {
 				challengesServed += 1;
-				const response = challengeResponse();
-				Object.defineProperty(response, 'body', {
-					value: {
-						cancel: async () => {
-							challengeBodyCancels += 1;
-						},
-					},
-				});
-				return response;
+				return challengeResponse();
 			}
 			return new Response(JSON.stringify({ id: 7 }), {
 				status: 200,
@@ -484,7 +478,6 @@ async function main() {
 		assert.deepEqual(cleared.data, { id: 7 });
 		assert.equal(challengesServed, 1);
 		assert.equal(fetchCalls.length, 2, 'exactly one replay');
-		assert.equal(challengeBodyCancels, 1, 'release the challenge body before discarding it');
 		assert.deepEqual(clearerCalls.clear, ['https://store.test/wp-json/wcpos/v1/orders']);
 		assert.equal(fetchCalls[1]?.init?.body, '{"total":"1.00"}', 'replay carries the same body');
 		assert.equal((fetchCalls[1]?.init?.headers as Headers).get('cookie'), 'cf_clearance=minted');
@@ -528,25 +521,102 @@ async function main() {
 		assert.equal(fetchCalls.length, 1, 'no replay without clearance');
 		assert.equal(clearerCalls.clear.length, 1);
 
-		// The request's own timeout still applies while the challenge is being
-		// solved: the caller gets its timeout, not a two-minute wait, and no replay.
+		// Solving may outlast the caller's timeout; only the fetch attempts use it.
+		resetCalls();
+		clearerSolves = true;
+		clearerDelayMs = 80;
+		responder = (_url, init) => {
+			init?.signal?.throwIfAborted();
+			return fetchCalls.length === 1 ? challengeResponse() : new Response('ok');
+		};
+		const slowSolve = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/wp-json/', timeout: 30 },
+		});
+		assert.equal(slowSolve.success, true);
+		assert.equal(slowSolve.status, 200);
+		assert.equal(fetchCalls.length, 2);
+
+		// Cancellation still stops waiting for a pending solve, without a replay.
 		resetCalls();
 		clearerHangs = true;
 		responder = () => challengeResponse();
-		// AbortSignal.timeout uses an unref'd timer: with the solve hanging, only
-		// this ref'd timer keeps Node alive long enough for the timeout to fire.
+		const pendingSolve = handler(undefined, {
+			type: 'request',
+			requestId: 'cancel-solve',
+			config: { url: 'https://store.test/wp-json/' },
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(clearerCalls.clear.length, 1, 'cancel while the solve is pending');
+		assert.deepEqual(await handler(undefined, { type: 'cancel', requestId: 'cancel-solve' }), {
+			success: true,
+		});
+		assert.equal((await pendingSolve).code, 'ERR_CANCELED');
+		assert.equal(fetchCalls.length, 1);
+
+		// A replay gets a fresh timeout after the original expired during solving.
+		resetCalls();
+		clearerSolves = true;
+		clearerDelayMs = 50;
+		responder = (_url, init) => {
+			if (fetchCalls.length === 1) return challengeResponse();
+			return new Promise<Response>((_resolve, reject) => {
+				init?.signal?.throwIfAborted();
+				init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+			});
+		};
+		// AbortSignal.timeout uses an unref'd timer; keep Node alive for the replay.
 		const keepAlive = setTimeout(() => undefined, 5_000);
 		const timedOut = await handler(undefined, {
 			type: 'request',
 			config: { method: 'get', url: 'https://store.test/wp-json/', timeout: 30 },
 		});
-		assert.equal(timedOut.success, false);
 		clearTimeout(keepAlive);
+		assert.equal(timedOut.success, false);
 		assert.equal(timedOut.code, 'ECONNABORTED');
-		assert.equal(fetchCalls.length, 1);
+		assert.equal(fetchCalls.length, 2);
+
+		// A solve that fails after the request's own timeout expired still hands
+		// back the challenge (403 + cf-mitigated) it read up front, not a
+		// spurious ECONNABORTED: the renderer needs that header to say "HOST121".
+		resetCalls();
+		clearerSolves = false;
+		clearerDelayMs = 60;
+		// Like net.fetch, the body stream dies once the request's signal aborts.
+		responder = (_url, init) => {
+			const requestSignal = init?.signal;
+			// highWaterMark 0: pull runs when the body is READ, not at construction.
+			const body = new ReadableStream<Uint8Array>(
+				{
+					pull(controller) {
+						if (requestSignal?.aborted) {
+							controller.error(requestSignal.reason);
+							return;
+						}
+						controller.enqueue(new TextEncoder().encode('<title>Just a moment...</title>'));
+						controller.close();
+					},
+				},
+				{ highWaterMark: 0 }
+			);
+			return new Response(body, {
+				status: 403,
+				headers: { 'Content-Type': 'text/html; charset=UTF-8', 'cf-mitigated': 'challenge' },
+			});
+		};
+		const failedLate = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/wp-json/', timeout: 30 },
+		});
+		assert.equal(failedLate.success, false);
+		assert.equal(failedLate.code, 'ERR_BAD_REQUEST');
+		assert.equal(failedLate.response?.status, 403);
+		assert.equal(failedLate.response?.headers['cf-mitigated'], 'challenge');
+		assert.equal(fetchCalls.length, 1, 'no replay without clearance');
 
 		// A challenge that persists after clearing is returned as-is, not retried again.
 		resetCalls();
+		responder = () => challengeResponse();
 		clearerSolves = true;
 		const persistent = await handler(undefined, {
 			type: 'request',
