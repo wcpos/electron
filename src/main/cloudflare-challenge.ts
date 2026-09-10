@@ -19,8 +19,14 @@
 //    handler registered there is an SSRF read-proxy (see
 //    external-window-isolation.test.ts). The challenge window lives in its own
 //    persistent partition and the bridge reads Cloudflare's cookies from it.
-// The clearance is bound to IP and user agent; the window and net.fetch share
-// both, so a cookie minted by the window is valid for the bridge.
+// The clearance is bound to IP and to the exact User-Agent string. The window
+// presents Chromium's UA, but the renderer stamps its own product UA
+// (`WCPOS/x.y.z (electron …)`, see use-http-client in the monorepo) on every
+// non-HEAD request, and net.fetch honours that header. Measured 2026-09-10
+// (Electron 43.4.0): cookie + Chromium UA → 200; the same cookie + the product
+// UA → 403 `cf-mitigated: challenge`. Release 1.10.11 shipped with that
+// mismatch and never connected. The bridge therefore sends the window's UA on
+// every request that carries a clearance; userAgent() is that single source.
 
 import { BrowserWindow, session } from 'electron';
 
@@ -89,6 +95,8 @@ export type ChallengeWindow = {
 export type ChallengeDeps = {
 	getCookies(url: string): Promise<CookieLike[]>;
 	createWindow(host: string): ChallengeWindow;
+	/** The User-Agent the challenge window presents. */
+	userAgent(): string;
 	silentSolveMs?: number;
 	interactiveSolveMs?: number;
 	failureCooldownMs?: number;
@@ -101,6 +109,11 @@ export type ChallengeClearer = {
 	cookieHeaderFor(url: string): Promise<string | undefined>;
 	/** Solve the challenge for this URL's origin. Resolves true once cleared. */
 	clear(url: string): Promise<boolean>;
+	/**
+	 * The User-Agent a clearance is bound to. Any request that carries the
+	 * cookie must send exactly this string or Cloudflare challenges it again.
+	 */
+	userAgent(): string;
 };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -223,7 +236,7 @@ export function createChallengeClearer(deps: ChallengeDeps): ChallengeClearer {
 		return attempt;
 	}
 
-	return { cookieHeaderFor, clear };
+	return { cookieHeaderFor, clear, userAgent: () => deps.userAgent() };
 }
 
 let hardened = false;
@@ -249,6 +262,10 @@ function defaultDeps(): ChallengeDeps {
 		// whose domain is the parent (.example.com) — measured on Electron 42, the
 		// domain filter returns it. hostname, not host: cookie domains carry no port.
 		getCookies: (url) => challengeSession().cookies.get({ domain: new URL(url).hostname }),
+		// The partition's UA is what the window sends; Electron's default already
+		// carries a `WCPOS/<version>` product token, so AIOS-style UA checks
+		// (the reason the renderer stamps its own UA) are still satisfied.
+		userAgent: () => challengeSession().getUserAgent(),
 		createWindow: (host) => {
 			challengeSession();
 			const win = new BrowserWindow({
