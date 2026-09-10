@@ -1633,46 +1633,65 @@ for (const [shape, fill, blank] of [
       const capture = captureRecoveryEvents();
       let recovering;
       try {
-        await (await seedCompacted(basePath, [sibling, damaged], "blank-seed")).close();
+        await (
+          await seedCompacted(basePath, [sibling, damaged], "blank-seed")
+        ).close();
         // Appending the range leaves a gap, forcing cleanup to read it.
         await corruptRecord(basePath, damaged.id, (original) => {
           const bytes = Buffer.alloc(original.length, Buffer.from(fill));
           if (!blank) bytes[bytes.length - 1] = 0x78; // One real byte is enough.
           return bytes;
         });
-        const raw = await getRxStorageFilesystemNode({ basePath })
-          .createStorageInstance(storageParams("blank-raw"));
+        const raw = await getRxStorageFilesystemNode({
+          basePath,
+        }).createStorageInstance(storageParams("blank-raw"));
         const read = raw.findDocumentsById.bind(raw);
         if (operation === "hollow-probe") {
           // Exercise the parsed-but-absent guard independently of JSON parsing.
           raw.findDocumentsById = async () => [];
         }
-        const { withTargetedOpfsRecovery } = await import("./opfs-targeted-recovery.mjs");
+        const { withTargetedOpfsRecovery } =
+          await import("./opfs-targeted-recovery.mjs");
         recovering = await withTargetedOpfsRecovery({
           createStorageInstance: async () => raw,
         }).createStorageInstance(storageParams("blank-recovering"));
         const state = await recovering.internals.statePromise;
-        const before = structuredClone(state.indexStates.map((index) => index.rows));
-        const action = () => operation === "cleanup"
-          ? recovering.cleanup(0)
-          : recovering.findDocumentsById([damaged.id], true);
+        const before = structuredClone(
+          state.indexStates.map((index) => index.rows),
+        );
+        const action = () =>
+          operation === "cleanup"
+            ? recovering.cleanup(0)
+            : recovering.findDocumentsById([damaged.id], true);
         if (!blank && operation !== "hollow-probe") {
-          await assert.rejects(action, /targeted recovery failed for order:damaged: no-valid-document/);
+          await assert.rejects(
+            action,
+            /targeted recovery failed for order:damaged: no-valid-document/,
+          );
         } else {
           await action();
         }
         if (blank) {
-          assert.deepEqual(capture.events.map(({ kind, id }) => [kind, id]), [
-            ["hollow-row-dropped", damaged.id],
-          ]);
+          assert.deepEqual(
+            capture.events.map(({ kind, id }) => [kind, id]),
+            [["hollow-row-dropped", damaged.id]],
+          );
           for (const index of state.indexStates) {
             assert.ok(index.rows.every((row) => !row[0].includes(damaged.id)));
           }
           assert.equal(state.firstIdx.metaIdMap.has(damaged.id), false);
         } else {
-          assert.deepEqual(state.indexStates.map((index) => index.rows), before);
+          assert.deepEqual(
+            state.indexStates.map((index) => index.rows),
+            before,
+          );
           assert.equal(state.firstIdx.metaIdMap.has(damaged.id), true);
-          assert.ok(capture.events.every(({ kind }) => !kind.includes("dropped") && !kind.includes("discarded")));
+          assert.ok(
+            capture.events.every(
+              ({ kind }) =>
+                !kind.includes("dropped") && !kind.includes("discarded"),
+            ),
+          );
           if (operation === "hollow-probe") {
             assert.equal(capture.events[0].reason, "range-holds-foreign-bytes");
           }
@@ -1694,20 +1713,32 @@ for (const operation of ["read", "cleanup"]) {
     let recovering;
     try {
       await (await seedCompacted(basePath, [damaged], "multi-seed")).close();
-      await corruptRecord(basePath, damaged.id, (bytes) => Buffer.alloc(bytes.length));
-      const { withTargetedOpfsRecovery } = await import("./opfs-targeted-recovery.mjs");
+      await corruptRecord(basePath, damaged.id, (bytes) =>
+        Buffer.alloc(bytes.length),
+      );
+      const { withTargetedOpfsRecovery } =
+        await import("./opfs-targeted-recovery.mjs");
       recovering = await withTargetedOpfsRecovery(
         getRxStorageFilesystemNode({ basePath }),
-      ).createStorageInstance({ ...storageParams("nul-multi"), multiInstance: true });
+      ).createStorageInstance({
+        ...storageParams("nul-multi"),
+        multiInstance: true,
+      });
       const state = await recovering.internals.statePromise;
-      const before = structuredClone(state.indexStates.map((index) => index.rows));
+      const before = structuredClone(
+        state.indexStates.map((index) => index.rows),
+      );
       await assert.rejects(
-        () => operation === "cleanup"
-          ? recovering.cleanup(0)
-          : recovering.findDocumentsById([damaged.id], true),
+        () =>
+          operation === "cleanup"
+            ? recovering.cleanup(0)
+            : recovering.findDocumentsById([damaged.id], true),
         /targeted recovery refused: multi-instance/,
       );
-      assert.deepEqual(state.indexStates.map((index) => index.rows), before);
+      assert.deepEqual(
+        state.indexStates.map((index) => index.rows),
+        before,
+      );
       assert.equal(state.firstIdx.metaIdMap.has(damaged.id), true);
     } finally {
       await recovering?.close();

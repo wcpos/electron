@@ -6,7 +6,12 @@ function isMalformedJson(error) {
 
 function isBlankBytes(bytes) {
   return bytes.every(
-    (byte) => byte === 0x00 || byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d,
+    (byte) =>
+      byte === 0x00 ||
+      byte === 0x20 ||
+      byte === 0x09 ||
+      byte === 0x0a ||
+      byte === 0x0d,
   );
 }
 
@@ -185,7 +190,10 @@ async function dropWhitespaceRows(instance, target, multiInstance) {
         if (indexState === state.firstIdx)
           report("hollow-row-dropped", {
             target,
-            id: getPrimaryKeyFromIndexableString(row[0], indexState.primaryKeyLength),
+            id: getPrimaryKeyFromIndexableString(
+              row[0],
+              indexState.primaryKeyLength,
+            ),
           });
       }
     }
