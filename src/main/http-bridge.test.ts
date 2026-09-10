@@ -582,7 +582,28 @@ async function main() {
 		resetCalls();
 		clearerSolves = false;
 		clearerDelayMs = 60;
-		responder = () => challengeResponse();
+		// Like net.fetch, the body stream dies once the request's signal aborts.
+		responder = (_url, init) => {
+			const requestSignal = init?.signal;
+			// highWaterMark 0: pull runs when the body is READ, not at construction.
+			const body = new ReadableStream<Uint8Array>(
+				{
+					pull(controller) {
+						if (requestSignal?.aborted) {
+							controller.error(requestSignal.reason);
+							return;
+						}
+						controller.enqueue(new TextEncoder().encode('<title>Just a moment...</title>'));
+						controller.close();
+					},
+				},
+				{ highWaterMark: 0 }
+			);
+			return new Response(body, {
+				status: 403,
+				headers: { 'Content-Type': 'text/html; charset=UTF-8', 'cf-mitigated': 'challenge' },
+			});
+		};
 		const failedLate = await handler(undefined, {
 			type: 'request',
 			config: { method: 'get', url: 'https://store.test/wp-json/', timeout: 30 },
