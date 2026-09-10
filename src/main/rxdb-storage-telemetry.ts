@@ -81,6 +81,8 @@ interface IndexRebuild {
 	target: string;
 	reason: string;
 	documents: number;
+	/** Documents larger than the rebuild window cap, left unindexed. */
+	skipped?: number;
 }
 
 interface RecoveryEvent {
@@ -173,8 +175,14 @@ export function installRxdbStorageTelemetry(capture: Capture = Sentry.captureExc
 	const seams = globalThis as StorageSeams;
 	seams.__wcposOnStorageRunFailure = ({ target, error }) =>
 		report('task-queue-run-failed', target, {}, error, capture);
-	seams.__wcposOnIndexRebuild = ({ target, reason, documents }) =>
-		report('index-rebuilt', target, { reason, documents }, undefined, capture);
+	seams.__wcposOnIndexRebuild = ({ target, reason, documents, skipped }) =>
+		report(
+			'index-rebuilt',
+			target,
+			{ reason, documents, ...(skipped ? { skipped } : {}) },
+			undefined,
+			capture
+		);
 	seams.__wcposOnStorageRecovery = ({ kind, target = 'unknown', error, ...details }) =>
 		report(kind, target, details, error, capture);
 }

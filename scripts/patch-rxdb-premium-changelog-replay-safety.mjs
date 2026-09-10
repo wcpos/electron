@@ -11,8 +11,12 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 export const MARKER = 'WCPOS_CHANGELOG_REPLAY_SAFETY_PATCH';
+// Bumped whenever the prelude or a rewrite changes: a dist patched by an older
+// script cannot be upgraded in place (the prelude text is unknown), so it must
+// be restored from the licensed package and re-patched.
+export const PATCH_VERSION = 2;
 
-const MARKER_PRELUDE = `globalThis.${MARKER}=1;\n`;
+const MARKER_PRELUDE = `globalThis.${MARKER}=${PATCH_VERSION};\n`;
 const HASH_PRELUDE = `${MARKER_PRELUDE}function __wcposHash(raw){
 var h1=3735928559,h2=1103547991;
 for(var i=0;i<raw.length;i++){var code=raw.charCodeAt(i);h1=Math.imul(h1^code,2654435761);h2=Math.imul(h2^code,1597334677)}
@@ -60,13 +64,25 @@ return null
 }
 // V8 refuses buffers in the GB range; one damaged documents file reached 42 GB (Sentry WOOCOMMERCE-POS-2MS).
 // A document that does not close inside the window it starts is re-read from a window
-// doubled up to the cap, never scanned from inside (its nested objects are not documents).
+// doubled up to the cap, never scanned from inside (its nested objects are not documents);
+// past the cap it is skipped whole by a streaming brace walk. The seam lets tests shrink both.
 const REBUILD_WINDOW_BYTES=8*1024*1024,REBUILD_WINDOW_MAX_BYTES=512*1024*1024;
+function __wcposRebuildWindow(){var seam=globalThis.__wcposRebuildWindowBytes;return{bytes:seam&&seam.bytes||REBUILD_WINDOW_BYTES,max:seam&&seam.max||REBUILD_WINDOW_MAX_BYTES}}
+async function __wcposSkipObject(handle,from,size,chunk){
+var depth=0,inString=false,escaped=false;
+for(var at=from;at<size;){
+var bytes=await handle.read(at,Math.min(at+chunk,size));
+for(var i=0;i<bytes.length;i++){var byte=bytes[i];
+if(inString){if(escaped)escaped=false;else if(byte===92)escaped=true;else if(byte===34)inString=false}
+else if(byte===34)inString=true;else if(byte===123)depth++;else if(byte===125){depth--;if(depth===0)return at+i+1}}
+at+=bytes.length}
+return -1
+}
 async function __wcposRebuildIndexes(options){
 var reason=options.reason,runState=options.runState,docsAccessHandle=options.docsAccessHandle,indexStates=options.indexStates,changelog=options.changelog,stampHandle=options.stampHandle,decode=options.decode,primaryPath=options.primaryPath,databaseName=options.databaseName,collectionName=options.collectionName;
 var kept;
 try{
-var size=await docsAccessHandle.getSize(),latest=new Map,windowBytes=REBUILD_WINDOW_BYTES;
+var size=await docsAccessHandle.getSize(),latest=new Map,sizes=__wcposRebuildWindow(),windowBytes=sizes.bytes,skipped=0;
 for(var pos=0;pos<size;){
 var windowEnd=Math.min(pos+windowBytes,size),bytes=await docsAccessHandle.read(pos,windowEnd);
 for(var cursor=0;cursor<bytes.length;){
@@ -80,14 +96,14 @@ else if(byte===34)inString=true;else if(byte===123)depth++;else if(byte===125){d
 // Unclosed inside a window that is not the tail: re-read from its brace (next window starts
 // there), or widen the window when it already starts there. Only past the cap, or at the
 // tail, is the brace stepped over like any other unparseable byte.
-if(end<0){if(windowEnd<size){if(start>0){cursor=start;break}if(windowBytes<REBUILD_WINDOW_MAX_BYTES){windowBytes=Math.min(windowBytes*2,REBUILD_WINDOW_MAX_BYTES);cursor=0;break}}cursor=start+1;continue}
+if(end<0){if(windowEnd<size){if(start>0){cursor=start;break}if(windowBytes<sizes.max){windowBytes=Math.min(windowBytes*2,sizes.max);cursor=0;break}var skipEnd=await __wcposSkipObject(docsAccessHandle,pos,size,sizes.bytes);if(skipEnd>0){skipped++;cursor=skipEnd-pos;windowBytes=sizes.bytes;break}}cursor=start+1;continue}
 try{
 var doc=JSON.parse(decode(bytes.subarray(start,end)));
 if(!doc||typeof doc!=="object"||!Object.prototype.hasOwnProperty.call(doc,primaryPath)){cursor=start+1;continue}
 var revision=parseInt(doc._rev,10);if(Number.isNaN(revision))revision=-1;
 var previous=latest.get(doc[primaryPath]),absoluteStart=pos+start,absoluteEnd=pos+end;
 if(!previous||revision>previous.revision||revision===previous.revision&&absoluteStart>previous.start)latest.set(doc[primaryPath],{doc:doc,start:absoluteStart,end:absoluteEnd,revision:revision});
-cursor=end;windowBytes=REBUILD_WINDOW_BYTES
+cursor=end;windowBytes=sizes.bytes
 }catch(error){cursor=start+1}
 }
 pos+=cursor
@@ -101,9 +117,9 @@ await changelog.empty(runState);
 var stampAccess=await ${stampAccessExpression};
 await stampAccess.truncate(0);
 }catch(rebuildError){try{rebuildError.message="index rebuild failed ("+reason+"): "+rebuildError.message}catch(ignored){}throw rebuildError}
-var report={db:databaseName,col:collectionName,reason:reason,documents:kept.length};
+var report={db:databaseName,col:collectionName,reason:reason,documents:kept.length,skipped:skipped};
 console.warn("[wcpos] rebuilt storage indexes from documents.json",report);
-if(typeof globalThis.__wcposOnIndexRebuild==="function")globalThis.__wcposOnIndexRebuild({target:databaseName+"/"+collectionName,reason:reason,documents:kept.length})
+if(typeof globalThis.__wcposOnIndexRebuild==="function")globalThis.__wcposOnIndexRebuild({target:databaseName+"/"+collectionName,reason:reason,documents:kept.length,skipped:skipped})
 }
 `;
 }
@@ -225,7 +241,13 @@ const DISTS = [
 
 export function preparePatch(path, patch) {
 	const source = readFileSync(path, 'utf8');
-	if (source.includes(`${MARKER}=1`)) {
+	const applied = source.match(new RegExp(`${MARKER}=(\\d+)`));
+	if (applied && Number(applied[1]) !== PATCH_VERSION) {
+		throw new Error(
+			`${path} carries patch v${applied[1]} but this script is v${PATCH_VERSION}: restore the pristine dist (pnpm rebuild rxdb-premium, needs RXDB_PREMIUM) and re-run patch:premium`
+		);
+	}
+	if (applied) {
 		for (const rewrite of patch.rewrites) {
 			if (!source.includes(rewrite.after)) {
 				throw new Error(`${path} carries the patch marker but rewrite ${rewrite.name} is missing`);

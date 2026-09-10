@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 
-import { MARKER, preparePatch } from './patch-rxdb-premium-changelog-replay-safety.mjs';
+import {
+	MARKER,
+	PATCH_VERSION,
+	preparePatch,
+} from './patch-rxdb-premium-changelog-replay-safety.mjs';
 
 const require = createRequire(import.meta.url);
 const packageRoot = dirname(require.resolve('rxdb-premium/package.json'));
@@ -412,6 +416,51 @@ for (const runtime of runtimes) {
 			rmSync(basePath, { recursive: true, force: true });
 		}
 	});
+
+	test(`${runtime.dist}: rebuild skips a document past the window cap whole, never its nested objects`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-overcap`);
+		const nestedSchema = {
+			...schema,
+			properties: { ...schema.properties, note: { type: 'string' }, nested: { type: 'object' } },
+		};
+		const documents = [
+			{ id: 'before', status: 'kept', note: 'small', nested: { id: 'decoy-before' } },
+			{
+				id: 'huge',
+				status: 'kept',
+				note: 'x'.repeat(300 * 1024),
+				nested: { id: 'decoy-inside', status: 'kept', note: 'nested' },
+			},
+			{ id: 'after', status: 'kept', note: 'small', nested: { id: 'decoy-after' } },
+		];
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath, nestedSchema);
+			db = initial.db;
+			assert.equal((await initial.collection.bulkInsert(documents)).error.length, 0);
+			await fullCleanup(initial.collection);
+			await db.close();
+			replaceRowWithNull(indexFiles(basePath)[0]);
+			// Shrink the window and its cap below the huge document so the skip path runs.
+			globalThis.__wcposRebuildWindowBytes = { bytes: 64 * 1024, max: 128 * 1024 };
+			const opened = await openWithRebuildEvents(runtime, basePath, nestedSchema);
+			db = opened.db;
+			await storageInternals(opened.collection).statePromise;
+			assert.equal(opened.events.length, 1);
+			assert.equal(opened.events[0].documents, 2, 'the two documents that fit were rebuilt');
+			assert.equal(opened.events[0].skipped, 1, 'the over-cap document was skipped whole');
+			assert.deepEqual(
+				(await findAll(opened.collection)).map((doc) => doc.id),
+				['after', 'before'],
+				'no nested object of the skipped document became a document'
+			);
+		} finally {
+			delete globalThis.__wcposRebuildWindowBytes;
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
 	for (const dieAt of ['empty', 'persist']) {
 		test(`${runtime.dist}: compaction dying at ${dieAt} rebuilds instead of replaying baked operations`, async () => {
 			const basePath = makeDirectory(`${runtime.dist}-crash-${dieAt}`);
@@ -556,7 +605,7 @@ test('both dists carry the audit marker in every patched file', () => {
 				join(packageRoot, `dist/${dist}/plugins/storage-abstract-filesystem/${file}`),
 				'utf8'
 			);
-			assert.ok(source.includes('WCPOS_CHANGELOG_REPLAY_SAFETY_PATCH=1'), `${dist}/${file}`);
+			assert.ok(source.includes(`${MARKER}=${PATCH_VERSION};`), `${dist}/${file}`);
 		}
 	}
 });
@@ -573,6 +622,24 @@ test('patch preparation rejects a moved anchor', () => {
 					rewrites: [{ name: 'fixture', before: '__anchor__', after: '__patched__' }],
 				}),
 			/anchor fixture matched 0 times/
+		);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test('patch preparation refuses a dist patched by an older script version', () => {
+	const directory = makeDirectory('patch-version');
+	const path = join(directory, 'fixture.js');
+	writeFileSync(path, `globalThis.${MARKER}=1;\n__patched__`);
+	try {
+		assert.throws(
+			() =>
+				preparePatch(path, {
+					prelude: `globalThis.${MARKER}=${PATCH_VERSION};\n`,
+					rewrites: [{ name: 'fixture', before: '__anchor__', after: '__patched__' }],
+				}),
+			/carries patch v1 but this script is v\d+: restore the pristine dist/
 		);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
