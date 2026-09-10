@@ -1706,6 +1706,59 @@ for (const [shape, fill, blank] of [
   }
 }
 
+test("read: a NUL range whose secondary row is missing is still dropped as hollow", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-blank-no-secondary-"));
+  const sibling = document("order:sibling", 0);
+  const damaged = document("order:damaged", 1);
+  const capture = captureRecoveryEvents();
+  let recovering;
+  try {
+    await (
+      await seedCompacted(basePath, [sibling, damaged], "blank-seed")
+    ).close();
+    await corruptRecord(basePath, damaged.id, (original) =>
+      Buffer.alloc(original.length),
+    );
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+    ).createStorageInstance(storageParams("blank-no-secondary"));
+    const state = await recovering.internals.statePromise;
+    // Lose the damaged document's row from one secondary index only: the
+    // repair must classify the blank range before demanding index parity.
+    const [, start, end] = state.firstIdx.metaIdMap.get(damaged.id);
+    const secondary = state.indexStates.find(
+      (index) => index !== state.firstIdx,
+    );
+    const position = secondary.rows.findIndex(
+      (row) => row[1] === start && row[2] === end,
+    );
+    assert.ok(position >= 0, "fixture has a secondary row to lose");
+    secondary.rows.splice(position, 1);
+
+    assert.deepEqual(
+      await recovering.findDocumentsById([damaged.id], true),
+      [],
+    );
+    assert.deepEqual(
+      capture.events.map(({ kind, id }) => [kind, id]),
+      [["hollow-row-dropped", damaged.id]],
+    );
+    for (const index of state.indexStates) {
+      assert.ok(index.rows.every((row) => !row[0].includes(damaged.id)));
+    }
+    assert.equal(state.firstIdx.metaIdMap.has(damaged.id), false);
+    assert.deepEqual(await recovering.findDocumentsById([sibling.id], true), [
+      sibling,
+    ]);
+  } finally {
+    await recovering?.close();
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
 for (const [filler, fill] of [
   ["NUL", 0x00],
   ["whitespace", 0x20],

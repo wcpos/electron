@@ -121,6 +121,16 @@ async function repairDocument(
 
     const oldStart = primaryRow[1];
     const oldEnd = primaryRow[2];
+    // Classify the range before demanding index parity: a blank range is
+    // dropped from every index that still points at it, whether or not a
+    // secondary row survived, so a lost secondary row cannot keep the hollow
+    // primary row indexed.
+    const accessHandle = await documentsAccessHandle(state, runState);
+    const damagedBytes = await accessHandle.read(oldStart, oldEnd);
+    if (isBlankBytes(damagedBytes)) {
+      await dropIndexRowsForRange(state, runState, oldStart, oldEnd);
+      return "hollow-row-dropped";
+    }
     const indexRows = state.indexStates.map((indexState) => {
       const position = indexState.rows.findIndex(
         (row) => row[1] === oldStart && row[2] === oldEnd,
@@ -129,13 +139,6 @@ async function repairDocument(
     });
     if (indexRows.some(({ position }) => position < 0))
       return "missing-index-row";
-
-    const accessHandle = await documentsAccessHandle(state, runState);
-    const damagedBytes = await accessHandle.read(oldStart, oldEnd);
-    if (isBlankBytes(damagedBytes)) {
-      await dropIndexRowsForRange(state, runState, oldStart, oldEnd);
-      return "hollow-row-dropped";
-    }
     const document = extractDocument(
       instance._decode(damagedBytes),
       instance.primaryPath,
