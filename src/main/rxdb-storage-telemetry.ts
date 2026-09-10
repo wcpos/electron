@@ -149,13 +149,11 @@ function report(
 	// every envelope, so the key must not be recorded either or the first event
 	// after consent would be swallowed as a duplicate.
 	if (!isSentryReporting()) return;
-	// Mass repairs are one event class per target, not one capture per row or byte offset.
+	// Mass repairs are one event class per target, not one capture per row or byte
+	// offset: the key drops the row id and collapses every digit run in the details
+	// (cause, initialError, reasons carrying positions), never in the target.
 	const keyDetails = Object.fromEntries(Object.entries(extra).filter(([name]) => name !== 'id'));
-	const key = JSON.stringify([
-		code,
-		target,
-		{ ...keyDetails, cause: extra.cause?.replace(/\d+/g, 'N') },
-	]);
+	const key = JSON.stringify([code, target, JSON.stringify(keyDetails).replace(/\d+/g, 'N')]);
 	if (capturedEvents.has(key)) return;
 	if (capturedEvents.size >= CAPTURED_EVENT_KEYS_MAX) capturedEvents.clear();
 	capturedEvents.add(key);

@@ -59,14 +59,16 @@ indexState.runChangelogOperation(operation)}}
 return null
 }
 // V8 refuses buffers in the GB range; one damaged documents file reached 42 GB (Sentry WOOCOMMERCE-POS-2MS).
-const REBUILD_WINDOW_BYTES=8*1024*1024;
+// A document that does not close inside the window it starts is re-read from a window
+// doubled up to the cap, never scanned from inside (its nested objects are not documents).
+const REBUILD_WINDOW_BYTES=8*1024*1024,REBUILD_WINDOW_MAX_BYTES=512*1024*1024;
 async function __wcposRebuildIndexes(options){
 var reason=options.reason,runState=options.runState,docsAccessHandle=options.docsAccessHandle,indexStates=options.indexStates,changelog=options.changelog,stampHandle=options.stampHandle,decode=options.decode,primaryPath=options.primaryPath,databaseName=options.databaseName,collectionName=options.collectionName;
 var kept;
 try{
-var size=await docsAccessHandle.getSize(),latest=new Map;
+var size=await docsAccessHandle.getSize(),latest=new Map,windowBytes=REBUILD_WINDOW_BYTES;
 for(var pos=0;pos<size;){
-var windowEnd=Math.min(pos+REBUILD_WINDOW_BYTES,size),bytes=await docsAccessHandle.read(pos,windowEnd);
+var windowEnd=Math.min(pos+windowBytes,size),bytes=await docsAccessHandle.read(pos,windowEnd);
 for(var cursor=0;cursor<bytes.length;){
 if(bytes[cursor]!==123){cursor++;continue}
 var start=cursor,depth=0,inString=false,escaped=false,end=-1;
@@ -75,15 +77,17 @@ var byte=bytes[at];
 if(inString){if(escaped)escaped=false;else if(byte===92)escaped=true;else if(byte===34)inString=false}
 else if(byte===34)inString=true;else if(byte===123)depth++;else if(byte===125){depth--;if(depth===0){end=at+1;break}}
 }
-// Re-read a split document whole; at window start an oversized document must make progress.
-if(end<0){if(windowEnd<size&&start>0){cursor=start;break}cursor=start+1;continue}
+// Unclosed inside a window that is not the tail: re-read from its brace (next window starts
+// there), or widen the window when it already starts there. Only past the cap, or at the
+// tail, is the brace stepped over like any other unparseable byte.
+if(end<0){if(windowEnd<size){if(start>0){cursor=start;break}if(windowBytes<REBUILD_WINDOW_MAX_BYTES){windowBytes=Math.min(windowBytes*2,REBUILD_WINDOW_MAX_BYTES);cursor=0;break}}cursor=start+1;continue}
 try{
 var doc=JSON.parse(decode(bytes.subarray(start,end)));
 if(!doc||typeof doc!=="object"||!Object.prototype.hasOwnProperty.call(doc,primaryPath)){cursor=start+1;continue}
 var revision=parseInt(doc._rev,10);if(Number.isNaN(revision))revision=-1;
 var previous=latest.get(doc[primaryPath]),absoluteStart=pos+start,absoluteEnd=pos+end;
 if(!previous||revision>previous.revision||revision===previous.revision&&absoluteStart>previous.start)latest.set(doc[primaryPath],{doc:doc,start:absoluteStart,end:absoluteEnd,revision:revision});
-cursor=end
+cursor=end;windowBytes=REBUILD_WINDOW_BYTES
 }catch(error){cursor=start+1}
 }
 pos+=cursor

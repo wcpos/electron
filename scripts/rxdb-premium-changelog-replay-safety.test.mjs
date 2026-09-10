@@ -361,6 +361,57 @@ for (const runtime of runtimes) {
 			rmSync(basePath, { recursive: true, force: true });
 		}
 	});
+
+	test(`${runtime.dist}: rebuild re-reads a document larger than a window instead of scanning inside it`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-oversized`);
+		const windowBytes = 8 * 1024 * 1024;
+		const nestedSchema = {
+			...schema,
+			properties: {
+				...schema.properties,
+				note: { type: 'string' },
+				nested: { type: 'object' },
+			},
+		};
+		// A nested object carrying the primary-key field is the decoy: scanned from
+		// inside the oversized document it would parse as a document of its own.
+		const documents = [
+			{ id: 'before', status: 'kept', note: 'small', nested: { id: 'decoy-before' } },
+			{
+				id: 'oversized',
+				status: 'kept',
+				note: 'x'.repeat(windowBytes + 4096),
+				nested: { id: 'decoy-inside', status: 'kept', note: 'nested' },
+			},
+			{ id: 'after', status: 'kept', note: 'small', nested: { id: 'decoy-after' } },
+		];
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath, nestedSchema);
+			db = initial.db;
+			const result = await initial.collection.bulkInsert(documents);
+			assert.equal(result.error.length, 0);
+			await fullCleanup(initial.collection);
+			await db.close();
+			replaceRowWithNull(indexFiles(basePath)[0]);
+			const opened = await openWithRebuildEvents(runtime, basePath, nestedSchema);
+			db = opened.db;
+			await storageInternals(opened.collection).statePromise;
+			assert.equal(opened.events.length, 1);
+			assert.equal(opened.events[0].documents, documents.length, 'exactly the three documents');
+			assert.deepEqual(
+				(await findAll(opened.collection)).map((doc) => doc.id),
+				['after', 'before', 'oversized'],
+				'no nested object became a document'
+			);
+			const oversized = await opened.collection.findOne('oversized').exec();
+			assert.equal(oversized.note.length, windowBytes + 4096, 'the oversized document is whole');
+		} finally {
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
 	for (const dieAt of ['empty', 'persist']) {
 		test(`${runtime.dist}: compaction dying at ${dieAt} rebuilds instead of replaying baked operations`, async () => {
 			const basePath = makeDirectory(`${runtime.dist}-crash-${dieAt}`);

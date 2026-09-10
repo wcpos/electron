@@ -238,9 +238,20 @@ async function main() {
 			kind: 'cleanup-recovery',
 			target: 'dedupe/orders',
 			error: new SyntaxError(`Unexpected token at position ${offset}`),
+			initialError: `RangeError: Invalid string length at ${offset * 2}`,
 		});
 	}
-	assert.equal(captured.length, beforeCleanup + 1, 'byte offsets do not split an event class');
+	assert.equal(
+		captured.length,
+		beforeCleanup + 1,
+		'byte offsets in the cause or any detail do not split an event class'
+	);
+	seams.__wcposOnStorageRecovery!({
+		kind: 'cleanup-recovery',
+		target: 'dedupe/orders_v2',
+		error: new SyntaxError('Unexpected token at position 1'),
+	});
+	assert.equal(captured.length, beforeCleanup + 2, 'digits in the target still distinguish it');
 	assert.equal(
 		captured[beforeCleanup].context.extra.cause,
 		'SyntaxError: Unexpected token at position 52428801',
