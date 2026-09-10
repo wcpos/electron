@@ -4,6 +4,12 @@ function isMalformedJson(error) {
   return error?.name === "SyntaxError";
 }
 
+function isBlankBytes(bytes) {
+  return bytes.every(
+    (byte) => byte === 0x00 || byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d,
+  );
+}
+
 function parseStorageResult(result) {
   if (typeof result === "string") {
     JSON.parse(result);
@@ -121,6 +127,10 @@ async function repairDocument(
 
     const accessHandle = await documentsAccessHandle(state, runState);
     const damagedBytes = await accessHandle.read(oldStart, oldEnd);
+    if (isBlankBytes(damagedBytes)) {
+      await dropIndexRowsForRange(state, runState, oldStart, oldEnd);
+      return "hollow-row-dropped";
+    }
     const document = extractDocument(
       instance._decode(damagedBytes),
       instance.primaryPath,
@@ -160,17 +170,23 @@ async function repairDocument(
   });
 }
 
-async function dropWhitespaceRows(instance) {
+async function dropWhitespaceRows(instance, target, multiInstance) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const accessHandle = await documentsAccessHandle(state, runState);
-    const isWhitespace = (bytes) => instance._decode(bytes).trim() === "";
     for (const indexState of state.indexStates) {
       let position = indexState.rows.length;
       while (position--) {
         const row = indexState.rows[position];
-        if (!isWhitespace(await accessHandle.read(row[1], row[2]))) continue;
+        const bytes = await accessHandle.read(row[1], row[2]);
+        if (!isBlankBytes(bytes) || (multiInstance && bytes.includes(0)))
+          continue;
         await dropIndexRow(state, runState, indexState, position);
+        if (indexState === state.firstIdx)
+          report("hollow-row-dropped", {
+            target,
+            id: getPrimaryKeyFromIndexableString(row[0], indexState.primaryKeyLength),
+          });
       }
     }
   });
@@ -192,9 +208,11 @@ async function dropWhitespaceRows(instance) {
 // All ids share one cleanup run (each run replays the changes file and
 // re-reads every index first). Returns a Map of id → true when a row was
 // dropped, false when the id was already gone, or a reason string when the
-// range holds something other than whitespace (a foreign document or junk
+// range holds non-blank bytes (a foreign document or junk
 // that happened to parse): that is a stale-range problem, not a hollow row,
 // and is refused rather than guessed.
+// A range of NUL bytes is also hollow: on Windows, extension past EOF or a
+// write lost in a power cut can leave zero-filled bytes (which fail JSON parsing).
 // With `discardForeign` (disposable collections only — `logs`) a foreign-bytes
 // range is dropped in the SAME cleanup run that detected it, outcome
 // "discarded-foreign-bytes": detection and deletion must not straddle a queue
@@ -216,8 +234,7 @@ async function dropHollowRows(
         continue;
       }
       const [, start, end] = primaryRow;
-      const foreign =
-        instance._decode(await accessHandle.read(start, end)).trim() !== "";
+      const foreign = !isBlankBytes(await accessHandle.read(start, end));
       if (foreign && !discardForeign) {
         outcomes.set(documentId, "range-holds-foreign-bytes");
         continue;
@@ -590,6 +607,10 @@ export function withTargetedOpfsRecovery(storage) {
               const failure = await repairDocument(instance, batch[0], {
                 discardInvalid: params.collectionName === "logs",
               });
+              if (failure === "hollow-row-dropped") {
+                report("hollow-row-dropped", { target, id: batch[0] });
+                return true;
+              }
               if (failure === "discarded-no-valid-document") {
                 report("log-row-discarded", {
                   target,
@@ -1005,7 +1026,7 @@ export function withTargetedOpfsRecovery(storage) {
         } catch (initialError) {
           let failure;
           try {
-            await dropWhitespaceRows(instance);
+            await dropWhitespaceRows(instance, target, params.multiInstance);
             return await cleanup(minimumDeletedTime);
           } catch (retryError) {
             failure = retryError;
