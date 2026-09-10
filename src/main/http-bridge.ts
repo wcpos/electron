@@ -5,8 +5,11 @@
 
 import { ipcMain, net } from 'electron';
 
+import { getDefaultChallengeClearer, isChallengeResponse } from './cloudflare-challenge';
 import { logger } from './log';
 import { isDevelopment } from './util';
+
+import type { ChallengeClearer } from './cloudflare-challenge';
 
 /**
  * Extract a short label from the request config for logging.
@@ -193,8 +196,38 @@ function serializeFailure(config: AxiosConfig, failure: AxiosFailure) {
 	};
 }
 
-export function createAxiosChannelHandler(fetchImpl: typeof net.fetch = net.fetch) {
+// A cancelled or timed-out request stops waiting for the challenge solve; the
+// origin-level solve itself carries on for whichever requests still want it.
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(signal.reason ?? new Error('aborted'));
+		signal.addEventListener('abort', onAbort, { once: true });
+		promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+	});
+}
+
+export function createAxiosChannelHandler(
+	fetchImpl: typeof net.fetch = net.fetch,
+	challengeClearer: ChallengeClearer = getDefaultChallengeClearer()
+) {
 	const activeRequests = new Map<string, AbortController>();
+
+	// Cloudflare's clearance lives in the challenge window's partition and
+	// net.fetch does not send session cookies, so it rides as an explicit header.
+	// See cloudflare-challenge.ts.
+	async function attachClearance(url: string, headers: Headers): Promise<void> {
+		try {
+			const cookie = await challengeClearer.cookieHeaderFor(url);
+			if (!cookie) return;
+			const existing = headers.get('cookie');
+			headers.set('cookie', existing ? `${existing}; ${cookie}` : cookie);
+		} catch (error) {
+			logger.debug('Cloudflare clearance lookup failed', {
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
 
 	return async (_event: unknown, obj: AxiosMessage) => {
 		if (obj.type === 'cancel') {
@@ -252,12 +285,25 @@ export function createAxiosChannelHandler(fetchImpl: typeof net.fetch = net.fetc
 			if (method === 'GET' || method === 'HEAD') {
 				body = undefined;
 			}
-			const response = await fetchImpl(buildRequestUrl(config), {
-				method,
-				headers,
-				body,
-				signal,
-			});
+			const requestUrl = buildRequestUrl(config);
+			// Remembered so the replay can rebuild the header: a stale clearance is
+			// the usual reason for a challenge, and appending the fresh one after it
+			// would leave the stale value first in line.
+			const callerCookie = headers.get('cookie');
+			await attachClearance(requestUrl, headers);
+			const init = { method, headers, body, signal };
+			let response = await fetchImpl(requestUrl, init);
+			// A Cloudflare challenge is not the store's answer: solve it in a real
+			// Chromium window and ask once more. A second challenge is returned as-is.
+			if (isChallengeResponse(response.headers)) {
+				logger.warn('Cloudflare challenged request; clearing', { request: requestLabel(config) });
+				if (await untilAborted(challengeClearer.clear(requestUrl), signal)) {
+					if (callerCookie === null) headers.delete('cookie');
+					else headers.set('cookie', callerCookie);
+					await attachClearance(requestUrl, headers);
+					response = await fetchImpl(requestUrl, init);
+				}
+			}
 			const serialized: SerializedResponse = {
 				data: await responseData(response, config.responseType),
 				status: response.status,
