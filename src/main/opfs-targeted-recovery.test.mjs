@@ -1706,45 +1706,62 @@ for (const [shape, fill, blank] of [
   }
 }
 
-for (const operation of ["read", "cleanup"]) {
-  test(`${operation}: NUL repair remains refused in multi-instance mode`, async () => {
-    const basePath = await mkdtemp(join(tmpdir(), "wcpos-nul-multi-"));
-    const damaged = document("order:damaged", 0);
-    let recovering;
-    try {
-      await (await seedCompacted(basePath, [damaged], "multi-seed")).close();
-      await corruptRecord(basePath, damaged.id, (bytes) =>
-        Buffer.alloc(bytes.length),
-      );
-      const { withTargetedOpfsRecovery } =
-        await import("./opfs-targeted-recovery.mjs");
-      recovering = await withTargetedOpfsRecovery(
-        getRxStorageFilesystemNode({ basePath }),
-      ).createStorageInstance({
-        ...storageParams("nul-multi"),
-        multiInstance: true,
-      });
-      const state = await recovering.internals.statePromise;
-      const before = structuredClone(
-        state.indexStates.map((index) => index.rows),
-      );
-      await assert.rejects(
-        () =>
+for (const [filler, fill] of [
+  ["NUL", 0x00],
+  ["whitespace", 0x20],
+]) {
+  for (const operation of ["read", "cleanup"]) {
+    test(`${operation}: ${filler} blank-range repair remains refused in multi-instance mode`, async () => {
+      const basePath = await mkdtemp(join(tmpdir(), "wcpos-blank-multi-"));
+      const damaged = document("order:damaged", 0);
+      let recovering;
+      try {
+        await (await seedCompacted(basePath, [damaged], "multi-seed")).close();
+        await corruptRecord(basePath, damaged.id, (bytes) =>
+          Buffer.alloc(bytes.length, fill),
+        );
+        const { withTargetedOpfsRecovery } =
+          await import("./opfs-targeted-recovery.mjs");
+        recovering = await withTargetedOpfsRecovery(
+          getRxStorageFilesystemNode({ basePath }),
+        ).createStorageInstance({
+          ...storageParams("nul-multi"),
+          multiInstance: true,
+        });
+        const state = await recovering.internals.statePromise;
+        const before = structuredClone(
+          state.indexStates.map((index) => index.rows),
+        );
+        // A NUL range fails JSON parsing, so the repair path refuses it by
+        // name. A whitespace range parses to nothing: a read reports the
+        // document absent and the hollow drop is refused silently, while the
+        // compaction walk dereferences the missing document. Either way no
+        // row moved.
+        const attempt = () =>
           operation === "cleanup"
             ? recovering.cleanup(0)
-            : recovering.findDocumentsById([damaged.id], true),
-        /targeted recovery refused: multi-instance/,
-      );
-      assert.deepEqual(
-        state.indexStates.map((index) => index.rows),
-        before,
-      );
-      assert.equal(state.firstIdx.metaIdMap.has(damaged.id), true);
-    } finally {
-      await recovering?.close();
-      await rm(basePath, { recursive: true, force: true });
-    }
-  });
+            : recovering.findDocumentsById([damaged.id], true);
+        if (filler === "whitespace" && operation === "read") {
+          assert.deepEqual(await attempt(), []);
+        } else {
+          await assert.rejects(
+            attempt,
+            filler === "whitespace"
+              ? /Cannot read properties of undefined/
+              : /targeted recovery refused: multi-instance/,
+          );
+        }
+        assert.deepEqual(
+          state.indexStates.map((index) => index.rows),
+          before,
+        );
+        assert.equal(state.firstIdx.metaIdMap.has(damaged.id), true);
+      } finally {
+        await recovering?.close();
+        await rm(basePath, { recursive: true, force: true });
+      }
+    });
+  }
 }
 
 test("drops a hollow index row so a pending write lands instead of dereferencing it", async () => {

@@ -175,7 +175,12 @@ async function repairDocument(
   });
 }
 
+// Dropping a row is a positional "D" operation; under multi-instance two
+// peers that each detect the same blank row would apply the other's deletion
+// at a shifted position (see dropHollowRows), so this pass refuses there for
+// whitespace and NUL alike and the retry fails into the refusing repair path.
 async function dropWhitespaceRows(instance, target, multiInstance) {
+  if (multiInstance) return;
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     const accessHandle = await documentsAccessHandle(state, runState);
@@ -184,8 +189,7 @@ async function dropWhitespaceRows(instance, target, multiInstance) {
       while (position--) {
         const row = indexState.rows[position];
         const bytes = await accessHandle.read(row[1], row[2]);
-        if (!isBlankBytes(bytes) || (multiInstance && bytes.includes(0)))
-          continue;
+        if (!isBlankBytes(bytes)) continue;
         await dropIndexRow(state, runState, indexState, position);
         if (indexState === state.firstIdx)
           report("hollow-row-dropped", {
