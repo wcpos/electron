@@ -452,11 +452,20 @@ async function main() {
 		resetCalls();
 		clearerSolves = true;
 		let challengesServed = 0;
+		let challengeBodyCancels = 0;
 		responder = (url, init) => {
 			const cookie = (init?.headers as Headers | undefined)?.get('cookie') || '';
 			if (!cookie.includes('cf_clearance=minted')) {
 				challengesServed += 1;
-				return challengeResponse();
+				const response = challengeResponse();
+				Object.defineProperty(response, 'body', {
+					value: {
+						cancel: async () => {
+							challengeBodyCancels += 1;
+						},
+					},
+				});
+				return response;
 			}
 			return new Response(JSON.stringify({ id: 7 }), {
 				status: 200,
@@ -475,6 +484,7 @@ async function main() {
 		assert.deepEqual(cleared.data, { id: 7 });
 		assert.equal(challengesServed, 1);
 		assert.equal(fetchCalls.length, 2, 'exactly one replay');
+		assert.equal(challengeBodyCancels, 1, 'release the challenge body before discarding it');
 		assert.deepEqual(clearerCalls.clear, ['https://store.test/wp-json/wcpos/v1/orders']);
 		assert.equal(fetchCalls[1]?.init?.body, '{"total":"1.00"}', 'replay carries the same body');
 		assert.equal((fetchCalls[1]?.init?.headers as Headers).get('cookie'), 'cf_clearance=minted');

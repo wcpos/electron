@@ -56,6 +56,23 @@ export function isChallengeResponse(headers: { get(name: string): string | null 
 	return (headers.get('cf-mitigated') || '').trim().toLowerCase() === 'challenge';
 }
 
+export function hardenChallengeWindow(
+	webContents: {
+		setWindowOpenHandler(handler: () => { action: 'deny' }): unknown;
+		on(
+			event: 'will-navigate',
+			listener: (event: { preventDefault(): void }, url: string) => void
+		): unknown;
+	},
+	host: string
+): void {
+	webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+	// The challenge must reload its own page, but cannot leave the store.
+	webContents.on('will-navigate', (event, url) => {
+		if (new URL(url).host !== host) event.preventDefault();
+	});
+}
+
 export type CookieLike = {
 	name: string;
 	value: string;
@@ -143,7 +160,7 @@ export function createChallengeClearer(deps: ChallengeDeps): ChallengeClearer {
 	}
 
 	async function clearanceValue(url: string): Promise<string | undefined> {
-		return (await deps.getCookies(url)).find((cookie) => cookie.name === CLEARANCE_COOKIE)?.value;
+		return (await cloudflareCookies(url)).find((cookie) => cookie.name === CLEARANCE_COOKIE)?.value;
 	}
 
 	async function solve(url: string, host: string): Promise<boolean> {
@@ -284,6 +301,7 @@ function defaultDeps(): ChallengeDeps {
 			// The page would otherwise retitle the window ("Just a moment…"); the
 			// cashier should see which store is asking, not the page's own words.
 			win.on('page-title-updated', (event) => event.preventDefault());
+			hardenChallengeWindow(win.webContents, host);
 			return win;
 		},
 	};
