@@ -24,6 +24,16 @@ type ChallengeWindow = {
 };
 
 type ChallengeModule = {
+	hardenChallengeWindow(
+		webContents: {
+			setWindowOpenHandler(handler: () => { action: 'deny' }): unknown;
+			on(
+				event: 'will-navigate',
+				listener: (event: { preventDefault(): void }, url: string) => void
+			): unknown;
+		},
+		host: string
+	): void;
 	isChallengeResponse(headers: { get(name: string): string | null }): boolean;
 	createChallengeClearer(deps: {
 		getCookies(url: string): Promise<CookieLike[]>;
@@ -120,6 +130,37 @@ async function main() {
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		const mod = require('./cloudflare-challenge') as ChallengeModule;
 
+		let windowOpen!: () => { action: 'deny' };
+		let willNavigate!: (event: { preventDefault(): void }, url: string) => void;
+		mod.hardenChallengeWindow(
+			{
+				setWindowOpenHandler: (handler) => {
+					windowOpen = handler;
+				},
+				on: (event, listener) => {
+					assert.equal(event, 'will-navigate');
+					willNavigate = listener;
+				},
+			},
+			'store.test'
+		);
+		assert.deepEqual(windowOpen(), { action: 'deny' });
+		for (const [url, expected] of [
+			['https://other.test/', true],
+			['https://store.test/wp-json/', false],
+		] as const) {
+			let prevented = false;
+			willNavigate(
+				{
+					preventDefault: () => {
+						prevented = true;
+					},
+				},
+				url
+			);
+			assert.equal(prevented, expected, url);
+		}
+
 		assert.equal(mod.isChallengeResponse(new Headers({ 'cf-mitigated': 'challenge' })), true);
 		assert.equal(mod.isChallengeResponse(new Headers({ 'cf-mitigated': 'Challenge ' })), true);
 		assert.equal(mod.isChallengeResponse(new Headers({})), false);
@@ -181,6 +222,13 @@ async function main() {
 		assert.deepEqual(await Promise.all([first, second]), [true, true]);
 		assert.equal(FakeWindow.created[0].shown, false, 'silent solve never shows the window');
 		assert.equal(FakeWindow.created[0].closed, true, 'window closed after solve');
+
+		// A fresh Secure cookie cannot clear a plaintext request.
+		jar = [];
+		const insecureSolve = clearer.clear('http://store.test/wp-json/');
+		await sleep(15);
+		jar = [{ name: 'cf_clearance', value: 'secure-minted', secure: true }];
+		assert.equal(await insecureSolve, false);
 
 		// Interactive: nothing within the silent budget shows the window; a
 		// cookie minted afterwards still clears.

@@ -315,6 +315,8 @@ export function createAxiosChannelHandler(
 					if (callerCookie === null) headers.delete('cookie');
 					else headers.set('cookie', callerCookie);
 					await attachClearance(requestUrl, headers);
+					// The discarded challenge body must not hold the connection.
+					void response.body?.cancel().catch(() => {});
 					response = await fetchImpl(requestUrl, init);
 					// Said out loud: without this line the log reads "cleared" followed
 					// by a bare 403, which is how the 1.10.11 failure hid for a release.
