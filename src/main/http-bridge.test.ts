@@ -470,6 +470,31 @@ async function main() {
 		assert.equal(fetchCalls[1]?.init?.body, '{"total":"1.00"}', 'replay carries the same body');
 		assert.equal((fetchCalls[1]?.init?.headers as Headers).get('cookie'), 'cf_clearance=minted');
 
+		// A stale clearance is the usual reason for a challenge: the replay must
+		// carry only the fresh one, after the caller's own cookies.
+		resetCalls();
+		clearerCookie = 'cf_clearance=stale';
+		clearerSolves = true;
+		// The bridge mutates one Headers object across both attempts, so the cookie
+		// is captured as each fetch sees it.
+		const cookiesSeen: string[] = [];
+		responder = (url, init) => {
+			const cookie = (init?.headers as Headers | undefined)?.get('cookie') || '';
+			cookiesSeen.push(cookie);
+			return cookie.includes('cf_clearance=minted')
+				? new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+				: challengeResponse();
+		};
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://store.test/wp-json/wcpos/v1/products',
+				headers: { cookie: 'a=1' },
+			},
+		});
+		assert.deepEqual(cookiesSeen, ['a=1; cf_clearance=stale', 'a=1; cf_clearance=minted']);
+
 		// If the challenge cannot be cleared the original 403 is returned, once.
 		resetCalls();
 		clearerSolves = false;

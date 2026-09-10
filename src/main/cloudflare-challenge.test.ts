@@ -118,16 +118,19 @@ async function main() {
 
 		// cookieHeaderFor forwards only Cloudflare's cookies.
 		let jar: CookieLike[] = [];
+		// Real timers: budgets are an order of magnitude above the sleeps so a
+		// loaded CI runner cannot turn a margin into a flake.
 		const timing = {
 			silentSolveMs: 40,
-			interactiveSolveMs: 120,
-			failureCooldownMs: 60,
+			interactiveSolveMs: 400,
+			failureCooldownMs: 200,
 			pollMs: 5,
 			settleMs: 1,
 		};
+		let createWindow = (host: string): ChallengeWindow => new FakeWindow(host);
 		const clearer = mod.createChallengeClearer({
 			getCookies: async () => jar,
-			createWindow: (host) => new FakeWindow(host),
+			createWindow: (host) => createWindow(host),
 			...timing,
 		});
 		assert.equal(await clearer.cookieHeaderFor(STORE), undefined);
@@ -181,12 +184,37 @@ async function main() {
 		assert.equal(FakeWindow.created[0].closed, true);
 		assert.equal(await clearer.clear(STORE), false, 'cooldown');
 		assert.equal(FakeWindow.created.length, 1, 'cooldown opens no window');
-		await sleep(70);
+		await sleep(250);
 		const afterCooldown = clearer.clear(STORE);
 		await sleep(10);
 		assert.equal(FakeWindow.created.length, 2, 'cooldown expired');
 		jar = [{ name: 'cf_clearance', value: 'again' }];
 		assert.equal(await afterCooldown, true);
+
+		// The interactive budget runs from the moment the window is shown, not
+		// from the start of the solve: a cookie minted late still clears.
+		await sleep(250);
+		FakeWindow.created.length = 0;
+		const late = clearer.clear(STORE);
+		await sleep(timing.silentSolveMs + timing.interactiveSolveMs - 60);
+		assert.equal(FakeWindow.created[0].closed, false, 'still open inside the shown budget');
+		jar = [{ name: 'cf_clearance', value: 'late' }];
+		assert.equal(await late, true);
+
+		// Window construction failing is an unsolved challenge, not a rejection,
+		// and starts the cooldown like any other failure.
+		await sleep(250);
+		jar = [];
+		FakeWindow.created.length = 0;
+		createWindow = () => {
+			throw new Error('no display');
+		};
+		assert.equal(await clearer.clear(STORE), false);
+		assert.equal(FakeWindow.created.length, 0);
+		createWindow = (host) => new FakeWindow(host);
+		assert.equal(await clearer.clear(STORE), false, 'cooldown after a construction failure');
+		assert.equal(FakeWindow.created.length, 0);
+		await sleep(250);
 
 		// Cashier closes the window: false, no crash on double close.
 		jar = [];

@@ -31,7 +31,7 @@ export const CHALLENGE_PARTITION = 'persist:cloudflare-challenge';
 // A non-interactive managed challenge clears well inside this. Past it, the
 // challenge is interactive (a Turnstile checkbox) and needs the cashier.
 export const SILENT_SOLVE_MS = 15_000;
-// Cashier-facing budget once the window has been shown.
+// Cashier-facing budget, measured from the moment the window is shown.
 export const INTERACTIVE_SOLVE_MS = 120_000;
 // A failed solve must not reopen a window for every request queued behind it.
 export const FAILURE_COOLDOWN_MS = 30_000;
@@ -110,45 +110,50 @@ export function createChallengeClearer(deps: ChallengeDeps): ChallengeClearer {
 	}
 
 	async function solve(url: string, host: string): Promise<boolean> {
-		const before = await clearanceValue(url);
-		const win = deps.createWindow(host);
+		let win: ChallengeWindow | undefined;
 		let closed = false;
 		let finishedLoads = 0;
-		let shown = false;
-		win.once('closed', () => {
-			closed = true;
-		});
-		win.webContents.once('did-finish-load', () => {
-			finishedLoads += 1;
-		});
+		let shownAt: number | undefined;
 		const started = Date.now();
 		try {
+			// Everything, including the cookie lookup and window construction, is
+			// guarded: clear() must resolve false so the bridge hands back the 403
+			// challenge it already holds instead of a bare ERR_NETWORK.
+			const before = await clearanceValue(url);
+			win = deps.createWindow(host);
+			const window = win;
+			window.once('closed', () => {
+				closed = true;
+			});
+			window.webContents.once('did-finish-load', () => {
+				finishedLoads += 1;
+			});
 			// A challenge page navigates itself once solved, which can reject the
 			// original loadURL promise; the poll below is the source of truth.
-			win.loadURL(url).catch((): void => undefined);
+			window.loadURL(url).catch((): void => undefined);
 			while (!closed) {
 				const elapsed = Date.now() - started;
 				const value = await clearanceValue(url);
 				const minted = Boolean(value) && value !== before;
 				const settled =
 					finishedLoads > 0 &&
-					!win.webContents.isLoading() &&
-					!CHALLENGE_TITLE.test(win.webContents.getTitle());
+					!window.webContents.isLoading() &&
+					!CHALLENGE_TITLE.test(window.webContents.getTitle());
 				if (minted || (settled && Boolean(value))) {
 					if (!settled) await sleep(settleMs);
 					logger.info('Cloudflare challenge cleared', {
 						host,
-						interactive: shown,
+						interactive: shownAt !== undefined,
 						ms: Date.now() - started,
 					});
 					return true;
 				}
-				if (!shown && elapsed >= silentSolveMs) {
-					shown = true;
+				if (shownAt === undefined && elapsed >= silentSolveMs) {
+					shownAt = Date.now();
 					logger.warn('Cloudflare challenge needs the cashier; showing it', { host });
-					win.show();
+					window.show();
 				}
-				if (elapsed >= interactiveSolveMs) {
+				if (shownAt !== undefined && Date.now() - shownAt >= interactiveSolveMs) {
 					logger.warn('Cloudflare challenge not cleared in time', { host });
 					return false;
 				}
@@ -163,7 +168,7 @@ export function createChallengeClearer(deps: ChallengeDeps): ChallengeClearer {
 			});
 			return false;
 		} finally {
-			if (!closed && !win.isDestroyed()) win.close();
+			if (win && !closed && !win.isDestroyed()) win.close();
 		}
 	}
 
@@ -204,8 +209,8 @@ function defaultDeps(): ChallengeDeps {
 		// domain filter returns it.
 		getCookies: (url) =>
 			session.fromPartition(CHALLENGE_PARTITION).cookies.get({ domain: new URL(url).host }),
-		createWindow: (host) =>
-			new BrowserWindow({
+		createWindow: (host) => {
+			const win = new BrowserWindow({
 				show: false,
 				width: 520,
 				height: 640,
@@ -217,7 +222,12 @@ function defaultDeps(): ChallengeDeps {
 					sandbox: true,
 					partition: CHALLENGE_PARTITION,
 				},
-			}),
+			});
+			// The page would otherwise retitle the window ("Just a moment…"); the
+			// cashier should see which store is asking, not the page's own words.
+			win.on('page-title-updated', (event) => event.preventDefault());
+			return win;
+		},
 	};
 }
 

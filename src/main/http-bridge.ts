@@ -275,6 +275,10 @@ export function createAxiosChannelHandler(
 				body = undefined;
 			}
 			const requestUrl = buildRequestUrl(config);
+			// Remembered so the replay can rebuild the header: a stale clearance is
+			// the usual reason for a challenge, and appending the fresh one after it
+			// would leave the stale value first in line.
+			const callerCookie = headers.get('cookie');
 			await attachClearance(requestUrl, headers);
 			const init = { method, headers, body, signal };
 			let response = await fetchImpl(requestUrl, init);
@@ -283,6 +287,8 @@ export function createAxiosChannelHandler(
 			if (isChallengeResponse(response.headers)) {
 				logger.warn('Cloudflare challenged request; clearing', { request: requestLabel(config) });
 				if (await challengeClearer.clear(requestUrl)) {
+					if (callerCookie === null) headers.delete('cookie');
+					else headers.set('cookie', callerCookie);
 					await attachClearance(requestUrl, headers);
 					response = await fetchImpl(requestUrl, init);
 				}
