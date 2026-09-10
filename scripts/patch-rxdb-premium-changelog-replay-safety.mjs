@@ -244,7 +244,7 @@ export function preparePatch(path, patch) {
 	const applied = source.match(new RegExp(`${MARKER}=(\\d+)`));
 	if (applied && Number(applied[1]) !== PATCH_VERSION) {
 		throw new Error(
-			`${path} carries patch v${applied[1]} but this script is v${PATCH_VERSION}: restore the pristine dist (pnpm rebuild rxdb-premium, needs RXDB_PREMIUM) and re-run patch:premium`
+			`${path} carries patch v${applied[1]} but this script is v${PATCH_VERSION}: restore the pristine dist (pnpm rebuild rxdb-premium, needs RXDB_PREMIUM) and re-run the rxdb-premium patch scripts (postinstall)`
 		);
 	}
 	if (applied) {
