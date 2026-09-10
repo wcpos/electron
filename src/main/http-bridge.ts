@@ -87,6 +87,10 @@ type AxiosFailure = {
 	response?: SerializedResponse;
 };
 
+// A Cookie header value that carries Cloudflare's clearance (not merely its
+// bot-management cookies, which can outlive it).
+const CLEARANCE_COOKIE = /(?:^|;\s*)cf_clearance=/;
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return Object.prototype.toString.call(value) === '[object Object]';
 }
@@ -229,7 +233,7 @@ export function createAxiosChannelHandler(
 			// A request that carries the cookie must therefore present the window's UA.
 			// Only the clearance triggers it: __cf_bm / _cfuvid can outlive it, and a
 			// request without a clearance keeps the caller's UA.
-			if (/(^|;\s*)cf_clearance=/.test(cookie)) {
+			if (CLEARANCE_COOKIE.test(cookie)) {
 				headers.set('user-agent', challengeClearer.userAgent());
 			}
 		} catch (error) {
@@ -317,7 +321,7 @@ export function createAxiosChannelHandler(
 					if (isChallengeResponse(response.headers)) {
 						logger.warn('Cloudflare challenge persisted after clearing; returning it', {
 							request: requestLabel(config),
-							cookieAttached: headers.has('cookie'),
+							clearanceAttached: CLEARANCE_COOKIE.test(headers.get('cookie') || ''),
 						});
 					}
 				}
