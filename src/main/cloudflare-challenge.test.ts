@@ -1,7 +1,14 @@
 import assert from 'assert/strict';
 import Module from 'module';
 
-type CookieLike = { name: string; value: string };
+type CookieLike = {
+	name: string;
+	value: string;
+	domain?: string;
+	path?: string;
+	secure?: boolean;
+	hostOnly?: boolean;
+};
 
 type ChallengeWindow = {
 	loadURL(url: string): Promise<void>;
@@ -140,6 +147,20 @@ async function main() {
 			{ name: '__cf_bm', value: 'bm' },
 		];
 		assert.equal(await clearer.cookieHeaderFor(STORE), 'cf_clearance=tok; __cf_bm=bm');
+
+		// Normal cookie scoping applies to the explicit header: Secure cookies stay
+		// off plaintext hops, and path / host-only scopes are honoured.
+		jar = [
+			{ name: 'cf_clearance', value: 'sec', secure: true, domain: '.store.test', path: '/' },
+			{ name: '__cf_bm', value: 'bm', domain: '.store.test', path: '/other' },
+			{ name: '_cfuvid', value: 'uv', domain: 'api.store.test', hostOnly: true, path: '/' },
+		];
+		assert.equal(await clearer.cookieHeaderFor('http://store.test/wp-json/'), undefined);
+		assert.equal(await clearer.cookieHeaderFor(STORE), 'cf_clearance=sec');
+		assert.equal(
+			await clearer.cookieHeaderFor('https://api.store.test/other/x'),
+			'cf_clearance=sec; __cf_bm=bm; _cfuvid=uv'
+		);
 
 		// Silent solve: the window is never shown, concurrent callers share it,
 		// and it is closed afterwards.

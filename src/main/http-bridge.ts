@@ -196,6 +196,17 @@ function serializeFailure(config: AxiosConfig, failure: AxiosFailure) {
 	};
 }
 
+// A cancelled or timed-out request stops waiting for the challenge solve; the
+// origin-level solve itself carries on for whichever requests still want it.
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(signal.reason ?? new Error('aborted'));
+		signal.addEventListener('abort', onAbort, { once: true });
+		promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+	});
+}
+
 export function createAxiosChannelHandler(
 	fetchImpl: typeof net.fetch = net.fetch,
 	challengeClearer: ChallengeClearer = getDefaultChallengeClearer()
@@ -286,7 +297,7 @@ export function createAxiosChannelHandler(
 			// Chromium window and ask once more. A second challenge is returned as-is.
 			if (isChallengeResponse(response.headers)) {
 				logger.warn('Cloudflare challenged request; clearing', { request: requestLabel(config) });
-				if (await challengeClearer.clear(requestUrl)) {
+				if (await untilAborted(challengeClearer.clear(requestUrl), signal)) {
 					if (callerCookie === null) headers.delete('cookie');
 					else headers.set('cookie', callerCookie);
 					await attachClearance(requestUrl, headers);

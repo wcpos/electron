@@ -51,6 +51,7 @@ const clearerCalls: { cookieHeaderFor: string[]; clear: string[] } = {
 };
 let clearerCookie: string | undefined;
 let clearerSolves = false;
+let clearerHangs = false;
 const fakeClearer: ChallengeClearer = {
 	async cookieHeaderFor(url) {
 		clearerCalls.cookieHeaderFor.push(url);
@@ -58,6 +59,7 @@ const fakeClearer: ChallengeClearer = {
 	},
 	async clear(url) {
 		clearerCalls.clear.push(url);
+		if (clearerHangs) return new Promise<boolean>(() => undefined);
 		if (clearerSolves) clearerCookie = 'cf_clearance=minted';
 		return clearerSolves;
 	},
@@ -139,6 +141,7 @@ function resetCalls(): void {
 	clearerCalls.clear.length = 0;
 	clearerCookie = undefined;
 	clearerSolves = false;
+	clearerHangs = false;
 	debugCalls.length = 0;
 	errorCalls.length = 0;
 }
@@ -508,6 +511,23 @@ async function main() {
 		assert.equal(stuck.response?.headers['cf-mitigated'], 'challenge');
 		assert.equal(fetchCalls.length, 1, 'no replay without clearance');
 		assert.equal(clearerCalls.clear.length, 1);
+
+		// The request's own timeout still applies while the challenge is being
+		// solved: the caller gets its timeout, not a two-minute wait, and no replay.
+		resetCalls();
+		clearerHangs = true;
+		responder = () => challengeResponse();
+		// AbortSignal.timeout uses an unref'd timer: with the solve hanging, only
+		// this ref'd timer keeps Node alive long enough for the timeout to fire.
+		const keepAlive = setTimeout(() => undefined, 5_000);
+		const timedOut = await handler(undefined, {
+			type: 'request',
+			config: { method: 'get', url: 'https://store.test/wp-json/', timeout: 30 },
+		});
+		assert.equal(timedOut.success, false);
+		clearTimeout(keepAlive);
+		assert.equal(timedOut.code, 'ECONNABORTED');
+		assert.equal(fetchCalls.length, 1);
 
 		// A challenge that persists after clearing is returned as-is, not retried again.
 		resetCalls();

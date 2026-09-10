@@ -50,7 +50,28 @@ export function isChallengeResponse(headers: { get(name: string): string | null 
 	return (headers.get('cf-mitigated') || '').trim().toLowerCase() === 'challenge';
 }
 
-export type CookieLike = { name: string; value: string };
+export type CookieLike = {
+	name: string;
+	value: string;
+	// Scope metadata as Electron's cookies.get returns it. The header builder
+	// applies normal cookie-matching rules with it, so a Secure clearance never
+	// rides on a plaintext hop and a path- or host-scoped cookie stays scoped.
+	domain?: string;
+	path?: string;
+	secure?: boolean;
+	hostOnly?: boolean;
+};
+
+function cookieMatchesUrl(cookie: CookieLike, url: URL): boolean {
+	if (cookie.secure && url.protocol !== 'https:') return false;
+	const path = cookie.path || '/';
+	if (!(url.pathname === path || url.pathname.startsWith(path.endsWith('/') ? path : `${path}/`)))
+		return false;
+	if (!cookie.domain) return true;
+	const domain = cookie.domain.replace(/^\./, '');
+	if (cookie.hostOnly) return url.hostname === domain;
+	return url.hostname === domain || url.hostname.endsWith(`.${domain}`);
+}
 
 export type ChallengeWindow = {
 	loadURL(url: string): Promise<void>;
@@ -96,7 +117,10 @@ export function createChallengeClearer(deps: ChallengeDeps): ChallengeClearer {
 	const failedAt = new Map<string, number>();
 
 	async function cloudflareCookies(url: string): Promise<CookieLike[]> {
-		return (await deps.getCookies(url)).filter((cookie) => CLOUDFLARE_COOKIE.test(cookie.name));
+		const parsed = new URL(url);
+		return (await deps.getCookies(url)).filter(
+			(cookie) => CLOUDFLARE_COOKIE.test(cookie.name) && cookieMatchesUrl(cookie, parsed)
+		);
 	}
 
 	async function cookieHeaderFor(url: string): Promise<string | undefined> {
@@ -202,14 +226,31 @@ export function createChallengeClearer(deps: ChallengeDeps): ChallengeClearer {
 	return { cookieHeaderFor, clear };
 }
 
+let hardened = false;
+
+// The partition hosts a page the store controls. Isolation from the default
+// session keeps wcpos-image:// out of its reach; this keeps the camera,
+// microphone, location and devices out of it too — Electron's default request
+// handler would otherwise grant getUserMedia to a hidden window.
+function challengeSession() {
+	const ses = session.fromPartition(CHALLENGE_PARTITION);
+	if (!hardened) {
+		ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+		ses.setPermissionCheckHandler(() => false);
+		ses.setDevicePermissionHandler(() => false);
+		hardened = true;
+	}
+	return ses;
+}
+
 function defaultDeps(): ChallengeDeps {
 	return {
-		// Filter by host, not url: cookies.get({ url }) misses a cf_clearance whose
-		// domain is the parent (.example.com) — measured on Electron 42, the
-		// domain filter returns it.
-		getCookies: (url) =>
-			session.fromPartition(CHALLENGE_PARTITION).cookies.get({ domain: new URL(url).host }),
+		// Filter by hostname, not url: cookies.get({ url }) misses a cf_clearance
+		// whose domain is the parent (.example.com) — measured on Electron 42, the
+		// domain filter returns it. hostname, not host: cookie domains carry no port.
+		getCookies: (url) => challengeSession().cookies.get({ domain: new URL(url).hostname }),
 		createWindow: (host) => {
+			challengeSession();
 			const win = new BrowserWindow({
 				show: false,
 				width: 520,
