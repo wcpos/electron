@@ -227,7 +227,11 @@ export function createAxiosChannelHandler(
 			// requests; with that UA the cookie is rejected and the replay is
 			// challenged again (1.10.11 shipped exactly this and never connected).
 			// A request that carries the cookie must therefore present the window's UA.
-			headers.set('user-agent', challengeClearer.userAgent());
+			// Only the clearance triggers it: __cf_bm / _cfuvid can outlive it, and a
+			// request without a clearance keeps the caller's UA.
+			if (/(^|;\s*)cf_clearance=/.test(cookie)) {
+				headers.set('user-agent', challengeClearer.userAgent());
+			}
 		} catch (error) {
 			logger.debug('Cloudflare clearance lookup failed', {
 				message: error instanceof Error ? error.message : String(error),

@@ -612,9 +612,28 @@ async function main() {
 			'first send keeps the caller UA, replay uses the window UA'
 		);
 
+		// Bot-management cookies (__cf_bm, _cfuvid) can outlive the clearance; on
+		// their own they are forwarded but do not trigger the UA override.
 		resetCalls();
+		clearerCookie = '__cf_bm=bm; _cfuvid=uv';
 		responder = () =>
 			new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+		await handler(undefined, {
+			type: 'request',
+			config: {
+				method: 'get',
+				url: 'https://store.test/wp-json/',
+				headers: { 'User-Agent': PRODUCT_UA },
+			},
+		});
+		assert.equal((fetchCalls[0]?.init?.headers as Headers).get('cookie'), '__cf_bm=bm; _cfuvid=uv');
+		assert.equal(
+			(fetchCalls[0]?.init?.headers as Headers).get('user-agent'),
+			PRODUCT_UA,
+			'no cf_clearance, no UA override'
+		);
+
+		resetCalls();
 		await handler(undefined, {
 			type: 'request',
 			config: {
