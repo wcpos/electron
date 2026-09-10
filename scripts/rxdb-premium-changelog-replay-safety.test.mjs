@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -22,11 +22,13 @@ const runtimes = [
 		dist: 'esm',
 		createRxDatabase: esmRxdb.createRxDatabase,
 		getStorage: esmFilesystem.getRxStorageFilesystemNode,
+		accessPrototype: esmFilesystem.NodeFilesystemFileSyncAccessHandle.prototype,
 	},
 	{
 		dist: 'cjs',
 		createRxDatabase: cjsRxdb.createRxDatabase,
 		getStorage: cjsFilesystem.getRxStorageFilesystemNode,
+		accessPrototype: cjsFilesystem.NodeFilesystemFileSyncAccessHandle.prototype,
 	},
 ];
 
@@ -79,22 +81,22 @@ function assertNoNullRows(basePath) {
 	}
 }
 
-async function openDatabase(runtime, basePath) {
+async function openDatabase(runtime, basePath, collectionSchema = schema) {
 	const db = await runtime.createRxDatabase({
 		name: join(basePath, 'database'),
 		storage: runtime.getStorage({ basePath }),
 		multiInstance: false,
 	});
-	const { c } = await db.addCollections({ c: { schema } });
+	const { c } = await db.addCollections({ c: { schema: collectionSchema } });
 	return { db, collection: c };
 }
 
-async function openWithRebuildEvents(runtime, basePath) {
+async function openWithRebuildEvents(runtime, basePath, collectionSchema = schema) {
 	const events = [];
 	const onRebuild = (event) => events.push(event);
 	globalThis.__wcposOnIndexRebuild = onRebuild;
 	return {
-		...(await openDatabase(runtime, basePath)),
+		...(await openDatabase(runtime, basePath, collectionSchema)),
 		events,
 		stopCapture() {
 			if (globalThis.__wcposOnIndexRebuild === onRebuild) delete globalThis.__wcposOnIndexRebuild;
@@ -142,7 +144,11 @@ async function seedCrashWindow(runtime, basePath, { dieAt = 'empty', keepStamp =
 	const { db, collection } = await openDatabase(runtime, basePath);
 	for (let index = 0; index < 10; index++) {
 		const suffix = String(index).padStart(2, '0');
-		await collection.insert({ id: `k-${suffix}`, status: `s-${suffix}`, note: 'original' });
+		await collection.insert({
+			id: `k-${suffix}`,
+			status: `s-${suffix}`,
+			note: 'original',
+		});
 	}
 	await fullCleanup(collection);
 	for (const id of ['k-09', 'k-08', 'k-07']) {
@@ -234,6 +240,127 @@ async function seedHealthy(runtime, basePath, documents) {
 }
 
 for (const runtime of runtimes) {
+	test(`${runtime.dist}: compaction shrinks dead gaps under a simulated string cap`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-large-gap`);
+		let db;
+		try {
+			const opened = await openDatabase(runtime, basePath);
+			db = opened.db;
+			const collection = opened.collection;
+			const documents = Array.from({ length: 80 }, (_, i) => ({
+				id: `k-${String(i).padStart(2, '0')}`,
+				status: 'kept',
+				note: 'original',
+			}));
+			await collection.bulkInsert(documents);
+			for (let i = 0; i < 20; i++) {
+				await (await collection.findOne('k-79').exec()).incrementalPatch({ note: `update-${i}` });
+			}
+			for (const document of documents.slice(0, 10)) {
+				await (await collection.findOne(document.id).exec()).remove();
+			}
+			const path = join(collectionDirectory(basePath), 'documents.json');
+			const before = statSync(path).size;
+			const repeat = String.prototype.repeat;
+			try {
+				String.prototype.repeat = function (count) {
+					if (count > 256) throw new RangeError('Invalid string length');
+					return repeat.call(this, count);
+				};
+				while (!(await collection.cleanup(0))) {
+					/* cleanup is incremental */
+				}
+			} finally {
+				String.prototype.repeat = repeat;
+			}
+			assert.ok(statSync(path).size < before, 'documents.json shrank');
+			await db.close();
+			const reopened = await openDatabase(runtime, basePath);
+			db = reopened.db;
+			const expected = documents
+				.slice(10)
+				.map((doc) => (doc.id === 'k-79' ? { ...doc, note: 'update-19' } : doc));
+			assert.deepEqual(
+				await findAll(reopened.collection),
+				expected,
+				'all live contents survive reopen'
+			);
+		} finally {
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	test(`${runtime.dist}: windowed rebuild preserves documents across the 8 MiB boundary`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-windowed`);
+		const windowBytes = 8 * 1024 * 1024;
+		const largeSchema = {
+			...schema,
+			properties: {
+				...schema.properties,
+				note: { type: 'string', maxLength: 2048 },
+			},
+		};
+		const documents = Array.from({ length: 9000 }, (_, i) => ({
+			id: `k-${String(i).padStart(5, '0')}`,
+			status: 'kept',
+			note: `${i}: Ü🍕 "quoted" \\ {braces} ` + 'x'.repeat(1024),
+		}));
+		const originalRead = runtime.accessPrototype.read;
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath, largeSchema);
+			db = initial.db;
+			for (let i = 0; i < documents.length; i += 500) {
+				const result = await initial.collection.bulkInsert(documents.slice(i, i + 500));
+				assert.equal(result.error.length, 0);
+			}
+			await fullCleanup(initial.collection);
+			await db.close();
+			const bytes = readFileSync(join(collectionDirectory(basePath), 'documents.json'));
+			assert.ok(bytes.length > windowBytes);
+			const rows = JSON.parse(readFileSync(indexFiles(basePath)[0], 'utf8'));
+			const crossing = rows.find((row) => row[1] < windowBytes && row[2] > windowBytes);
+			assert.ok(crossing, 'fixture has a document straddling the window boundary');
+			const crossingDoc = JSON.parse(bytes.subarray(crossing[1], crossing[2]).toString());
+			const crossingIndex = documents.findIndex((doc) => doc.id === crossingDoc.id);
+			replaceRowWithNull(indexFiles(basePath)[0]);
+			runtime.accessPrototype.read = async function (offset, end) {
+				if (this.fileHandle.name === 'documents.json') {
+					assert.ok(
+						end !== undefined && end - offset <= windowBytes,
+						'document reads are bounded to 8 MiB'
+					);
+				}
+				return originalRead.call(this, offset, end);
+			};
+			const opened = await openWithRebuildEvents(runtime, basePath, largeSchema);
+			db = opened.db;
+			await storageInternals(opened.collection).statePromise;
+			assert.equal(opened.events.length, 1);
+			assert.equal(opened.events[0].documents, documents.length, 'every live document was rebuilt');
+			for (const index of [
+				0,
+				crossingIndex - 1,
+				crossingIndex,
+				crossingIndex + 1,
+				documents.length - 1,
+			]) {
+				const doc = await opened.collection.findOne(documents[index].id).exec();
+				assert.ok(doc);
+				assert.equal(
+					doc.note,
+					documents[index].note,
+					'contents and absolute offsets survive the boundary'
+				);
+			}
+		} finally {
+			runtime.accessPrototype.read = originalRead;
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
 	for (const dieAt of ['empty', 'persist']) {
 		test(`${runtime.dist}: compaction dying at ${dieAt} rebuilds instead of replaying baked operations`, async () => {
 			const basePath = makeDirectory(`${runtime.dist}-crash-${dieAt}`);
@@ -294,7 +421,9 @@ for (const runtime of runtimes) {
 	test(`${runtime.dist}: a stale changelog without a stamp is refused before it can punch holes`, async () => {
 		const basePath = makeDirectory(`${runtime.dist}-unstamped`);
 		try {
-			const expected = await seedCrashWindow(runtime, basePath, { keepStamp: false });
+			const expected = await seedCrashWindow(runtime, basePath, {
+				keepStamp: false,
+			});
 			const opened = await openWithRebuildEvents(runtime, basePath);
 			assert.deepEqual(await findAll(opened.collection), expected);
 			opened.stopCapture();
@@ -349,7 +478,11 @@ for (const runtime of runtimes) {
 	test(`${runtime.dist}: rebuild preserves multibyte document byte offsets`, async () => {
 		const basePath = makeDirectory(`${runtime.dist}-multibyte`);
 		const expected = [
-			{ id: 'unicode', status: 'kept', note: 'Ünïcødé 🍕 “quotes” \\ and {braces}' },
+			{
+				id: 'unicode',
+				status: 'kept',
+				note: 'Ünïcødé 🍕 “quotes” \\ and {braces}',
+			},
 		];
 		try {
 			await seedHealthy(runtime, basePath, expected);
