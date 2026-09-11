@@ -88,6 +88,23 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           printf 'Lane: %s\nVersion: %s\n' "$lane" "$version" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Tag the next-lane build at this commit
+        if: steps.lane.outputs.lane == 'next'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.lane.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Forge creates the release without a target commit, so an absent tag would land on the
+          # default branch (main) although the build is next's. Create it here at this commit; a
+          # re-run of the same run number finds it already there.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists"
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$GITHUB_SHA" >/dev/null
+            echo "Tagged v$VERSION at $GITHUB_SHA"
+          fi
+
       - name: 📥 Check out the Monorepo repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,6 +149,8 @@ jobs:
 
       - name: Apply lane version
         if: needs.build-expo.outputs.lane == 'next'
+        # bash on every runner: the Windows default shell is PowerShell, where $LANE_VERSION is empty.
+        shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
         run: npm version --no-git-tag-version "$LANE_VERSION"
@@ -219,6 +238,8 @@ jobs:
 
       - name: Apply lane version
         if: needs.build-expo.outputs.lane == 'next'
+        # bash on every runner: the Windows default shell is PowerShell, where $LANE_VERSION is empty.
+        shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
         run: npm version --no-git-tag-version "$LANE_VERSION"
@@ -302,6 +323,8 @@ jobs:
 
       - name: Apply lane version
         if: needs.build-expo.outputs.lane == 'next'
+        # bash on every runner: the Windows default shell is PowerShell, where $LANE_VERSION is empty.
+        shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
         run: npm version --no-git-tag-version "$LANE_VERSION"
@@ -398,6 +421,8 @@ jobs:
 
       - name: Apply lane version
         if: needs.build-expo.outputs.lane == 'next'
+        # bash on every runner: the Windows default shell is PowerShell, where $LANE_VERSION is empty.
+        shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
         run: npm version --no-git-tag-version "$LANE_VERSION"
