@@ -524,11 +524,15 @@ async function reconcileSecondaryIndexes(instance) {
   });
 }
 
-export function withTargetedOpfsRecovery(storage) {
+export function withTargetedOpfsRecovery(storage, options = {}) {
+  const ownsRepairs = typeof options.ownsRepairs === "function"
+    ? options.ownsRepairs
+    : (params) => !params.multiInstance;
   const createStorageInstance = storage.createStorageInstance.bind(storage);
   return {
     ...storage,
     async createStorageInstance(params) {
+      const soleRepairOwner = () => Boolean(ownsRepairs(params));
       const instance = await createStorageInstance(params);
       const findDocumentsById = instance.findDocumentsById.bind(instance);
       const bulkWrite = instance.bulkWrite.bind(instance);
@@ -575,7 +579,8 @@ export function withTargetedOpfsRecovery(storage) {
       const dropHollowIds = async (hollow) => {
         const refused = [];
         if (hollow.length === 0) return refused;
-        if (params.multiInstance) {
+        // Only the sole repair owner may mutate positions (#1057, #1049).
+        if (!soleRepairOwner()) {
           for (const id of hollow) {
             refused.push({ id, reason: "multi-instance" });
             report("hollow-row-refused", {
@@ -613,7 +618,8 @@ export function withTargetedOpfsRecovery(storage) {
             documents = parseDocuments(await findDocumentsById(batch, true));
           } catch (error) {
             if (!isMalformedJson(error)) throw error;
-            if (params.multiInstance) {
+            // Only the sole repair owner may repair document ranges (#1057).
+            if (!soleRepairOwner()) {
               error.message += "; targeted recovery refused: multi-instance";
               throw error;
             }
@@ -835,8 +841,8 @@ export function withTargetedOpfsRecovery(storage) {
         // that lost the primary row can leave a secondary row standing, and
         // the insert would then file a second row for the id beside the stale
         // one, so that secondary serves both revisions from then on. The
-        // stale rows are dropped through the changelog first; under
-        // multi-instance the drop is refused like every positional repair —
+        // stale rows are dropped through the changelog first; without a
+        // sole repair owner the drop is refused (#1057) —
         // and the write is refused WITH it, loudly, because stripping without
         // the drop corrupts the secondary while keeping `previous` corrupts
         // the primary (position -1).
@@ -852,7 +858,7 @@ export function withTargetedOpfsRecovery(storage) {
           ),
         );
         if (staleIds.length === 0) return writes;
-        if (params.multiInstance) {
+        if (!soleRepairOwner()) {
           for (const id of staleIds) {
             report("stale-secondary-refused", {
               target,
@@ -943,9 +949,9 @@ export function withTargetedOpfsRecovery(storage) {
         const repairedDocuments = await repairMalformedIds(
           state.firstIdx.metaIdMap.keys(),
         );
-        // A rebuild changes row offsets without emitting changelog operations,
-        // so a multi-instance peer's stale in-memory rows could later persist
-        // over it — only reconcile when this instance is the sole owner.
+        // A rebuild rewrites every row without emitting changelog operations,
+        // so peers cannot converge; ownership does not make it safe.
+        // Refused under multi-instance regardless of ownership (#1049).
         let refusal = "multi-instance";
         if (!params.multiInstance) {
           try {

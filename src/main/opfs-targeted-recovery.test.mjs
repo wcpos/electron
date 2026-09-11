@@ -2784,3 +2784,190 @@ test("refuses a stripped write over a stale secondary survivor when multi-instan
     await rm(basePath, { recursive: true, force: true });
   }
 });
+
+for (const method of ["read", "write", "late leadership"]) {
+  test(`sole repair owner repairs malformed documents: ${method}`, async () => {
+    const basePath = await mkdtemp(join(tmpdir(), "wcpos-repair-owner-"));
+    const record = document("order:owner", 0);
+    let owner = method !== "late leadership";
+    let recovering;
+    try {
+      await (await seedCompacted(basePath, [record], "owner-seed")).close();
+      await corruptRecord(basePath, record.id);
+      const { withTargetedOpfsRecovery } =
+        await import("./opfs-targeted-recovery.mjs");
+      recovering = await withTargetedOpfsRecovery(
+        getRxStorageFilesystemNode({ basePath }),
+        {
+          ownsRepairs: (params) => {
+            assert.equal(params.databaseName, "targeted-recovery-db");
+            return owner;
+          },
+        },
+      ).createStorageInstance({
+        ...storageParams("owner"),
+        multiInstance: true,
+      });
+      const updated = {
+        ...record,
+        value: "updated",
+        _rev: "2-owner",
+        _meta: { lwt: record._meta.lwt + 100 },
+      };
+      const write = () =>
+        recovering.bulkWrite(
+          [{ previous: record, document: updated }],
+          "update",
+        );
+      if (!owner) {
+        await assert.rejects(
+          recovering.findDocumentsById([record.id], false),
+          /targeted recovery refused: multi-instance$/,
+        );
+        await assert.rejects(
+          write(),
+          /targeted recovery refused: multi-instance$/,
+        );
+        owner = true;
+      }
+      if (method === "write") {
+        assert.deepEqual((await write()).error, []);
+        assert.deepEqual(
+          await recovering.findDocumentsById([record.id], false),
+          [updated],
+        );
+      } else {
+        assert.deepEqual(
+          await recovering.findDocumentsById([record.id], false),
+          [record],
+        );
+        assert.deepEqual((await write()).error, []);
+      }
+    } finally {
+      await recovering?.close();
+      await rm(basePath, { recursive: true, force: true });
+    }
+  });
+}
+
+test("sole repair owner is still refused an index rebuild when multi-instance", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-index-multi-"));
+  const ids = ["lane:aaa", "lane:bbb", "lane:ccc"];
+
+  try {
+    const initial = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(laneStorageParams("multi-initial"));
+    await initial.bulkWrite(
+      ids.map((id, index) => ({ document: laneDocument(id, index) })),
+      "seed",
+    );
+    await initial.cleanup(0);
+    await initial.close();
+    await shiftSecondaryIndexOffsets(basePath, "lane:bbb", -2);
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+      { ownsRepairs: () => true },
+    ).createStorageInstance({
+      ...laneStorageParams("multi-recovering"),
+      multiInstance: true,
+    });
+    const betaQuery = prepareQuery(
+      laneSchema,
+      normalizeMangoQuery(laneSchema, {
+        selector: {},
+        sort: [{ beta: "asc" }],
+      }),
+    );
+    await assert.rejects(recovering.query(betaQuery), {
+      name: "SyntaxError",
+      message: /index reconciliation refused: multi-instance$/,
+    });
+    await recovering.close();
+  } finally {
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("sole repair owner drops a stale secondary survivor when multi-instance", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-stale-secondary-"));
+  const orphan = document("order:orphan", 0);
+  const sibling = document("order:sibling", 1);
+  const capture = captureRecoveryEvents();
+
+  try {
+    await (
+      await seedCompacted(basePath, [orphan, sibling], "survivor-seed")
+    ).close();
+    await orphanPrimaryRow(basePath, orphan.id, sibling.id);
+
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery(
+      getRxStorageFilesystemNode({ basePath }),
+      { ownsRepairs: () => true },
+    ).createStorageInstance({
+      ...storageParams("survivor-recovering"),
+      multiInstance: true,
+    });
+    const state = await recovering.internals.statePromise;
+    const broadcastMessages = [];
+    state.broadcastChannel = { postMessage: (message) => broadcastMessages.push(message), close() {} };
+    const updated = {
+      ...orphan,
+      value: "reinserted",
+      _rev: "2-orphan",
+      _meta: { lwt: orphan._meta.lwt + 100 },
+    };
+    const written = await recovering.bulkWrite(
+      [{ previous: orphan, document: updated }],
+      "update",
+    );
+    assert.deepEqual(written.error, []);
+    assert.deepEqual(capture.events, [
+      {
+        kind: "stale-secondary-dropped",
+        target: "targeted-recovery-db/products",
+        id: orphan.id,
+      },
+    ]);
+    assert.deepEqual(
+      (
+        await recovering.findDocumentsById([orphan.id, sibling.id], false)
+      ).map((item) => [item.id, item.value]),
+      [
+        [orphan.id, "reinserted"],
+        [sibling.id, sibling.value],
+      ],
+    );
+    const drops = broadcastMessages.flatMap((message) => message.changelogOperations ?? [])
+      .filter((operation) => operation[2] === 'D');
+    assert.ok(drops.length > 0, "stale secondary row drops are broadcast");
+    for (const indexState of state.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(orphan.id)).length,
+        1,
+        "exactly one row per index for the re-inserted document",
+      );
+    }
+    await recovering.close();
+
+    const reopened = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("survivor-reopened"));
+    const persisted = await reopened.internals.statePromise;
+    for (const indexState of persisted.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(orphan.id)).length,
+        1,
+      );
+    }
+    await reopened.close();
+  } finally {
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
