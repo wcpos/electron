@@ -208,20 +208,55 @@ async function main() {
 	assert.equal(captured.length, 9, 'identical reports capture once');
 	assert.equal(captured[8].context.level, 'warning');
 	seams.__wcposOnStorageRecovery!({ ...discarded, id: 'second' });
-	assert.equal(captured.length, 10, 'a distinct id captures again');
+	assert.equal(captured.length, 9, 'a distinct id in the same event class is deduplicated');
 	assert.equal(logged.length, 11, 'every report still logs');
 	seams.__wcposOnStorageRecovery!({ ...discarded, reason: 'range-holds-foreign-bytes' });
-	assert.equal(captured.length, 11, 'the same id with a different reason is a distinct event');
+	assert.equal(captured.length, 10, 'the same id with a different reason is a distinct event');
 
 	// Before consent the transport drops everything, so a report seen then must
 	// not be remembered as captured: the first report after consent has to send.
 	reporting = false;
-	seams.__wcposOnStorageRecovery!({ ...discarded, id: 'third' });
-	assert.equal(captured.length, 11, 'no capture while reporting is off');
+	seams.__wcposOnStorageRecovery!({ ...discarded, target: 'store_v6_consent/logs', id: 'third' });
+	assert.equal(captured.length, 10, 'no capture while reporting is off');
 	assert.equal(logged.length, 13, 'still logged locally while reporting is off');
 	reporting = true;
-	seams.__wcposOnStorageRecovery!({ ...discarded, id: 'third' });
-	assert.equal(captured.length, 12, 'the first report after consent is captured');
+	seams.__wcposOnStorageRecovery!({ ...discarded, target: 'store_v6_consent/logs', id: 'third' });
+	assert.equal(captured.length, 11, 'the first report after consent is captured');
+
+	const hollow = { kind: 'hollow-row-dropped', target: 'dedupe/orders', id: 'first' };
+	const beforeHollow = captured.length;
+	seams.__wcposOnStorageRecovery!(hollow);
+	seams.__wcposOnStorageRecovery!({ ...hollow, id: 'second' });
+	assert.equal(captured.length, beforeHollow + 1, 'different damaged rows capture once');
+	assert.equal(captured[beforeHollow].context.extra.id, 'first', 'capture retains the first id');
+	seams.__wcposOnStorageRecovery!({ ...hollow, target: 'dedupe/products' });
+	assert.equal(captured.length, beforeHollow + 2, 'a different target captures separately');
+
+	const beforeCleanup = captured.length;
+	for (const offset of [52428801, 94371842]) {
+		seams.__wcposOnStorageRecovery!({
+			kind: 'cleanup-recovery',
+			target: 'dedupe/orders',
+			error: new SyntaxError(`Unexpected token at position ${offset}`),
+			initialError: `RangeError: Invalid string length at ${offset * 2}`,
+		});
+	}
+	assert.equal(
+		captured.length,
+		beforeCleanup + 1,
+		'byte offsets in the cause or any detail do not split an event class'
+	);
+	seams.__wcposOnStorageRecovery!({
+		kind: 'cleanup-recovery',
+		target: 'dedupe/orders_v2',
+		error: new SyntaxError('Unexpected token at position 1'),
+	});
+	assert.equal(captured.length, beforeCleanup + 2, 'digits in the target still distinguish it');
+	assert.equal(
+		captured[beforeCleanup].context.extra.cause,
+		'SyntaxError: Unexpected token at position 52428801',
+		'capture retains the exact first cause'
+	);
 
 	delete seams.__wcposOnStorageRunFailure;
 	delete seams.__wcposOnIndexRebuild;

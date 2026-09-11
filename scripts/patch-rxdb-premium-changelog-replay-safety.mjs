@@ -11,8 +11,12 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 export const MARKER = 'WCPOS_CHANGELOG_REPLAY_SAFETY_PATCH';
+// Bumped whenever the prelude or a rewrite changes: a dist patched by an older
+// script cannot be upgraded in place (the prelude text is unknown), so it must
+// be restored from the licensed package and re-patched.
+export const PATCH_VERSION = 2;
 
-const MARKER_PRELUDE = `globalThis.${MARKER}=1;\n`;
+const MARKER_PRELUDE = `globalThis.${MARKER}=${PATCH_VERSION};\n`;
 const HASH_PRELUDE = `${MARKER_PRELUDE}function __wcposHash(raw){
 var h1=3735928559,h2=1103547991;
 for(var i=0;i<raw.length;i++){var code=raw.charCodeAt(i);h1=Math.imul(h1^code,2654435761);h2=Math.imul(h2^code,1597334677)}
@@ -58,11 +62,29 @@ else if(!(at>=0&&at<rows.length)||!Array.isArray(rows[at])||rows[at][0]!==row[0]
 indexState.runChangelogOperation(operation)}}
 return null
 }
+// V8 refuses buffers in the GB range; one damaged documents file reached 42 GB (Sentry WOOCOMMERCE-POS-2MS).
+// A document that does not close inside the window it starts is re-read from a window
+// doubled up to the cap, never scanned from inside (its nested objects are not documents);
+// past the cap it is skipped whole by a streaming brace walk. The seam lets tests shrink both.
+const REBUILD_WINDOW_BYTES=8*1024*1024,REBUILD_WINDOW_MAX_BYTES=512*1024*1024;
+function __wcposRebuildWindow(){var seam=globalThis.__wcposRebuildWindowBytes;return{bytes:seam&&seam.bytes||REBUILD_WINDOW_BYTES,max:seam&&seam.max||REBUILD_WINDOW_MAX_BYTES}}
+async function __wcposSkipObject(handle,from,size,chunk){
+var depth=0,inString=false,escaped=false;
+for(var at=from;at<size;){
+var bytes=await handle.read(at,Math.min(at+chunk,size));
+for(var i=0;i<bytes.length;i++){var byte=bytes[i];
+if(inString){if(escaped)escaped=false;else if(byte===92)escaped=true;else if(byte===34)inString=false}
+else if(byte===34)inString=true;else if(byte===123)depth++;else if(byte===125){depth--;if(depth===0)return at+i+1}}
+at+=bytes.length}
+return -1
+}
 async function __wcposRebuildIndexes(options){
 var reason=options.reason,runState=options.runState,docsAccessHandle=options.docsAccessHandle,indexStates=options.indexStates,changelog=options.changelog,stampHandle=options.stampHandle,decode=options.decode,primaryPath=options.primaryPath,databaseName=options.databaseName,collectionName=options.collectionName;
 var kept;
 try{
-var bytes=await docsAccessHandle.read(0),latest=new Map;
+var size=await docsAccessHandle.getSize(),latest=new Map,sizes=__wcposRebuildWindow(),windowBytes=sizes.bytes,skipped=0;
+for(var pos=0;pos<size;){
+var windowEnd=Math.min(pos+windowBytes,size),bytes=await docsAccessHandle.read(pos,windowEnd);
 for(var cursor=0;cursor<bytes.length;){
 if(bytes[cursor]!==123){cursor++;continue}
 var start=cursor,depth=0,inString=false,escaped=false,end=-1;
@@ -71,15 +93,20 @@ var byte=bytes[at];
 if(inString){if(escaped)escaped=false;else if(byte===92)escaped=true;else if(byte===34)inString=false}
 else if(byte===34)inString=true;else if(byte===123)depth++;else if(byte===125){depth--;if(depth===0){end=at+1;break}}
 }
-if(end<0){cursor=start+1;continue}
+// Unclosed inside a window that is not the tail: re-read from its brace (next window starts
+// there), or widen the window when it already starts there. Only past the cap, or at the
+// tail, is the brace stepped over like any other unparseable byte.
+if(end<0){if(windowEnd<size){if(start>0){cursor=start;break}if(windowBytes<sizes.max){windowBytes=Math.min(windowBytes*2,sizes.max);cursor=0;break}var skipEnd=await __wcposSkipObject(docsAccessHandle,pos,size,sizes.bytes);if(skipEnd>0){skipped++;cursor=skipEnd-pos;windowBytes=sizes.bytes;break}}cursor=start+1;continue}
 try{
 var doc=JSON.parse(decode(bytes.subarray(start,end)));
 if(!doc||typeof doc!=="object"||!Object.prototype.hasOwnProperty.call(doc,primaryPath)){cursor=start+1;continue}
 var revision=parseInt(doc._rev,10);if(Number.isNaN(revision))revision=-1;
-var previous=latest.get(doc[primaryPath]);
-if(!previous||revision>previous.revision||revision===previous.revision&&start>previous.start)latest.set(doc[primaryPath],{doc:doc,start:start,end:end,revision:revision});
-cursor=end
+var previous=latest.get(doc[primaryPath]),absoluteStart=pos+start,absoluteEnd=pos+end;
+if(!previous||revision>previous.revision||revision===previous.revision&&absoluteStart>previous.start)latest.set(doc[primaryPath],{doc:doc,start:absoluteStart,end:absoluteEnd,revision:revision});
+cursor=end;windowBytes=sizes.bytes
 }catch(error){cursor=start+1}
+}
+pos+=cursor
 }
 kept=Array.from(latest.values());
 for(var indexState of indexStates)indexState.rows=kept.map(function(record){return[indexState.getIndexableString(record.doc),record.start,record.end]}).sort(function(left,right){return left[0]<right[0]?-1:1});
@@ -90,9 +117,9 @@ await changelog.empty(runState);
 var stampAccess=await ${stampAccessExpression};
 await stampAccess.truncate(0);
 }catch(rebuildError){try{rebuildError.message="index rebuild failed ("+reason+"): "+rebuildError.message}catch(ignored){}throw rebuildError}
-var report={db:databaseName,col:collectionName,reason:reason,documents:kept.length};
+var report={db:databaseName,col:collectionName,reason:reason,documents:kept.length,skipped:skipped};
 console.warn("[wcpos] rebuilt storage indexes from documents.json",report);
-if(typeof globalThis.__wcposOnIndexRebuild==="function")globalThis.__wcposOnIndexRebuild({target:databaseName+"/"+collectionName,reason:reason,documents:kept.length})
+if(typeof globalThis.__wcposOnIndexRebuild==="function")globalThis.__wcposOnIndexRebuild({target:databaseName+"/"+collectionName,reason:reason,documents:kept.length,skipped:skipped})
 }
 `;
 }
@@ -117,6 +144,19 @@ const DISTS = [
 				file: 'cleanup.js',
 				prelude: HASH_PRELUDE,
 				rewrites: [
+					{
+						// When the encoded document fits in the gap ahead of it, write it there directly
+						// and size the row from the bytes written: the destination lies wholly in dead
+						// space, so a crash before the row move leaves the source bytes and row intact,
+						// and no gap-sized whitespace string is ever built (RangeError past ~512 MB —
+						// Sentry WOOCOMMERCE-POS-2MS). Otherwise rxdb's fill + interim-row sequence runs
+						// unchanged; the gap is then shorter than one document.
+						name: 'directMoveOverLargeGaps',
+						before:
+							'export async function cleanupDocumentJsonFile(a,t){for(var r=await a.internals.statePromise,n=e(r.indexStates.find((e=>"_meta.lwt"===e.index[0]&&e.index[1]===a.primaryPath&&2===e.index.length))),i=await o(r.documentFileHandle,t),s=await i.getSize(),l=50,g=0,d=0,m=0;;){if(d>=l)return d;var u=n.rows[m];if(m+=1,!u)return g<s&&await i.truncate(g),d;var w=u[1],h=u[2];if(w===g)g=h;else{d+=1;var f=(await p(r,i,t,[u]))[0],v=g,x=w-v,y=a._encode(" ".repeat(x)),D=await i.getWritable();await D.write(y,{at:v});var P=[];for(var S of r.indexStates){var O=S.changeDocumentPosition(f,[v,h]);P.push(O)}await r.changelog.addChangelogOperations(t,P),await c(a,r,P);var C=h-w,b=JSON.stringify(f)+" ".repeat(x),j=a._encode(b);D=await i.getWritable(),await D.write(j,{at:v});var F=v+C,I=[];for(var J of r.indexStates){var _=J.changeDocumentPosition(f,[v,F]);I.push(_)}await r.changelog.addChangelogOperations(t,I),await c(a,r,I),g+=C}}}',
+						after:
+							'export async function cleanupDocumentJsonFile(a,t){for(var r=await a.internals.statePromise,n=e(r.indexStates.find((e=>"_meta.lwt"===e.index[0]&&e.index[1]===a.primaryPath&&2===e.index.length))),i=await o(r.documentFileHandle,t),s=await i.getSize(),l=50,g=0,d=0,m=0;;){if(d>=l)return d;var u=n.rows[m];if(m+=1,!u)return g<s&&await i.truncate(g),d;var w=u[1],h=u[2];if(w===g)g=h;else{d+=1;var f=(await p(r,i,t,[u]))[0],v=g,x=w-v,D,C,E=a._encode(JSON.stringify(f));if(x>=E.byteLength){D=await i.getWritable(),await D.write(E,{at:v}),C=E.byteLength}else{var y=a._encode(" ".repeat(x));D=await i.getWritable();await D.write(y,{at:v});var P=[];for(var S of r.indexStates){var O=S.changeDocumentPosition(f,[v,h]);P.push(O)}await r.changelog.addChangelogOperations(t,P),await c(a,r,P);C=h-w;var b=JSON.stringify(f)+" ".repeat(x),j=a._encode(b);D=await i.getWritable(),await D.write(j,{at:v})}var F=v+C,I=[];for(var J of r.indexStates){var _=J.changeDocumentPosition(f,[v,F]);I.push(_)}await r.changelog.addChangelogOperations(t,I),await c(a,r,I),g+=C}}}',
+					},
 					{
 						name: 'stampBeforeBake',
 						before:
@@ -165,6 +205,15 @@ const DISTS = [
 				prelude: HASH_PRELUDE,
 				rewrites: [
 					{
+						// A non-overlapping destination lies wholly in dead space: a crash before
+						// the final row move leaves the original document bytes and row intact.
+						name: 'directMoveOverLargeGaps',
+						before:
+							'async function d(t,i){for(var o=await t.internals.statePromise,s=(0,e.ensureNotFalsy)(o.indexStates.find((e=>"_meta.lwt"===e.index[0]&&e.index[1]===t.primaryPath&&2===e.index.length))),g=await(0,a.getAccessHandle)(o.documentFileHandle,i),d=await g.getSize(),l=50,u=0,c=0,p=0;;){if(c>=l)return c;var w=s.rows[p];if(p+=1,!w)return u<d&&await g.truncate(u),c;var h=w[1],m=w[2];if(h===u)u=m;else{c+=1;var x=(await(0,r.getDocumentsJson)(o,g,i,[w]))[0],f=u,v=h-f,y=t._encode(" ".repeat(v)),I=await g.getWritable();await I.write(y,{at:f});var b=[];for(var S of o.indexStates){var C=S.changeDocumentPosition(x,[f,m]);b.push(C)}await o.changelog.addChangelogOperations(i,b),await(0,n.broadcastChangelogOperations)(t,o,b);var O=m-h,P=JSON.stringify(x)+" ".repeat(v),D=t._encode(P);I=await g.getWritable(),await I.write(D,{at:f});var F=f+O,q=[];for(var _ of o.indexStates){var j=_.changeDocumentPosition(x,[f,F]);q.push(j)}await o.changelog.addChangelogOperations(i,q),await(0,n.broadcastChangelogOperations)(t,o,q),u+=O}}}',
+						after:
+							'async function d(t,i){for(var o=await t.internals.statePromise,s=(0,e.ensureNotFalsy)(o.indexStates.find((e=>"_meta.lwt"===e.index[0]&&e.index[1]===t.primaryPath&&2===e.index.length))),g=await(0,a.getAccessHandle)(o.documentFileHandle,i),d=await g.getSize(),l=50,u=0,c=0,p=0;;){if(c>=l)return c;var w=s.rows[p];if(p+=1,!w)return u<d&&await g.truncate(u),c;var h=w[1],m=w[2];if(h===u)u=m;else{c+=1;var x=(await(0,r.getDocumentsJson)(o,g,i,[w]))[0],f=u,v=h-f,I,O,E=t._encode(JSON.stringify(x));if(v>=E.byteLength){I=await g.getWritable(),await I.write(E,{at:f}),O=E.byteLength}else{var y=t._encode(" ".repeat(v));I=await g.getWritable();await I.write(y,{at:f});var b=[];for(var S of o.indexStates){var C=S.changeDocumentPosition(x,[f,m]);b.push(C)}await o.changelog.addChangelogOperations(i,b),await(0,n.broadcastChangelogOperations)(t,o,b);O=m-h;var P=JSON.stringify(x)+" ".repeat(v),D=t._encode(P);I=await g.getWritable(),await I.write(D,{at:f})}var F=f+O,q=[];for(var _ of o.indexStates){var j=_.changeDocumentPosition(x,[f,F]);q.push(j)}await o.changelog.addChangelogOperations(i,q),await(0,n.broadcastChangelogOperations)(t,o,q),u+=O}}}',
+					},
+					{
 						name: 'stampBeforeBake',
 						before:
 							'async function g(e,a){var t=await e.internals.statePromise,r=await t.changelog.getChangelogOperations(a),n=t.indexStates.filter((e=>{var a=r.get(e.indexId);return!(!a||0===a.length)}));for(var i of n)await i.persistInMemoryRows(a);return n.length>0&&await t.changelog.empty(a),n}',
@@ -192,7 +241,13 @@ const DISTS = [
 
 export function preparePatch(path, patch) {
 	const source = readFileSync(path, 'utf8');
-	if (source.includes(`${MARKER}=1`)) {
+	const applied = source.match(new RegExp(`${MARKER}=(\\d+)`));
+	if (applied && Number(applied[1]) !== PATCH_VERSION) {
+		throw new Error(
+			`${path} carries patch v${applied[1]} but this script is v${PATCH_VERSION}: restore the pristine dist (pnpm rebuild rxdb-premium, needs RXDB_PREMIUM) and re-run the rxdb-premium patch scripts (postinstall)`
+		);
+	}
+	if (applied) {
 		for (const rewrite of patch.rewrites) {
 			if (!source.includes(rewrite.after)) {
 				throw new Error(`${path} carries the patch marker but rewrite ${rewrite.name} is missing`);
