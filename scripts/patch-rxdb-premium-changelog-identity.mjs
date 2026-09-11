@@ -125,17 +125,27 @@ export const DISTS = [
 			'runChangelogOperation=function(t){var r=t[1],i=t[3];if("A"===t[2])this.rows.splice(r,0,i),this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i);else if("D"===t[2])this.rows.splice(r,1),this.metaIdMap&&this.metaIdMap.delete((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength));else{if("R"!==t[2])throw new Error("unknown operation key "+t[2]);this.rows[r]=i,this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i)}}',
 		applyAfter: `runChangelogOperation=function(t){return ${MARKER}(this,t,function(a,b){return (0,e.getPrimaryKeyFromIndexableString)(a,b)})}`,
 	},
-	...['esm', 'cjs'].map((dist) => {
-		const states = dist === 'esm' ? 'y' : 'h';
-		return {
-			dist,
-			file: 'helpers.js',
-			marker: LINK_MARKER,
-			prelude: LINK_PRELUDE,
-			linkBefore: `indexStates:${states},firstIdx:${states}[0]`,
-			linkAfter: `indexStates:${LINK_MARKER}(${states}),firstIdx:${states}[0]`,
-		};
-	}),
+	// Link at the moment the IndexState array is created — BEFORE the replay-safety
+	// patch replays the boot changelog through it (review finding on #1995): a
+	// link on the returned state object would leave every index unlinked during
+	// that replay, and the range gate would silently fall back to the old path.
+	{
+		dist: 'esm',
+		file: 'helpers.js',
+		marker: LINK_MARKER,
+		prelude: LINK_PRELUDE,
+		linkBefore: 'y=s(d.schema).map(((e,a)=>new i(a,e,u,d.schema)))',
+		linkAfter: `y=${LINK_MARKER}(s(d.schema).map(((e,a)=>new i(a,e,u,d.schema))))`,
+	},
+	{
+		dist: 'cjs',
+		file: 'helpers.js',
+		marker: LINK_MARKER,
+		prelude: LINK_PRELUDE,
+		linkBefore:
+			'h=(0,n.getIndexesFromSchema)(i.schema).map(((e,a)=>new n.IndexState(a,e,m,i.schema)))',
+		linkAfter: `h=${LINK_MARKER}((0,n.getIndexesFromSchema)(i.schema).map(((e,a)=>new n.IndexState(a,e,m,i.schema))))`,
+	},
 ];
 
 // Validate every dist before writing any, as in the task-queue patcher.

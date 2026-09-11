@@ -561,6 +561,23 @@ function withFixture(content, fn) {
 
 const syntheticAnchors = { applyBefore: '__before__', applyAfter: '__after__' };
 
+for (const patch of DISTS.filter((entry) => entry.file === 'helpers.js')) {
+	test(`[${patch.dist}/helpers.js] indexes are linked before the boot changelog replays through them`, () => {
+		const source = readFileSync(
+			join(packageRoot, `dist/${patch.dist}/plugins/storage-abstract-filesystem/helpers.js`),
+			'utf8'
+		);
+		const linked = source.indexOf(
+			`${patch.marker}(`,
+			source.indexOf(patch.prelude) + patch.prelude.length
+		);
+		// The call site, not the prelude's definition of the replay function.
+		const replayed = source.indexOf('=__wcposReplayChangelog(');
+		assert.ok(linked > 0 && replayed > 0, 'both rewrites present');
+		assert.ok(linked < replayed, `link at ${linked} must precede replay at ${replayed}`);
+	});
+}
+
 for (const patch of DISTS) {
 	test(`[${patch.dist}/${patch.file}] installed patch is complete and idempotent`, () => {
 		const path = join(
