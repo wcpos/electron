@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { getPrimaryKeyFromIndexableString } from 'rxdb/plugins/core';
+import {
+	getPrimaryKeyFromIndexableString,
+	normalizeMangoQuery,
+	prepareQuery,
+} from 'rxdb/plugins/core';
 
 import {
 	applyChangelogOperation,
+	DISTS,
 	MARKER,
 	preparePatch,
 } from './patch-rxdb-premium-changelog-identity.mjs';
@@ -206,6 +211,57 @@ implementations.push({
 });
 
 for (const { name, apply } of implementations) {
+	for (const kind of ['A', 'R']) {
+		for (const pos of [0, 1, 9]) {
+			test(`[${name}/linked] stale ${kind} at position ${pos} is ignored`, () => {
+				const state = stateFor([a, b, c], false);
+				state.__wcposIndexStates = [stateFor([a, movedB, c]), state];
+				for (const op of [
+					[1, 1, 'D', b],
+					[1, 2, 'A', movedB],
+					[1, pos, kind, b],
+				]) {
+					apply(state, structuredClone(op));
+				}
+				assert.deepEqual(state.rows, [a, c, movedB]);
+			});
+			for (const known of [true, false]) {
+				test(`[${name}/linked] ${kind} at ${pos}, primary knows document: ${known}`, () => {
+					const state = stateFor([a, c], false);
+					state.__wcposIndexStates = [stateFor(known ? [a, updatedB, c] : [a, c]), state];
+					apply(state, [1, pos, kind, updatedB]);
+					assert.deepEqual(state.rows, known ? [a, updatedB, c] : [a, c]);
+				});
+			}
+		}
+		for (const current of [
+			['b002', 21, 30],
+			['b002', 20, 31],
+		]) {
+			test(`[${name}/linked] ${kind} cannot overwrite a different current range ${current}`, () => {
+				const state = stateFor([a, current, c], false);
+				state.__wcposIndexStates = [stateFor([a, current, c]), state];
+				apply(state, [1, 1, kind, b]);
+				assert.deepEqual(state.rows, [a, current, c]);
+			});
+		}
+	}
+	test(`[${name}/linked] primary-first D/A batch converges`, () => {
+		const states = [stateFor([a, b, c]), stateFor([a, b, c], false)];
+		for (const state of states) state.__wcposIndexStates = states;
+		for (const op of [
+			[0, 1, 'D', b],
+			[0, 1, 'A', updatedB],
+			[1, 1, 'D', b],
+			[1, 2, 'A', movedB],
+		]) {
+			apply(states[op[0]], structuredClone(op));
+		}
+		assert.deepEqual(states[0].rows, [a, updatedB, c]);
+		assert.deepEqual(states[1].rows, [a, c, movedB]);
+		assert.strictEqual(states[0].metaIdMap.get('002'), states[0].rows[1]);
+	});
+
 	for (const primary of [true, false]) {
 		const label = `${name}/${primary ? 'primary' : 'secondary'}`;
 		for (const kind of ['A', 'D', 'R']) {
@@ -282,7 +338,7 @@ const schema = {
 	type: 'object',
 	properties: {
 		id: { type: 'string', maxLength: 3 },
-		value: { type: 'string' },
+		value: { type: 'string', maxLength: 20 },
 		_deleted: { type: 'boolean' },
 		_rev: { type: 'string', minLength: 1 },
 		_meta: {
@@ -296,7 +352,10 @@ const schema = {
 		_attachments: { type: 'object' },
 	},
 	required: ['id', 'value', '_deleted', '_rev', '_meta', '_attachments'],
-	indexes: [['_deleted', 'id']],
+	indexes: [
+		['_deleted', 'id'],
+		['value', 'id'],
+	],
 };
 
 // Subscribe after premium's own handler: resolving this barrier means the
@@ -312,6 +371,101 @@ function nextEvent(state) {
 }
 
 for (const { dist, storage } of dists) {
+	test(`[${dist}] stale secondary A at a valid slot broadcasts without duplicating query results`, async () => {
+		const basePath = mkdtempSync(join(tmpdir(), 'wcpos-changelog-range-'));
+		const instances = [];
+		const states = [];
+		let channel;
+		try {
+			const engine = storage.getRxStorageFilesystemNode({ basePath });
+			for (const token of ['writer', 'reader']) {
+				const instance = await engine.createStorageInstance({
+					databaseName: `range-${dist}`,
+					collectionName: 'products',
+					schema,
+					options: {},
+					multiInstance: true,
+					devMode: false,
+					databaseInstanceToken: token,
+				});
+				instances.push(instance);
+				states.push(await instance.internals.statePromise);
+			}
+			const [writer, reader] = instances;
+			const [, state] = states;
+			const documents = ['a', 'b', 'c'].map((value, i) => ({
+				id: `00${i + 1}`,
+				value,
+				_deleted: false,
+				_rev: `1-range${i}`,
+				_meta: { lwt: Date.now() + i },
+				_attachments: {},
+			}));
+			const seeded = nextEvent(state);
+			assert.deepEqual(
+				(
+					await writer.bulkWrite(
+						documents.map((document) => ({ document })),
+						'seed'
+					)
+				).error,
+				[]
+			);
+			await seeded;
+			const secondary = state.indexStates.find((index) => index.index[0] === 'value');
+			const stale = [secondary.indexId, 1, 'A', structuredClone(secondary.rows[1])];
+			const current = {
+				...documents[1],
+				value: 'd',
+				_rev: '2-range',
+				_meta: { lwt: Date.now() + 10 },
+			};
+			const updated = nextEvent(state);
+			assert.deepEqual(
+				(await writer.bulkWrite([{ previous: documents[1], document: current }], 'move')).error,
+				[]
+			);
+			await updated;
+			assert.ok(secondary.rows[0][0] < stale[3][0] && stale[3][0] < secondary.rows[1][0]);
+			const query = () =>
+				reader.query(
+					prepareQuery(
+						schema,
+						normalizeMangoQuery(schema, {
+							selector: { _deleted: false },
+							sort: [{ value: 'asc' }, { id: 'asc' }],
+							index: ['value', 'id'],
+						})
+					)
+				);
+			const want = [documents[0], documents[2], current];
+			assert.deepEqual((await query()).documents, want);
+			const received = states.map(nextEvent);
+			channel = new BroadcastChannel(state.broadcastChannel.name);
+			channel.postMessage({
+				type: 'event',
+				eventBulks: [],
+				changelogOperations: [stale],
+				info: { db: reader.databaseName, col: reader.collectionName },
+			});
+			await Promise.all(received);
+			assert.deepEqual((await query()).documents, want);
+			for (const siblingState of states) {
+				for (const index of siblingState.indexStates) {
+					assert.strictEqual(index.__wcposIndexStates, siblingState.indexStates);
+				}
+			}
+		} finally {
+			channel?.close();
+			try {
+				for (const instance of instances) await instance.close();
+			} finally {
+				for (const state of states) state.broadcastChannel?.close();
+				rmSync(basePath, { recursive: true, force: true });
+			}
+		}
+	});
+
 	test(`[${dist}] real peer broadcast preserves all rows and reads; upstream deletes a neighbour`, async () => {
 		const basePath = mkdtempSync(join(tmpdir(), 'wcpos-changelog-identity-'));
 		const instances = [];
@@ -406,6 +560,58 @@ function withFixture(content, fn) {
 }
 
 const syntheticAnchors = { applyBefore: '__before__', applyAfter: '__after__' };
+
+for (const patch of DISTS.filter((entry) => entry.file === 'helpers.js')) {
+	test(`[${patch.dist}/helpers.js] indexes are linked before the boot changelog replays through them`, () => {
+		const source = readFileSync(
+			join(packageRoot, `dist/${patch.dist}/plugins/storage-abstract-filesystem/helpers.js`),
+			'utf8'
+		);
+		const linked = source.indexOf(
+			`${patch.marker}(`,
+			source.indexOf(patch.prelude) + patch.prelude.length
+		);
+		// The call site, not the prelude's definition of the replay function.
+		const replayed = source.indexOf('=__wcposReplayChangelog(');
+		assert.ok(linked > 0 && replayed > 0, 'both rewrites present');
+		assert.ok(linked < replayed, `link at ${linked} must precede replay at ${replayed}`);
+	});
+}
+
+for (const patch of DISTS) {
+	test(`[${patch.dist}/${patch.file}] installed patch is complete and idempotent`, () => {
+		const path = join(
+			packageRoot,
+			`dist/${patch.dist}/plugins/storage-abstract-filesystem/${patch.file}`
+		);
+		assert.deepEqual(preparePatch(path, patch), { path, status: 'already patched' });
+	});
+	if (patch.file !== 'helpers.js') continue;
+	test(`[${patch.dist}/helpers.js] exact anchor patches and rejects outdated or incomplete preludes`, () => {
+		const path = join(
+			packageRoot,
+			`dist/${patch.dist}/plugins/storage-abstract-filesystem/helpers.js`
+		);
+		const installed = readFileSync(path, 'utf8');
+		const pristine = installed
+			.replace(patch.prelude, '')
+			.replace(patch.linkAfter, patch.linkBefore);
+		withFixture(pristine, (fixture) => {
+			const { next, status } = preparePatch(fixture, patch);
+			assert.equal(status, 'patched');
+			assert.equal(next, installed);
+			writeFileSync(fixture, next.replace('return states', 'return []'));
+			assert.throws(() => preparePatch(fixture, patch), /outdated prelude/);
+			writeFileSync(fixture, next.replace(patch.linkAfter, patch.linkBefore));
+			assert.throws(() => preparePatch(fixture, patch), /rewrite link is missing/);
+		});
+		for (const count of [0, 2]) {
+			withFixture(patch.linkBefore.repeat(count), (fixture) => {
+				assert.throws(() => preparePatch(fixture, patch), new RegExp(`matched ${count} times`));
+			});
+		}
+	});
+}
 
 test('patch preparation rejects when an earlier rewrite removes a later anchor', () => {
 	const anchors = {
