@@ -42,18 +42,34 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 		var at = lowerBound(rows, s);
 		return rows[at] && rows[at][0] === s ? at : -1;
 	}
+	function hasDifferentString() {
+		var existing = map && map.get(key);
+		// Only anomalous fallback inserts pay the secondary index's O(n) scan;
+		// ordinary changelog boot replay keeps the positional/exact-string fast path.
+		if (!map) {
+			for (var i = 0; i < rows.length; i++) {
+				if (primaryKeyFromIndexableString(rows[i][0], indexState.primaryKeyLength) === key) {
+					existing = rows[i];
+					break;
+				}
+			}
+		}
+		return existing && existing[0] !== row[0];
+	}
 	var at;
 	if (op[2] === 'A') {
 		if (sameRow(rows[pos], row)) return;
-		at =
+		var validPosition =
 			pos >= 0 &&
 			pos <= rows.length &&
 			(pos === 0 || rows[pos - 1][0] < row[0]) &&
-			(pos === rows.length || row[0] <= rows[pos][0])
-				? pos
-				: lowerBound(rows, row[0]);
+			(pos === rows.length || row[0] <= rows[pos][0]);
+		at = validPosition ? pos : lowerBound(rows, row[0]);
 		if (rows[at] && rows[at][0] === row[0]) rows[at] = row;
-		else rows.splice(at, 0, row);
+		else {
+			if (!validPosition && hasDifferentString()) return;
+			rows.splice(at, 0, row);
+		}
 		if (map) map.set(key, row);
 	} else if (op[2] === 'D' || op[2] === 'R') {
 		at = rows[pos] && rows[pos][0] === row[0] ? pos : findByString(rows, row[0]);
@@ -64,7 +80,10 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 			if (map && (map.get(key) === removed || sameRow(map.get(key), removed))) map.delete(key);
 		} else {
 			if (at >= 0) rows[at] = row;
-			else rows.splice(lowerBound(rows, row[0]), 0, row);
+			else {
+				if (hasDifferentString()) return;
+				rows.splice(lowerBound(rows, row[0]), 0, row);
+			}
 			if (map) map.set(key, row);
 		}
 	} else {
@@ -107,6 +126,11 @@ export function preparePatch(path, anchors) {
 						'the patched file is incomplete; reinstall rxdb-premium to restore a pristine dist'
 				);
 			}
+		}
+		if (!source.includes(PRELUDE)) {
+			throw new Error(
+				`${path} carries the patch marker but an outdated prelude — reinstall rxdb-premium so postinstall can re-apply the current patch`
+			);
 		}
 		return { path, status: 'already patched' };
 	}

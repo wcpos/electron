@@ -64,7 +64,20 @@ const a = ['a001', 10, 20];
 const b = ['b002', 20, 30];
 const c = ['c003', 30, 40];
 const updatedB = ['b002', 100, 120];
+const movedB = ['d002', 100, 120];
 const cases = [
+	...['A', 'R'].flatMap((kind) =>
+		[0, 9].map((pos) => ({
+			name: `stale ${kind} old-string at position ${pos} after D old/A new is ignored`,
+			rows: [a, b, c],
+			ops: [
+				[0, 1, 'D', b],
+				[0, 2, 'A', movedB],
+				[0, pos, kind, b],
+			],
+			want: [a, c, movedB],
+		}))
+	),
 	{
 		name: 'duplicate D leaves the neighbour and map intact',
 		rows: [a, b, c],
@@ -415,9 +428,22 @@ test('a marked file missing a rewrite is corrupt, not "already patched"', () => 
 	});
 });
 
-test('a marked file carrying every rewrite reports "already patched"', () => {
-	withFixture(MARKER + syntheticAnchors.applyAfter, (path) => {
+test('a marked file carrying the current prelude and every rewrite reports "already patched"', () => {
+	withFixture(syntheticAnchors.applyBefore, (path) => {
+		const { next } = preparePatch(path, syntheticAnchors);
+		writeFileSync(path, next);
 		assert.deepEqual(preparePatch(path, syntheticAnchors), { path, status: 'already patched' });
+	});
+});
+
+test('preparePatch fails closed on a marker with an outdated prelude', () => {
+	withFixture(syntheticAnchors.applyBefore, (path) => {
+		const { next } = preparePatch(path, syntheticAnchors);
+		// Keep the marker and every rewrite, but change the installed helper.
+		writeFileSync(path, next.replace('var rows = indexState.rows;', 'var rows = [];'));
+		assert.throws(() => preparePatch(path, syntheticAnchors), {
+			message: `${path} carries the patch marker but an outdated prelude — reinstall rxdb-premium so postinstall can re-apply the current patch`,
+		});
 	});
 });
 
