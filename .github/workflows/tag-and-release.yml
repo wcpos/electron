@@ -45,6 +45,7 @@ jobs:
       lane: ${{ steps.lane.outputs.lane }}
       version: ${{ steps.lane.outputs.version }}
       monorepo_ref: ${{ steps.pin.outputs.ref }}
+      monorepo_sha: ${{ steps.source.outputs.sha }}
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
@@ -113,10 +114,13 @@ jobs:
           persist-credentials: false
 
       - name: Report monorepo source
+        id: source
         env:
           MONOREPO_REF: ${{ steps.pin.outputs.ref }}
         run: |
-          printf 'Monorepo ref: %s\nMonorepo SHA: %s\n' "$MONOREPO_REF" "$(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          printf 'Monorepo ref: %s\nMonorepo SHA: %s\n' "$MONOREPO_REF" "$sha" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: 🏗 Setup Monorepo
         # A uses: ref cannot be an expression, so setup tracks main while source tracks the pin.
@@ -562,6 +566,7 @@ jobs:
           LANE: ${{ needs.build-expo.outputs.lane }}
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
           MONOREPO_REF: ${{ needs.build-expo.outputs.monorepo_ref }}
+          MONOREPO_SHA: ${{ needs.build-expo.outputs.monorepo_sha }}
         run: |
           set -euo pipefail
           version="$LANE_VERSION"
@@ -604,7 +609,7 @@ jobs:
             echo "::warning title=App notes skipped::wcpos/monorepo ref $app_ref is not a release tag; using the desktop footer only."
           fi
           if [ "$LANE" = "next" ]; then
-            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` for testing. Not served by auto-update; a prerelease build does not check for updates on its own." >> "$notes_file"
+            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update; a prerelease build does not check for updates on its own." >> "$notes_file"
           else
             echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
           fi
