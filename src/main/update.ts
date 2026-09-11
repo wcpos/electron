@@ -72,6 +72,13 @@ export class AutoUpdater implements UpdaterHandle {
 			logger.info('Skipping auto-update in development mode');
 			return;
 		}
+		// A next-lane build (1.11.0-next.57) is a tester's install: the update server only ever
+		// serves the latest stable release, which would "upgrade" it back to the release lane
+		// every hour. Manual checks still work for whoever wants that.
+		if (semver.parse(app.getVersion())?.prerelease.length) {
+			logger.info('Skipping scheduled update checks on a prerelease build', app.getVersion());
+			return;
+		}
 
 		// Check for updates immediately on startup
 		this.checkForUpdates().catch((error) => {

@@ -1,9 +1,17 @@
 name: Publish
 
+# Two lanes, one workflow:
+#   main  → release lane: version from package.json, a DRAFT release the release train publishes.
+#   next  → next lane: version `<package.json>-next.<run>`, a published PRERELEASE built from
+#           wcpos/monorepo `next` (unless monorepo_ref says otherwise). Testers install it from
+#           the releases page; GitHub's "latest" (what updates.wcpos.com serves) never points at
+#           a prerelease, and a prerelease build skips scheduled update checks.
+# A push builds Linux only; dispatch with platform=all for signed macOS and Windows installers.
 on:
   push:
     branches:
       - main
+      - next
   workflow_dispatch:
     inputs:
       monorepo_ref:
@@ -33,6 +41,10 @@ permissions:
 jobs:
   build-expo:
     runs-on: ubuntu-latest
+    outputs:
+      lane: ${{ steps.lane.outputs.lane }}
+      version: ${{ steps.lane.outputs.version }}
+      monorepo_ref: ${{ steps.pin.outputs.ref }}
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
@@ -44,6 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           ref="$MONOREPO_REF_INPUT"
+          if [ -z "$ref" ] && [ "$GITHUB_REF_NAME" = "next" ]; then
+            # The next lane tracks the monorepo's next lane; .monorepo-ref pins the release lane.
+            ref=next
+          fi
           if [ -z "$ref" ]; then
             ref=$(gh api "repos/$GITHUB_REPOSITORY/contents/.monorepo-ref?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw")
           fi
@@ -53,6 +69,24 @@ jobs:
             exit 1
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve lane and version
+        id: lane
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          base=$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          if [ "$GITHUB_REF_NAME" = "next" ]; then
+            lane=next
+            version="$base-next.$GITHUB_RUN_NUMBER"
+          else
+            lane=release
+            version="$base"
+          fi
+          echo "lane=$lane" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          printf 'Lane: %s\nVersion: %s\n' "$lane" "$version" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: 📥 Check out the Monorepo repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,6 +120,8 @@ jobs:
   publish-macos:
     needs: build-expo
     runs-on: macos-15-intel
+    env:
+      WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
     if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' }}
 
     steps:
@@ -93,6 +129,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Apply lane version
+        if: needs.build-expo.outputs.lane == 'next'
+        env:
+          LANE_VERSION: ${{ needs.build-expo.outputs.version }}
+        run: npm version --no-git-tag-version "$LANE_VERSION"
+
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -164,6 +207,8 @@ jobs:
       - build-expo
       # - publish-macos
     runs-on: macos-latest
+    env:
+      WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
     if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos-arm64' }}
 
     steps:
@@ -171,6 +216,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Apply lane version
+        if: needs.build-expo.outputs.lane == 'next'
+        env:
+          LANE_VERSION: ${{ needs.build-expo.outputs.version }}
+        run: npm version --no-git-tag-version "$LANE_VERSION"
+
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -238,6 +290,8 @@ jobs:
     # Visual Studio 18, which the bundled @electron/node-gyp cannot classify
     # (invalid versionYear), breaking native module rebuilds (@serialport/bindings-cpp).
     runs-on: windows-2022
+    env:
+      WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
     if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
 
     steps:
@@ -245,6 +299,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Apply lane version
+        if: needs.build-expo.outputs.lane == 'next'
+        env:
+          LANE_VERSION: ${{ needs.build-expo.outputs.version }}
+        run: npm version --no-git-tag-version "$LANE_VERSION"
+
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -325,6 +386,8 @@ jobs:
     needs:
       - build-expo
     runs-on: ubuntu-latest
+    env:
+      WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
     steps:
@@ -332,6 +395,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Apply lane version
+        if: needs.build-expo.outputs.lane == 'next'
+        env:
+          LANE_VERSION: ${{ needs.build-expo.outputs.version }}
+        run: npm version --no-git-tag-version "$LANE_VERSION"
+
 
       - name: 📦 Download expo-dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -441,6 +511,7 @@ jobs:
   # re-runs of failed platform jobs are safe.
   release-notes:
     needs:
+      - build-expo
       - publish-macos
       - publish-macos-arm64
       - publish-windows
@@ -463,9 +534,12 @@ jobs:
       - name: 📝 Mirror app release notes onto the desktop release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LANE: ${{ needs.build-expo.outputs.lane }}
+          LANE_VERSION: ${{ needs.build-expo.outputs.version }}
+          MONOREPO_REF: ${{ needs.build-expo.outputs.monorepo_ref }}
         run: |
           set -euo pipefail
-          version=$(node -p "require('./package.json').version")
+          version="$LANE_VERSION"
           tag="v$version"
 
           body=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
@@ -479,7 +553,7 @@ jobs:
           # rate-limit, or other API errors so we never publish incomplete
           # notes silently.
           notes_file=$(mktemp)
-          app_ref=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' .monorepo-ref)
+          app_ref="$MONOREPO_REF"
           app_version="$app_ref"
           if [[ "$app_ref" =~ ^v[0-9] ]]; then
             app_version="${app_ref#v}"
@@ -504,7 +578,11 @@ jobs:
           else
             echo "::warning title=App notes skipped::wcpos/monorepo ref $app_ref is not a release tag; using the desktop footer only."
           fi
-          echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
+          if [ "$LANE" = "next" ]; then
+            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` for testing. Not served by auto-update; a prerelease build does not check for updates on its own." >> "$notes_file"
+          else
+            echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
+          fi
 
           # Re-check right before writing: GitHub has no conditional release
           # update, so this narrows the window in which a concurrent manual

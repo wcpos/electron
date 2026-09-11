@@ -212,6 +212,11 @@ const config: ForgeConfig = {
 				owner: 'wcpos',
 				name: 'electron',
 			},
+			// Release lane: a draft the release train publishes by hand. Next lane (WCPOS_LANE=next,
+			// set by the Publish workflow on the `next` branch): a published prerelease, so testers
+			// can download it, and never GitHub's "latest", so updates.wcpos.com never serves it.
+			draft: process.env.WCPOS_LANE !== 'next',
+			prerelease: process.env.WCPOS_LANE === 'next',
 		}),
 		// new PublisherGithubLatestYml({
 		// 	repository: {
