@@ -11,6 +11,8 @@ readonly pairs=(
   "scripts/patch-rxdb-premium-task-queue-containment.mjs:scripts/patch-rxdb-premium-task-queue-containment.mjs"
   "scripts/rxdb-premium-task-queue-containment.test.mjs:scripts/rxdb-premium-task-queue-containment.test.mjs"
   "scripts/patch-rxdb-premium-changelog-replay-safety.mjs:scripts/patch-rxdb-premium-changelog-replay-safety.mjs"
+  "scripts/patch-rxdb-premium-changelog-identity.mjs:scripts/patch-rxdb-premium-changelog-identity.mjs"
+  "scripts/rxdb-premium-changelog-identity.test.mjs:scripts/rxdb-premium-changelog-identity.test.mjs"
 )
 # scripts/patch-rxdb-premium-resurrection-leak.mjs differs intentionally; excluded.
 readonly fix="copy the monorepo file over the local one, or bump .monorepo-ref"
