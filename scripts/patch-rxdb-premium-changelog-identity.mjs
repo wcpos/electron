@@ -25,6 +25,13 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 	var row = op[3];
 	var pos = op[1];
 	var key = primaryKeyFromIndexableString(row[0], indexState.primaryKeyLength);
+	var siblings = indexState.__wcposIndexStates;
+	// Emitters apply index 0 first; secondary rows must describe its current bytes.
+	if (!map && siblings && (op[2] === 'A' || op[2] === 'R')) {
+		var primary = siblings[0];
+		var current = primary && primary.metaIdMap && primary.metaIdMap.get(key);
+		if (!current || current[1] !== row[1] || current[2] !== row[2]) return;
+	}
 	function sameRow(a, b) {
 		return a && b && a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 	}
@@ -44,9 +51,8 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 	}
 	function hasDifferentString() {
 		var existing = map && map.get(key);
-		// Only anomalous fallback inserts pay the secondary index's O(n) scan;
-		// ordinary changelog boot replay keeps the positional/exact-string fast path.
-		if (!map) {
+		// Unlinked states retain the secondary scan on anomalous fallback inserts.
+		if (!map && !siblings) {
 			for (var i = 0; i < rows.length; i++) {
 				if (primaryKeyFromIndexableString(rows[i][0], indexState.primaryKeyLength) === key) {
 					existing = rows[i];
@@ -95,30 +101,51 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 const PRELUDE = `globalThis.WCPOS_CHANGELOG_IDENTITY_PATCH=1;\n${applyChangelogOperation
 	.toString()
 	.replace('function applyChangelogOperation(', `function ${MARKER}(`)}\n`;
+const LINK_MARKER = '__wcposLinkIndexStates';
+const LINK_PRELUDE = `globalThis.WCPOS_CHANGELOG_INDEX_STATES_PATCH=1;
+function ${LINK_MARKER}(states){
+for(var i=0;i<states.length;i++)states[i].__wcposIndexStates=states;
+return states
+}
+`;
 
-// Byte-exact per-dist literals: keep everything outside this method untouched.
-const DISTS = [
+// Byte-exact per-dist literals: keep everything outside these rewrites untouched.
+export const DISTS = [
 	{
 		dist: 'esm',
+		file: 'index-state.js',
 		applyBefore:
 			'runChangelogOperation=function(t){var e=t[1],i=t[3];if("A"===t[2])this.rows.splice(e,0,i),this.metaIdMap&&this.metaIdMap.set(s(i[0],this.primaryKeyLength),i);else if("D"===t[2])this.rows.splice(e,1),this.metaIdMap&&this.metaIdMap.delete(s(i[0],this.primaryKeyLength));else{if("R"!==t[2])throw new Error("unknown operation key "+t[2]);this.rows[e]=i,this.metaIdMap&&this.metaIdMap.set(s(i[0],this.primaryKeyLength),i)}}',
 		applyAfter: `runChangelogOperation=function(t){return ${MARKER}(this,t,s)}`,
 	},
 	{
 		dist: 'cjs',
+		file: 'index-state.js',
 		applyBefore:
 			'runChangelogOperation=function(t){var r=t[1],i=t[3];if("A"===t[2])this.rows.splice(r,0,i),this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i);else if("D"===t[2])this.rows.splice(r,1),this.metaIdMap&&this.metaIdMap.delete((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength));else{if("R"!==t[2])throw new Error("unknown operation key "+t[2]);this.rows[r]=i,this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i)}}',
 		applyAfter: `runChangelogOperation=function(t){return ${MARKER}(this,t,function(a,b){return (0,e.getPrimaryKeyFromIndexableString)(a,b)})}`,
 	},
+	...['esm', 'cjs'].map((dist) => {
+		const states = dist === 'esm' ? 'y' : 'h';
+		return {
+			dist,
+			file: 'helpers.js',
+			marker: LINK_MARKER,
+			prelude: LINK_PRELUDE,
+			linkBefore: `indexStates:${states},firstIdx:${states}[0]`,
+			linkAfter: `indexStates:${LINK_MARKER}(${states}),firstIdx:${states}[0]`,
+		};
+	}),
 ];
 
 // Validate every dist before writing any, as in the task-queue patcher.
 export function preparePatch(path, anchors) {
 	const source = readFileSync(path, 'utf8');
+	const { marker = MARKER, prelude = PRELUDE } = anchors;
 	const keys = Object.keys(anchors)
 		.filter((key) => key.endsWith('Before'))
 		.map((key) => key.slice(0, -6));
-	if (source.includes(MARKER)) {
+	if (source.includes(marker)) {
 		for (const key of keys) {
 			if (!source.includes(anchors[`${key}After`])) {
 				throw new Error(
@@ -127,7 +154,7 @@ export function preparePatch(path, anchors) {
 				);
 			}
 		}
-		if (!source.includes(PRELUDE)) {
+		if (!source.includes(prelude)) {
 			throw new Error(
 				`${path} carries the patch marker but an outdated prelude — reinstall rxdb-premium so postinstall can re-apply the current patch`
 			);
@@ -143,7 +170,7 @@ export function preparePatch(path, anchors) {
 			);
 		}
 	}
-	let next = PRELUDE + source;
+	let next = prelude + source;
 	for (const key of keys) {
 		next = next.replace(anchors[`${key}Before`], anchors[`${key}After`]);
 	}
@@ -168,20 +195,17 @@ function commitPatches(prepared) {
 
 function main() {
 	const packageRoot = dirname(require.resolve('rxdb-premium/package.json'));
-	const prepared = DISTS.map(({ dist, ...anchors }) => {
-		const path = join(
-			packageRoot,
-			`dist/${dist}/plugins/storage-abstract-filesystem/index-state.js`
-		);
+	const prepared = DISTS.map(({ dist, file, ...anchors }) => {
+		const path = join(packageRoot, `dist/${dist}/plugins/storage-abstract-filesystem/${file}`);
 		if (!existsSync(path)) {
 			throw new Error(`rxdb-premium ${dist} dist not found — run after the package postinstall`);
 		}
-		return { dist, ...preparePatch(path, anchors) };
+		return { dist, file, ...preparePatch(path, anchors) };
 	});
 	commitPatches(prepared);
 	console.log(
 		`[patch-rxdb-premium-changelog-identity] ${prepared
-			.map(({ dist, status }) => `${dist}: ${status}`)
+			.map(({ dist, file, status }) => `${dist}/${file}: ${status}`)
 			.join(', ')}`
 	);
 }
