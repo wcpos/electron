@@ -2915,7 +2915,10 @@ test("sole repair owner drops a stale secondary survivor when multi-instance", a
     });
     const state = await recovering.internals.statePromise;
     const broadcastMessages = [];
-    state.broadcastChannel = { postMessage: (message) => broadcastMessages.push(message), close() {} };
+    state.broadcastChannel = {
+      postMessage: (message) => broadcastMessages.push(message),
+      close() {},
+    };
     const updated = {
       ...orphan,
       value: "reinserted",
@@ -2935,16 +2938,17 @@ test("sole repair owner drops a stale secondary survivor when multi-instance", a
       },
     ]);
     assert.deepEqual(
-      (
-        await recovering.findDocumentsById([orphan.id, sibling.id], false)
-      ).map((item) => [item.id, item.value]),
+      (await recovering.findDocumentsById([orphan.id, sibling.id], false)).map(
+        (item) => [item.id, item.value],
+      ),
       [
         [orphan.id, "reinserted"],
         [sibling.id, sibling.value],
       ],
     );
-    const drops = broadcastMessages.flatMap((message) => message.changelogOperations ?? [])
-      .filter((operation) => operation[2] === 'D');
+    const drops = broadcastMessages
+      .flatMap((message) => message.changelogOperations ?? [])
+      .filter((operation) => operation[2] === "D");
     assert.ok(drops.length > 0, "stale secondary row drops are broadcast");
     for (const indexState of state.indexStates) {
       assert.equal(
