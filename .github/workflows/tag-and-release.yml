@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       monorepo_ref:
-        description: "wcpos/monorepo ref to build the renderer from; empty = the ref in .monorepo-ref"
+        description: "wcpos/monorepo ref to build the renderer from; empty = .monorepo-ref on main, `next` on next"
         type: string
         required: false
         default: ""
