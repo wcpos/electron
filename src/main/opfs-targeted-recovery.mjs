@@ -525,9 +525,10 @@ async function reconcileSecondaryIndexes(instance) {
 }
 
 export function withTargetedOpfsRecovery(storage, options = {}) {
-  const ownsRepairs = typeof options.ownsRepairs === "function"
-    ? options.ownsRepairs
-    : (params) => !params.multiInstance;
+  const ownsRepairs =
+    typeof options.ownsRepairs === "function"
+      ? options.ownsRepairs
+      : (params) => !params.multiInstance;
   const createStorageInstance = storage.createStorageInstance.bind(storage);
   return {
     ...storage,
