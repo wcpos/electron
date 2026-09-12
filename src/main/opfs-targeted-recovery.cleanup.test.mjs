@@ -481,7 +481,7 @@ test("drops every index row sharing one whitespace range, not just the first", a
   }
 });
 
-for (const owner of [false, true]) {
+for (const owner of [false, true, "revoked in lock"]) {
   test(`hollow-row read drops and broadcasts only for sole repair owner: ${owner}`, async () => {
     const { instance, indexStates, changelogOperations } =
       createFakeOpfsInstance({
@@ -499,20 +499,43 @@ for (const owner of [false, true]) {
     state.broadcastChannel = {
       postMessage: (message) => broadcastMessages.push(message),
     };
+    let owns = Boolean(owner);
+    const runCleanup = instance.taskQueue.runCleanup;
+    instance.taskQueue.runCleanup = (callback) =>
+      runCleanup((runState) => {
+        if (owner === "revoked in lock") owns = false;
+        return callback(runState);
+      });
+    const events = [];
+    const previousHook = globalThis.__wcposOnStorageRecovery;
+    globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
     const recovering = await withTargetedOpfsRecovery(
       { createStorageInstance: async () => instance },
-      { ownsRepairs: () => owner },
+      { ownsRepairs: () => owns },
     ).createStorageInstance({ ...state.params, multiInstance: true });
-    await recovering.findDocumentsById(["bbb"], true);
-    for (const indexState of indexStates) {
-      assert.equal(indexState.rows.length, owner ? 2 : 3);
+    try {
+      await recovering.findDocumentsById(["bbb"], true);
+    } finally {
+      globalThis.__wcposOnStorageRecovery = previousHook;
     }
-    assert.equal(changelogOperations.length, owner ? 3 : 0);
+    if (!owns)
+      assert.deepEqual(events, [
+        {
+          kind: "hollow-row-refused",
+          target: "scope-db/orders",
+          id: "bbb",
+          reason: "multi-instance",
+        },
+      ]);
+    for (const indexState of indexStates) {
+      assert.equal(indexState.rows.length, owns ? 2 : 3);
+    }
+    assert.equal(changelogOperations.length, owns ? 3 : 0);
     assert.deepEqual(
       broadcastMessages.map((message) => message.changelogOperations[0]),
       changelogOperations,
     );
-    if (owner)
+    if (owns)
       assert.deepEqual(broadcastMessages[0].info, {
         db: "scope-db",
         col: "orders",

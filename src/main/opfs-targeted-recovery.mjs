@@ -112,10 +112,11 @@ function extractDocument(text, primaryPath, expectedId) {
 async function repairDocument(
   instance,
   documentId,
-  { discardInvalid = false } = {},
+  { discardInvalid = false, ownsRepairs = () => true } = {},
 ) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
+    if (!ownsRepairs()) return "multi-instance";
     const primaryRow = state.firstIdx.metaIdMap.get(documentId);
     if (!primaryRow) return "missing-primary-row";
 
@@ -236,10 +237,12 @@ async function dropWhitespaceRows(instance, target) {
 async function dropHollowRows(
   instance,
   documentIds,
-  { discardForeign = false } = {},
+  { discardForeign = false, ownsRepairs = () => true } = {},
 ) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
+    if (!ownsRepairs())
+      return new Map(documentIds.map((id) => [id, "multi-instance"]));
     const outcomes = new Map();
     const accessHandle = await documentsAccessHandle(state, runState);
     for (const documentId of documentIds) {
@@ -318,14 +321,27 @@ async function dropIndexRowsById(
 // applied changelog add whose matching delete was lost), and the insert the
 // stripped write becomes would file a second row for the id beside the stale
 // one, so that secondary would serve both revisions from then on.
-async function dropSecondaryRowsById(instance, documentIds) {
+async function dropSecondaryRowsById(
+  instance,
+  documentIds,
+  ownsRepairs = () => true,
+) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
+    if (!ownsRepairs()) return "multi-instance";
+    const dropped = [];
+    const reappeared = [];
     for (const documentId of documentIds) {
+      if (state.firstIdx.metaIdMap.has(documentId)) {
+        reappeared.push(documentId);
+        continue;
+      }
       await dropIndexRowsById(state, runState, documentId, {
         includePrimary: false,
       });
+      dropped.push(documentId);
     }
+    return { dropped, reappeared };
   });
 }
 
@@ -594,6 +610,7 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
         }
         const outcomes = await dropHollowRows(instance, hollow, {
           discardForeign: params.collectionName === "logs",
+          ownsRepairs: soleRepairOwner,
         });
         for (const [id, outcome] of outcomes) {
           if (outcome === "discarded-foreign-bytes") {
@@ -628,6 +645,7 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
             if (batch.length === 1) {
               const failure = await repairDocument(instance, batch[0], {
                 discardInvalid: params.collectionName === "logs",
+                ownsRepairs: soleRepairOwner,
               });
               if (failure === "hollow-row-dropped") {
                 report("hollow-row-dropped", { target, id: batch[0] });
@@ -640,6 +658,10 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
                   reason: "no-valid-document",
                 });
                 return true;
+              }
+              if (failure === "multi-instance") {
+                error.message += "; targeted recovery refused: multi-instance";
+                throw error;
               }
               if (typeof failure === "string") {
                 error.message += `; targeted recovery failed for ${batch[0]}: ${failure}`;
@@ -859,7 +881,10 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
           ),
         );
         if (staleIds.length === 0) return writes;
-        if (!soleRepairOwner()) {
+        const outcome = soleRepairOwner()
+          ? await dropSecondaryRowsById(instance, staleIds, soleRepairOwner)
+          : "multi-instance";
+        if (outcome === "multi-instance") {
           for (const id of staleIds) {
             report("stale-secondary-refused", {
               target,
@@ -871,11 +896,21 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
             `stale secondary index rows for ${staleIds.join(", ")} in ${target}; targeted recovery refused: multi-instance`,
           );
         }
-        await dropSecondaryRowsById(instance, staleIds);
-        for (const id of staleIds) {
+        for (const id of outcome.dropped) {
           report("stale-secondary-dropped", { target, id });
         }
-        return writes;
+        for (const id of outcome.reappeared) {
+          report("stale-secondary-refused", {
+            target,
+            id,
+            reason: "reappeared",
+          });
+        }
+        return writes.map((row, index) =>
+          outcome.reappeared.includes(row.document[instance.primaryPath])
+            ? documentWrites[index]
+            : row,
+        );
       };
 
       instance.bulkWrite = async (documentWrites, context) => {

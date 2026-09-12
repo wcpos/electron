@@ -2975,3 +2975,193 @@ test("sole repair owner drops a stale secondary survivor when multi-instance", a
     await rm(basePath, { recursive: true, force: true });
   }
 });
+
+test(
+  "stale-secondary drop preserves a peer insert received before cleanup",
+  { timeout: 5000 },
+  async () => {
+    const basePath = await mkdtemp(join(tmpdir(), "wcpos-stale-peer-"));
+    const orphan = document("order:orphan", 0);
+    const sibling = document("order:sibling", 1);
+    const capture = captureRecoveryEvents();
+    let owner;
+    let peer;
+    try {
+      await (
+        await seedCompacted(basePath, [orphan, sibling], "peer-seed")
+      ).close();
+      await orphanPrimaryRow(basePath, orphan.id, sibling.id);
+      const { withTargetedOpfsRecovery } =
+        await import("./opfs-targeted-recovery.mjs");
+      const storage = getRxStorageFilesystemNode({ basePath });
+      owner = await withTargetedOpfsRecovery(storage, {
+        ownsRepairs: () => true,
+      }).createStorageInstance({
+        ...storageParams("race-owner"),
+        multiInstance: true,
+      });
+      peer = await storage.createStorageInstance({
+        ...storageParams("race-peer"),
+        multiInstance: true,
+      });
+      const state = await owner.internals.statePromise;
+      const peerDocument = {
+        ...orphan,
+        value: "peer won",
+        _rev: "2-peer",
+        _meta: { lwt: orphan._meta.lwt + 100 },
+      };
+      const attempted = { ...orphan, value: "owner lost", _rev: "2-owner" };
+      const runCleanup = owner.taskQueue.runCleanup.bind(owner.taskQueue);
+      let before;
+      owner.taskQueue.runCleanup = async (callback) => {
+        owner.taskQueue.runCleanup = runCleanup;
+        // Insert after stale detection but before the owner's lock acquisition.
+        const received = new Promise((resolve) => {
+          const subscription = state.broadcastChannelMessages$.subscribe(
+            (message) => {
+              if (message.type !== "event") return;
+              subscription.unsubscribe();
+              resolve();
+            },
+          );
+        });
+        assert.deepEqual(
+          (await peer.bulkWrite([{ document: peerDocument }], "peer insert"))
+            .error,
+          [],
+        );
+        await received;
+        assert.ok(
+          state.firstIdx.metaIdMap.has(orphan.id),
+          "peer broadcast applied before cleanup",
+        );
+        before = state.indexStates.map((index) => structuredClone(index.rows));
+        return runCleanup(callback);
+      };
+      const result = await owner.bulkWrite(
+        [{ previous: orphan, document: attempted }],
+        "stale update",
+      );
+      assert.ok(before, "stale-secondary cleanup was entered");
+      assert.deepEqual(
+        state.indexStates.map((index) => index.rows),
+        before,
+        "no secondary rows removed",
+      );
+      assert.deepEqual(await owner.findDocumentsById([orphan.id], false), [
+        peerDocument,
+      ]);
+      const secondary = state.indexStates.find(
+        (index) => index !== state.firstIdx,
+      );
+      const prepared = prepareQuery(
+        schema,
+        normalizeMangoQuery(schema, {
+          selector: { id: orphan.id, "_meta.lwt": peerDocument._meta.lwt },
+          index: secondary.index,
+          sort: secondary.index.map((field) => ({ [field]: "asc" })),
+        }),
+      );
+      assert.deepEqual((await owner.query(prepared)).documents, [peerDocument]);
+      assert.deepEqual(capture.events, [
+        {
+          kind: "stale-secondary-refused",
+          target: "targeted-recovery-db/products",
+          id: orphan.id,
+          reason: "reappeared",
+        },
+      ]);
+      assert.equal(result.error.length, 1);
+      assert.equal(result.error[0].status, 409);
+      assert.deepEqual(result.error[0].documentInDb, peerDocument);
+      assert.deepEqual(
+        result.error[0].writeRow.previous,
+        orphan,
+        "premium receives the original previous",
+      );
+    } finally {
+      await owner?.close();
+      await peer?.close();
+      capture.stop();
+      await rm(basePath, { recursive: true, force: true });
+    }
+  },
+);
+
+for (const damage of ["malformed", "stale-secondary"]) {
+  test(`${damage}: revocation inside the cleanup lock refuses without mutation`, async () => {
+    const basePath = await mkdtemp(join(tmpdir(), "wcpos-revoked-repair-"));
+    const record = document("order:orphan", 0);
+    const sibling = document("order:sibling", 1);
+    const capture = captureRecoveryEvents();
+    let recovering;
+    let owner = true;
+    try {
+      await (
+        await seedCompacted(basePath, [record, sibling], "revoke-seed")
+      ).close();
+      if (damage === "malformed") await corruptRecord(basePath, record.id);
+      else await orphanPrimaryRow(basePath, record.id, sibling.id);
+      const { withTargetedOpfsRecovery } =
+        await import("./opfs-targeted-recovery.mjs");
+      recovering = await withTargetedOpfsRecovery(
+        getRxStorageFilesystemNode({ basePath }),
+        {
+          ownsRepairs: () => owner,
+        },
+      ).createStorageInstance({
+        ...storageParams("revoke-owner"),
+        multiInstance: true,
+      });
+      const state = await recovering.internals.statePromise;
+      const before = state.indexStates.map((index) =>
+        structuredClone(index.rows),
+      );
+      const directory = join(basePath, (await readdir(basePath))[0]);
+      const bytes = await readFile(join(directory, "documents.json"));
+      const runCleanup = recovering.taskQueue.runCleanup.bind(
+        recovering.taskQueue,
+      );
+      recovering.taskQueue.runCleanup = (callback) =>
+        runCleanup((runState) => {
+          owner = false;
+          return callback(runState);
+        });
+      await assert.rejects(
+        recovering.bulkWrite(
+          [
+            {
+              previous: record,
+              document: { ...record, value: "updated", _rev: "2-owner" },
+            },
+          ],
+          "revoked write",
+        ),
+        /targeted recovery refused: multi-instance$/,
+      );
+      assert.equal(owner, false, "entered the cleanup callback");
+      assert.deepEqual(
+        state.indexStates.map((index) => index.rows),
+        before,
+      );
+      assert.deepEqual(
+        await readFile(join(directory, "documents.json")),
+        bytes,
+      );
+      if (damage === "stale-secondary")
+        assert.deepEqual(capture.events, [
+          {
+            kind: "stale-secondary-refused",
+            target: "targeted-recovery-db/products",
+            id: record.id,
+            reason: "multi-instance",
+          },
+        ]);
+    } finally {
+      await recovering?.close();
+      capture.stop();
+      await rm(basePath, { recursive: true, force: true });
+    }
+  });
+}
