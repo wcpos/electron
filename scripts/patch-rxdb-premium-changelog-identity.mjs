@@ -1,7 +1,8 @@
 /**
  * Apply peer changelog ops by index-string identity when positions have drifted.
  * Positional deletes otherwise remove healthy neighbours; write-shaped deletes
- * carry the OLD string with the NEW byte range, so bytes cannot identify a D.
+ * carry the OLD string with the NEW byte range. Recovery deletes are tagged
+ * wcpos-exact because they name the removed bytes as well as the string.
  *
  * Why not `pnpm patch`: rxdb-premium's dist/ is materialized by its own
  * license-gated postinstall, so it does not exist in the tarball pnpm patches.
@@ -80,7 +81,7 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 	} else if (op[2] === 'D' || op[2] === 'R') {
 		at = rows[pos] && rows[pos][0] === row[0] ? pos : findByString(rows, row[0]);
 		if (op[2] === 'D') {
-			if (at < 0) return;
+			if (at < 0 || (op[4] === 'wcpos-exact' && !sameRow(rows[at], row))) return;
 			var removed = rows[at];
 			rows.splice(at, 1);
 			if (map && (map.get(key) === removed || sameRow(map.get(key), removed))) map.delete(key);

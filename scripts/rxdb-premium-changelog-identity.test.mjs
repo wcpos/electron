@@ -12,6 +12,7 @@ import {
 	prepareQuery,
 } from 'rxdb/plugins/core';
 
+import { withTargetedOpfsRecovery } from './opfs-targeted-recovery.mjs';
 import {
 	applyChangelogOperation,
 	DISTS,
@@ -83,6 +84,24 @@ const cases = [
 			want: [a, c, movedB],
 		}))
 	),
+	...[1, 0, 9].flatMap((pos) => [
+		{
+			name: `tagged D at ${pos} preserves a same-string re-add`,
+			rows: [a, b, c],
+			ops: [
+				[0, 1, 'D', b],
+				[0, 1, 'A', updatedB],
+				[0, pos, 'D', b, 'wcpos-exact'],
+			],
+			want: [a, updatedB, c],
+		},
+		{
+			name: `tagged D at ${pos} removes the exact row`,
+			rows: [a, b, c],
+			ops: [[0, pos, 'D', b, 'wcpos-exact']],
+			want: [a, c],
+		},
+	]),
 	{
 		name: 'duplicate D leaves the neighbour and map intact',
 		rows: [a, b, c],
@@ -371,6 +390,107 @@ function nextEvent(state) {
 }
 
 for (const { dist, storage } of dists) {
+	test(
+		`[${dist}] delayed recovery D preserves a peer's same-string re-add`,
+		{ timeout: 5000 },
+		async () => {
+			const basePath = mkdtempSync(join(tmpdir(), 'wcpos-exact-delete-'));
+			const instances = [];
+			const states = [];
+			let leader = 'owner';
+			const previousHook = globalThis.__wcposOnStorageRecovery;
+			globalThis.__wcposOnStorageRecovery = () => {};
+			try {
+				const engine = storage.getRxStorageFilesystemNode({ basePath });
+				for (const token of ['owner', 'peer']) {
+					const instance = await withTargetedOpfsRecovery(engine, {
+						ownsRepairs: () => leader === token,
+					}).createStorageInstance({
+						databaseName: `exact-${dist}`,
+						collectionName: 'products',
+						schema,
+						options: {},
+						multiInstance: true,
+						devMode: false,
+						databaseInstanceToken: token,
+					});
+					instances.push(instance);
+					states.push(await instance.internals.statePromise);
+				}
+				const [owner, peer] = instances;
+				const [ownerState, peerState] = states;
+				const original = {
+					id: '001',
+					value: 'same',
+					_deleted: false,
+					_rev: '1-hollow',
+					_meta: { lwt: Date.now() },
+					_attachments: {},
+				};
+				const seeded = nextEvent(peerState);
+				assert.deepEqual((await owner.bulkWrite([{ document: original }], 'seed')).error, []);
+				await seeded;
+				await owner.taskQueue.awaitIdle();
+				const oldRows = structuredClone(ownerState.indexStates.map((index) => index.rows[0]));
+				await owner.taskQueue.runCleanup(async (runState) => {
+					const handle = await ownerState.documentFileHandle.createAccessHandle();
+					runState.accessHandlers.set(ownerState.documentFileHandle, Promise.resolve(handle));
+					const writable = await handle.getWritable();
+					await writable.write(new Uint8Array(oldRows[0][2] - oldRows[0][1]).fill(32), {
+						at: oldRows[0][1],
+					});
+				});
+				const onmessage = peerState.broadcastChannel.onmessage;
+				const delayed = [];
+				let received;
+				const withheld = new Promise((resolve) => {
+					received = resolve;
+				});
+				peerState.broadcastChannel.onmessage = (event) => {
+					delayed.push(event);
+					if (delayed.length === oldRows.length) received();
+				};
+				assert.deepEqual(await owner.findDocumentsById(['001'], false), []);
+				await withheld;
+				assert.equal(peerState.firstIdx.rows.length, 1, 'peer has not applied the owner delete');
+				assert.deepEqual(
+					delayed.flatMap(({ data }) => data.changelogOperations),
+					oldRows.map((row, index) => [index, 0, 'D', row, 'wcpos-exact'])
+				);
+				leader = 'peer';
+				const current = { ...original, _rev: '2-readded' };
+				// The new owner recovers its still-hollow local row before inserting.
+				assert.deepEqual((await peer.bulkWrite([{ document: current }], 're-add')).error, []);
+				await peer.taskQueue.awaitIdle();
+				const before = structuredClone(peerState.indexStates.map((index) => index.rows));
+				for (const [index, rows] of before.entries()) {
+					assert.equal(rows.length, 1);
+					assert.equal(rows[0][0], oldRows[index][0], 'same index string');
+					assert.notDeepEqual(rows[0].slice(1), oldRows[index].slice(1), 'new byte range');
+				}
+				peerState.broadcastChannel.onmessage = onmessage;
+				for (const event of delayed) {
+					const applied = nextEvent(peerState);
+					onmessage(event);
+					await applied;
+				}
+				assert.deepEqual(
+					peerState.indexStates.map((index) => index.rows),
+					before
+				);
+				assert.deepEqual(await peer.findDocumentsById(['001'], false), [current]);
+			} finally {
+				globalThis.__wcposOnStorageRecovery = previousHook;
+				try {
+					for (const instance of instances) await instance.close();
+				} finally {
+					for (const state of states) state.broadcastChannel?.close();
+					rmSync(basePath, { recursive: true, force: true });
+				}
+			}
+		}
+	);
+
 	test(`[${dist}] stale secondary A at a valid slot broadcasts without duplicating query results`, async () => {
 		const basePath = mkdtempSync(join(tmpdir(), 'wcpos-changelog-range-'));
 		const instances = [];

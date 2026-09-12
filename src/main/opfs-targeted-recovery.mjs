@@ -61,6 +61,7 @@ async function dropIndexRow(state, runState, indexState, position) {
     position,
     "D",
     indexState.rows[position],
+    "wcpos-exact",
   ];
   indexState.runChangelogOperation(operation);
   await state.changelog.addChangelogOperations(runState, [operation]);
@@ -181,12 +182,12 @@ async function repairDocument(
 
 // A blank range is whitespace (compaction's own fill) or NUL (a Windows
 // zero-fill after a crash); both drop the same way. The positional "D" op is
-// broadcast like any other storage op, so peers apply the same deletion —
-// unlike the per-id hollow probe, which several peers can run concurrently
-// and which therefore refuses under multi-instance (see dropHollowRows).
-async function dropWhitespaceRows(instance, target) {
+// broadcast like any other storage op. Like the per-id hollow probe, this
+// repair must have a sole repair owner (#1057).
+async function dropWhitespaceRows(instance, target, ownsRepairs = () => true) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
+    const refusal = ownsRepairs() ? undefined : "multi-instance";
     const accessHandle = await documentsAccessHandle(state, runState);
     for (const indexState of state.indexStates) {
       let position = indexState.rows.length;
@@ -194,10 +195,11 @@ async function dropWhitespaceRows(instance, target) {
         const row = indexState.rows[position];
         const bytes = await accessHandle.read(row[1], row[2]);
         if (!isBlankBytes(bytes)) continue;
-        await dropIndexRow(state, runState, indexState, position);
+        if (!refusal) await dropIndexRow(state, runState, indexState, position);
         if (indexState === state.firstIdx)
-          report("hollow-row-dropped", {
+          report(refusal ? "hollow-row-refused" : "hollow-row-dropped", {
             target,
+            ...(refusal ? { reason: refusal } : {}),
             id: getPrimaryKeyFromIndexableString(
               row[0],
               indexState.primaryKeyLength,
@@ -205,6 +207,7 @@ async function dropWhitespaceRows(instance, target) {
           });
       }
     }
+    return refusal;
   });
 }
 
@@ -329,10 +332,29 @@ async function dropSecondaryRowsById(
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
     if (!ownsRepairs()) return "multi-instance";
+    // A peer's durable insert can precede its broadcast. Replay on detached
+    // rows only: refreshing the live index here would risk #1049.
+    const primary = state.firstIdx;
+    const snapshot = { ...primary, metaIdMap: new Map() };
+    await primary.initRead.call(snapshot, runState);
+    const operations = await state.changelog.getChangelogOperations(runState);
+    for (const operation of operations.get(0) ?? []) {
+      // Reuse the installed identity patch without importing the Node patcher.
+      primary.runChangelogOperation.call(snapshot, operation);
+    }
     const dropped = [];
     const reappeared = [];
     for (const documentId of documentIds) {
-      if (state.firstIdx.metaIdMap.has(documentId)) {
+      if (
+        primary.metaIdMap.has(documentId) ||
+        snapshot.rows.some(
+          (row) =>
+            getPrimaryKeyFromIndexableString(
+              row[0],
+              primary.primaryKeyLength,
+            ) === documentId,
+        )
+      ) {
         reappeared.push(documentId);
         continue;
       }
@@ -1083,7 +1105,7 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
         } catch (initialError) {
           let failure;
           try {
-            await dropWhitespaceRows(instance, target);
+            await dropWhitespaceRows(instance, target, soleRepairOwner);
             return await cleanup(minimumDeletedTime);
           } catch (retryError) {
             failure = retryError;

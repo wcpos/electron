@@ -87,6 +87,7 @@ function createFakeOpfsInstance({ documents, corruptId, gapBefore }) {
     const getIndexableString = getIndexableStringMonad(SCHEMA, index);
     return {
       indexId,
+      primaryKeyLength: 4,
       getIndexableString,
       rows: documents
         .map((document) => [
@@ -146,6 +147,7 @@ function createFakeOpfsInstance({ documents, corruptId, gapBefore }) {
       },
       internals: {
         statePromise: Promise.resolve({
+          firstIdx: indexStates[0],
           documentFileHandle: { createAccessHandle: async () => accessHandle },
           indexStates,
           changelog: {
@@ -209,38 +211,59 @@ test("recovers the cleanup storm: a whitespace row is dropped and cleanup retrie
   await assert.doesNotReject(() => recovering.cleanup(0));
 });
 
-test("recovers and broadcasts whitespace-row drops in multi-instance mode", async () => {
-  const { instance, indexStates, changelogOperations } = createFakeOpfsInstance(
-    {
-      documents: DOCUMENTS,
-      corruptId: "bbb",
-      gapBefore: "bbb",
-    },
-  );
-  const broadcastMessages = [];
-  const state = await instance.internals.statePromise;
-  state.params = { databaseName: "scope-db", collectionName: "orders" };
-  state.broadcastChannel = {
-    postMessage: (message) => broadcastMessages.push(message),
-  };
-  const recovering = await withTargetedOpfsRecovery({
-    createStorageInstance: async () => instance,
-  }).createStorageInstance({ multiInstance: true });
-
-  assert.equal(await recovering.cleanup(0), false);
-  for (const indexState of indexStates) {
-    assert.equal(indexState.rows.length, 2);
-  }
-  assert.equal(broadcastMessages.length, changelogOperations.length);
-  assert.deepEqual(
-    broadcastMessages.map((message) => message.changelogOperations[0]),
-    changelogOperations,
-  );
-  assert.deepEqual(broadcastMessages[0].info, {
-    db: "scope-db",
-    col: "orders",
+for (const ownership of ["absent", "revoked in lock"]) {
+  test(`whitespace cleanup refuses when ownership is ${ownership}`, async () => {
+    const { instance, indexStates, changelogOperations } =
+      createFakeOpfsInstance({
+        documents: DOCUMENTS,
+        corruptId: "bbb",
+        gapBefore: "bbb",
+      });
+    const state = await instance.internals.statePromise;
+    const broadcasts = [];
+    state.params = { databaseName: "scope-db", collectionName: "orders" };
+    state.broadcastChannel = {
+      postMessage: (message) => broadcasts.push(message),
+    };
+    let owns = ownership !== "absent";
+    const runCleanup = instance.taskQueue.runCleanup;
+    instance.taskQueue.runCleanup = (callback) =>
+      runCleanup((runState) => {
+        owns = false;
+        return callback(runState);
+      });
+    const before = structuredClone(indexStates.map((index) => index.rows));
+    const events = [];
+    const previousHook = globalThis.__wcposOnStorageRecovery;
+    globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+    const recovering = await withTargetedOpfsRecovery(
+      { createStorageInstance: async () => instance },
+      { ownsRepairs: () => owns },
+    ).createStorageInstance({ ...state.params, multiInstance: true });
+    try {
+      await assert.rejects(recovering.cleanup(0), /reading '_deleted'/);
+    } finally {
+      globalThis.__wcposOnStorageRecovery = previousHook;
+    }
+    assert.deepEqual(
+      indexStates.map((index) => index.rows),
+      before,
+    );
+    assert.deepEqual(changelogOperations, []);
+    assert.deepEqual(broadcasts, []);
+    assert.deepEqual(
+      events.filter((event) => event.kind === "hollow-row-refused"),
+      [
+        {
+          kind: "hollow-row-refused",
+          target: "scope-db/orders",
+          id: "bbb",
+          reason: "multi-instance",
+        },
+      ],
+    );
   });
-});
+}
 
 test("propagates the retry error and reports the initial cleanup error", async () => {
   const initialError = new Error("initial cleanup failure");
