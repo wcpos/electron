@@ -294,6 +294,25 @@ for (const { name, apply } of implementations) {
 
 	for (const primary of [true, false]) {
 		const label = `${name}/${primary ? 'primary' : 'secondary'}`;
+		for (const pos of [1, 0, 9, 2]) {
+			test(`[${label}] tagged D at ${pos} removes the second same-string row`, () => {
+				const state = stateFor([a, b, updatedB, c], primary);
+				apply(state, [0, pos, 'D', structuredClone(updatedB), 'wcpos-exact']);
+				assert.deepEqual(state.rows, [a, b, c]);
+				if (primary) {
+					assert.equal(state.metaIdMap.has('002'), false);
+					assert.strictEqual(state.metaIdMap.get('001'), state.rows[0]);
+					assert.strictEqual(state.metaIdMap.get('003'), state.rows[2]);
+				}
+			});
+			test(`[${label}] tagged D at ${pos} preserves same-string rows when neither range matches`, () => {
+				const state = stateFor([a, b, updatedB, c], primary);
+				const mapped = state.metaIdMap?.get('002');
+				apply(state, [0, pos, 'D', ['b002', 20, 120], 'wcpos-exact']);
+				assert.deepEqual(state.rows, [a, b, updatedB, c]);
+				if (primary) assert.strictEqual(state.metaIdMap.get('002'), mapped);
+			});
+		}
 		for (const kind of ['A', 'D', 'R']) {
 			test(`[${label}] correct-position ${kind} matches upstream`, () => {
 				const rows = kind === 'A' ? [a, c] : [a, b, c];
@@ -321,6 +340,15 @@ for (const { name, apply } of implementations) {
 			});
 		});
 	}
+
+	test(`[${name}] tagged D of the second same-string row preserves a map pointing at the first`, () => {
+		const state = stateFor([a, b, updatedB, c]);
+		const first = state.rows[1];
+		state.metaIdMap.set('002', first);
+		apply(state, [0, 1, 'D', structuredClone(updatedB), 'wcpos-exact']);
+		assert.deepEqual(state.rows, [a, b, c]);
+		assert.strictEqual(state.metaIdMap.get('002'), first);
+	});
 
 	test(`[${name}] duplicate A at the correct position preserves row object identity`, () => {
 		const state = stateFor([a, b, c]);

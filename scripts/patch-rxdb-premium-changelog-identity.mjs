@@ -82,6 +82,11 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 	} else if (op[2] === 'D' || op[2] === 'R') {
 		at = rows[pos] && rows[pos][0] === row[0] ? pos : findByString(rows, row[0]);
 		if (op[2] === 'D') {
+			if (op[4] === 'wcpos-exact' && !sameRow(rows[at], row)) {
+				for (at = lowerBound(rows, row[0]); at < rows.length && rows[at][0] === row[0]; at++) {
+					if (sameRow(rows[at], row)) break;
+				}
+			}
 			if (at < 0 || (op[4] === 'wcpos-exact' && !sameRow(rows[at], row))) return;
 			var removed = rows[at];
 			rows.splice(at, 1);
