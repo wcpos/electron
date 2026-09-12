@@ -1,8 +1,9 @@
 /**
  * Apply peer changelog ops by index-string identity when positions have drifted.
  * Positional deletes otherwise remove healthy neighbours; write-shaped deletes
- * carry the OLD string with the NEW byte range. Recovery deletes are tagged
- * wcpos-exact because they name the removed bytes as well as the string.
+ * used to carry the OLD string with the NEW byte range. All current deletes
+ * carry the removed row and wcpos-exact. Older peers emit untagged deletes
+ * and apply ours by string identity (ignoring the extra element) during rollout.
  *
  * Why not `pnpm patch`: rxdb-premium's dist/ is materialized by its own
  * license-gated postinstall, so it does not exist in the tarball pnpm patches.
@@ -118,6 +119,9 @@ export const DISTS = [
 		applyBefore:
 			'runChangelogOperation=function(t){var e=t[1],i=t[3];if("A"===t[2])this.rows.splice(e,0,i),this.metaIdMap&&this.metaIdMap.set(s(i[0],this.primaryKeyLength),i);else if("D"===t[2])this.rows.splice(e,1),this.metaIdMap&&this.metaIdMap.delete(s(i[0],this.primaryKeyLength));else{if("R"!==t[2])throw new Error("unknown operation key "+t[2]);this.rows[e]=i,this.metaIdMap&&this.metaIdMap.set(s(i[0],this.primaryKeyLength),i)}}',
 		applyAfter: `runChangelogOperation=function(t){return ${MARKER}(this,t,s)}`,
+		emitBefore: 'this.rows.splice(I,1),r.push([this.indexId,I,"D",[t(l),p[0],p[1]]])',
+		emitAfter:
+			'function(){var removed=this.rows[I];this.rows.splice(I,1),r.push([this.indexId,I,"D",removed,"wcpos-exact"])}.call(this)',
 	},
 	{
 		dist: 'cjs',
@@ -125,7 +129,22 @@ export const DISTS = [
 		applyBefore:
 			'runChangelogOperation=function(t){var r=t[1],i=t[3];if("A"===t[2])this.rows.splice(r,0,i),this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i);else if("D"===t[2])this.rows.splice(r,1),this.metaIdMap&&this.metaIdMap.delete((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength));else{if("R"!==t[2])throw new Error("unknown operation key "+t[2]);this.rows[r]=i,this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i)}}',
 		applyAfter: `runChangelogOperation=function(t){return ${MARKER}(this,t,function(a,b){return (0,e.getPrimaryKeyFromIndexableString)(a,b)})}`,
+		emitBefore:
+			'this.rows.splice(x,1),o.push([this.indexId,x,"D",[(0,e.ensureNotFalsy)(I),g[0],g[1]]])',
+		emitAfter:
+			'function(){var removed=this.rows[x];this.rows.splice(x,1),o.push([this.indexId,x,"D",removed,"wcpos-exact"])}.call(this)',
 	},
+	...[
+		['esm', 'k=[H.indexId,W,"D",H.rows[W]]', 'k=[H.indexId,W,"D",H.rows[W],"wcpos-exact"]'],
+		['cjs', 'P=[S.indexId,O,"D",S.rows[O]]', 'P=[S.indexId,O,"D",S.rows[O],"wcpos-exact"]'],
+	].map(([dist, emitBefore, emitAfter]) => ({
+		dist,
+		file: 'cleanup.js',
+		marker: 'WCPOS_EXACT_CLEANUP_DELETE_PATCH',
+		prelude: 'globalThis.WCPOS_EXACT_CLEANUP_DELETE_PATCH=1;\n',
+		emitBefore,
+		emitAfter,
+	})),
 	// Link at the moment the IndexState array is created — BEFORE the replay-safety
 	// patch replays the boot changelog through it (review finding on #1995): a
 	// link on the returned state object would leave every index unlinked during

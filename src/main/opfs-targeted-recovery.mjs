@@ -74,6 +74,8 @@ async function dropIndexRow(state, runState, indexState, position) {
       col: state.params.collectionName,
     },
   });
+  // Match premium: dispatch before a waiting peer can acquire the cleanup lock.
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function extractDocument(text, primaryPath, expectedId) {
@@ -573,6 +575,7 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
     async createStorageInstance(params) {
       const soleRepairOwner = () => Boolean(ownsRepairs(params));
       const instance = await createStorageInstance(params);
+      options.onInstance?.(instance, params);
       const findDocumentsById = instance.findDocumentsById.bind(instance);
       const bulkWrite = instance.bulkWrite.bind(instance);
       const query = instance.query.bind(instance);

@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	closeSync,
+	fstatSync,
+	ftruncateSync,
+	mkdtempSync,
+	openSync,
+	readFileSync,
+	readSync,
+	rmSync,
+	writeFileSync,
+	writeSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -130,7 +141,7 @@ const cases = [
 		want: [a, c],
 	},
 	{
-		name: 'documented limit: stale D removes a same-string re-add',
+		name: 'mixed-version untagged D still removes a same-string re-add',
 		rows: [a, b, c],
 		ops: [
 			[0, 1, 'D', b],
@@ -390,6 +401,328 @@ function nextEvent(state) {
 }
 
 for (const { dist, storage } of dists) {
+	test(`[${dist}] exact write and cleanup deletes persist and boot replay without rebuilding`, async () => {
+		const basePath = mkdtempSync(join(tmpdir(), 'wcpos-delete-replay-'));
+		const instances = [];
+		const states = [];
+		const previousHook = globalThis.__wcposOnIndexRebuild;
+		const rebuilds = [];
+		globalThis.__wcposOnIndexRebuild = (event) => rebuilds.push(event);
+		try {
+			const engine = storage.getRxStorageFilesystemNode({ basePath });
+			const params = {
+				databaseName: `replay-${dist}`,
+				collectionName: 'products',
+				schema,
+				options: {},
+				multiInstance: true,
+				devMode: false,
+			};
+			const open = async (token) => {
+				const instance = await engine.createStorageInstance({
+					...params,
+					databaseInstanceToken: token,
+				});
+				instances.push(instance);
+				states.push(await instance.internals.statePromise);
+				return instance;
+			};
+			const writer = await open('writer');
+			const first = {
+				id: '001',
+				value: 'original',
+				_rev: '1-original',
+				_deleted: false,
+				_meta: { lwt: Date.now() - 1000 },
+				_attachments: {},
+			};
+			assert.deepEqual((await writer.bulkWrite([{ document: first }], 'seed')).error, []);
+			await writer.taskQueue.awaitIdle();
+			await writer.taskQueue.runCleanup(async (run) => {
+				for (const index of states[0].indexStates) await index.persistInMemoryRows(run);
+				await states[0].changelog.empty(run);
+			});
+			const current = { ...first, value: 'changed', _rev: '2-deleted', _deleted: true };
+			assert.deepEqual(
+				(await writer.bulkWrite([{ previous: first, document: current }], 'delete')).error,
+				[]
+			);
+			await writer.close();
+			const reopened = await open('reopened');
+			assert.deepEqual(await reopened.findDocumentsById(['001'], true), [current]);
+			assert.deepEqual(rebuilds, [], 'tagged write delete replays without a rebuild');
+			const state = states.at(-1);
+			const rows = structuredClone(state.indexStates.map((index) => index.rows[0]));
+			const cleanup = await import(
+				pathToFileURL(
+					join(packageRoot, `dist/${dist}/plugins/storage-abstract-filesystem/cleanup.js`)
+				).href
+			);
+			await reopened.taskQueue.runCleanup(async (run) => {
+				for (const index of state.indexStates) await index.persistInMemoryRows(run);
+				await state.changelog.empty(run);
+				assert.deepEqual(await cleanup.cleanupDeletedDocuments(reopened, run, 0), ['001']);
+				const operations = [...(await state.changelog.getChangelogOperations(run)).values()].flat();
+				assert.deepEqual(
+					operations,
+					rows.map((row, index) => [index, 0, 'D', row, 'wcpos-exact'])
+				);
+			});
+			await reopened.close();
+			const afterCleanup = await open('after-cleanup');
+			assert.deepEqual(await afterCleanup.findDocumentsById(['001'], true), []);
+			assert.ok(states.at(-1).indexStates.every((index) => index.rows.length === 0));
+			assert.deepEqual(rebuilds, [], 'tagged cleanup delete replays without a rebuild');
+		} finally {
+			for (const instance of instances) await instance.close();
+			for (const state of states) state.broadcastChannel?.close();
+			globalThis.__wcposOnIndexRebuild = previousHook;
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	test(`[${dist}] recovery dispatches before a queued peer cleanup persists and empties the changelog`, async () => {
+		const basePath = mkdtempSync(join(tmpdir(), 'wcpos-repair-dispatch-'));
+		const instances = [];
+		const states = [];
+		const prototype = storage.NodeFilesystemFileHandle.prototype;
+		const createAccessHandle = prototype.createAccessHandle;
+		const previousHook = globalThis.__wcposOnStorageRecovery;
+		globalThis.__wcposOnStorageRecovery = () => {};
+		// OPFS access handles do synchronous I/O. Node's async fs otherwise yields
+		// during close and masks the missing broadcast yield. Keep real disk bytes,
+		// premium instances, the real BroadcastChannel and the shared Web Lock.
+		prototype.createAccessHandle = async function () {
+			const fd = openSync(this.filepath, 'r+');
+			return {
+				getSize: async () => fstatSync(fd).size,
+				read: async (start, end = fstatSync(fd).size) => {
+					const bytes = new Uint8Array(end - start);
+					readSync(fd, bytes, 0, bytes.length, start);
+					return bytes;
+				},
+				getWritable: async () => ({
+					write: async (bytes, { at }) => {
+						writeSync(fd, bytes, 0, bytes.length, at);
+					},
+				}),
+				truncate: async (size) => ftruncateSync(fd, size),
+				close: async () => closeSync(fd),
+			};
+		};
+		try {
+			const engine = storage.getRxStorageFilesystemNode({ basePath });
+			const params = {
+				databaseName: `dispatch-${dist}`,
+				collectionName: 'products',
+				schema,
+				options: {},
+				multiInstance: true,
+				devMode: false,
+			};
+			for (const token of ['owner', 'peer']) {
+				const instance = await withTargetedOpfsRecovery(engine, {
+					ownsRepairs: () => token === 'owner',
+				}).createStorageInstance({ ...params, databaseInstanceToken: token });
+				instances.push(instance);
+				states.push(await instance.internals.statePromise);
+			}
+			const [owner, peer] = instances;
+			const [ownerState, peerState] = states;
+			const documents = ['001', '002'].map((id) => ({
+				id,
+				value: id,
+				_rev: '1-seed',
+				_deleted: false,
+				_meta: { lwt: Date.now() },
+				_attachments: {},
+			}));
+			const seeded = nextEvent(ownerState);
+			assert.deepEqual(
+				(
+					await peer.bulkWrite(
+						documents.map((document) => ({ document })),
+						'seed'
+					)
+				).error,
+				[]
+			);
+			await seeded;
+			await peer.taskQueue.awaitIdle();
+			await (
+				await peerState.dirHandle
+			).getFileHandle('wcpos-changelog-baked.txt', { create: true });
+			const row = ownerState.firstIdx.metaIdMap.get('001');
+			await owner.taskQueue.runCleanup(async (run) => {
+				const handle = await ownerState.documentFileHandle.createAccessHandle();
+				run.accessHandlers.set(ownerState.documentFileHandle, Promise.resolve(handle));
+				await (
+					await handle.getWritable()
+				).write(new Uint8Array(row[2] - row[1]).fill(32), { at: row[1] });
+			});
+			const cleanup = await import(
+				pathToFileURL(
+					join(packageRoot, `dist/${dist}/plugins/storage-abstract-filesystem/cleanup.js`)
+				).href
+			);
+			const runCleanup = owner.taskQueue.runCleanup.bind(owner.taskQueue);
+			let peerCleanup;
+			owner.taskQueue.runCleanup = (callback) =>
+				runCleanup(async (run) => {
+					peerCleanup = peer.taskQueue.runCleanup((peerRun) =>
+						cleanup.cleanupChangelogOperations(peer, peerRun)
+					);
+					return callback(run);
+				});
+			assert.deepEqual(await owner.findDocumentsById(['001'], false), []);
+			assert.ok(peerCleanup, 'peer cleanup queued while owner holds the lock');
+			await peerCleanup;
+			for (const instance of instances) await instance.close();
+			instances.length = 0;
+			for (const token of ['owner-reopened', 'peer-reopened']) {
+				const reopened = await engine.createStorageInstance({
+					...params,
+					databaseInstanceToken: token,
+				});
+				instances.push(reopened);
+				const state = await reopened.internals.statePromise;
+				states.push(state);
+				for (const index of state.indexStates) {
+					assert.equal(index.rows.length, 1, 'dropped row absent from persisted indexes');
+					assert.equal(index.rows[0][0].slice(-3), '002');
+				}
+				assert.deepEqual(await reopened.findDocumentsById(['002'], false), [documents[1]]);
+			}
+		} finally {
+			for (const instance of instances) await instance.close();
+			for (const state of states) state.broadcastChannel?.close();
+			prototype.createAccessHandle = createAccessHandle;
+			globalThis.__wcposOnStorageRecovery = previousHook;
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	test(`[${dist}] a delayed write-shaped D no longer removes a newer same-string re-add`, async () => {
+		const basePath = mkdtempSync(join(tmpdir(), 'wcpos-write-delete-'));
+		const instances = [];
+		const states = [];
+		const engine = storage.getRxStorageFilesystemNode({ basePath });
+		const params = {
+			databaseName: `write-${dist}`,
+			collectionName: 'products',
+			schema,
+			options: {},
+			multiInstance: true,
+			devMode: false,
+		};
+		try {
+			for (const token of ['writer', 'peer']) {
+				const instance = await withTargetedOpfsRecovery(engine, {
+					onInstance: (live, passed) => {
+						assert.equal(passed.databaseInstanceToken, token);
+						instances.push(live);
+					},
+				}).createStorageInstance({ ...params, databaseInstanceToken: token });
+				// Registration is part of the production wrapper, not a test-only caller.
+				assert.equal(instances.at(-1), instance);
+				states.push(await instance.internals.statePromise);
+			}
+			const [writer, peer] = instances;
+			const [writerState, peerState] = states;
+			let previous = {
+				id: '001',
+				value: 'same',
+				_rev: '1-seed',
+				_deleted: false,
+				_meta: { lwt: Date.now() },
+				_attachments: {},
+			};
+			const seeded = nextEvent(peerState);
+			assert.deepEqual((await writer.bulkWrite([{ document: previous }], 'seed')).error, []);
+			await seeded;
+			await writer.taskQueue.awaitIdle();
+			// Bake the seed so reopening must replay the changed delete payload.
+			await writer.taskQueue.runCleanup(async (run) => {
+				for (const index of writerState.indexStates) await index.persistInMemoryRows(run);
+				await writerState.changelog.empty(run);
+			});
+			const onmessage = peerState.broadcastChannel.onmessage;
+			const delayed = [];
+			const valueIndex = peerState.indexStates.find((index) => index.index[0] === 'value').indexId;
+			const withhold = (op) => op[2] === 'D' && op[0] === valueIndex;
+			peerState.broadcastChannel.onmessage = ({ data }) => {
+				delayed.push(...data.changelogOperations.filter(withhold));
+				onmessage({
+					data: {
+						...data,
+						changelogOperations: data.changelogOperations.filter((op) => !withhold(op)),
+					},
+				});
+			};
+			for (const [revision, value] of [
+				[2, 'different'],
+				[3, 'same'],
+			]) {
+				const document = {
+					...previous,
+					value,
+					_rev: `${revision}-updated`,
+					_meta: { lwt: previous._meta.lwt + 1 },
+				};
+				const received = nextEvent(peerState);
+				assert.deepEqual((await writer.bulkWrite([{ previous, document }], 'update')).error, []);
+				await received;
+				peerState.broadcastChannel.onmessage = onmessage;
+				previous = document;
+			}
+			assert.ok(delayed.length > 0);
+			const before = structuredClone(peerState.indexStates.map((index) => index.rows));
+			const delivered = nextEvent(peerState);
+			onmessage({
+				data: {
+					type: 'event',
+					eventBulks: [],
+					changelogOperations: delayed,
+					info: { db: params.databaseName, col: params.collectionName },
+				},
+			});
+			await delivered;
+			assert.deepEqual(
+				peerState.indexStates.map((index) => index.rows),
+				before
+			);
+			assert.deepEqual(await peer.findDocumentsById(['001'], false), [previous]);
+			await writer.taskQueue.awaitIdle();
+			await writer.taskQueue.runCleanup(async (run) => {
+				const operations = [
+					...(await writerState.changelog.getChangelogOperations(run)).values(),
+				].flat();
+				const deletes = operations.filter((op) => op[2] === 'D');
+				assert.ok(deletes.length > 0);
+				assert.ok(
+					deletes.every((op) => op[4] === 'wcpos-exact'),
+					'fifth element survives JSON persistence'
+				);
+			});
+			for (const instance of instances) await instance.close();
+			instances.length = 0;
+			const reopened = await engine.createStorageInstance({
+				...params,
+				databaseInstanceToken: 'reopened',
+			});
+			instances.push(reopened);
+			states.push(await reopened.internals.statePromise);
+			assert.deepEqual(
+				states.at(-1).indexStates.map((index) => index.rows),
+				before
+			);
+			assert.deepEqual(await reopened.findDocumentsById(['001'], false), [previous]);
+		} finally {
+			for (const instance of instances) await instance.close();
+			for (const state of states) state.broadcastChannel?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
 	test(
 		`[${dist}] delayed recovery D preserves a peer's same-string re-add`,
 		{ timeout: 5000 },
