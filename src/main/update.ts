@@ -187,13 +187,22 @@ export class AutoUpdater implements UpdaterHandle {
 	private async downloadAndInstallUpdates(assets: Asset[]) {
 		let targetPath = '';
 		try {
-			const paths = await Promise.all(assets.map((asset) => this.download(asset.name, asset.url)));
-			targetPath = paths.find((filePath) => Boolean(filePath)) ?? '';
+			// Recorded as each download finishes, not after all of them: on Windows the
+			// installer and the RELEASES manifest download together, and a finished installer
+			// should still be revealed below if its sibling fails.
+			await Promise.all(
+				assets.map(async (asset) => {
+					const filePath = await this.download(asset.name, asset.url);
+					if (filePath) {
+						targetPath = filePath;
+					}
+				})
+			);
 			await this.installUpdates(targetPath);
 		} catch (error) {
 			logger.error('Error applying the updates', error, error.stack);
 			// A finished download that failed to install is still useful: reveal it so
-			// the user can run it by hand.
+			// the user can run it by hand. A partial download is never recorded here.
 			if (targetPath) {
 				shell.showItemInFolder(targetPath);
 			}
