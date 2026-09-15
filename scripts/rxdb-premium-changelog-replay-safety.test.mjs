@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	truncateSync,
+	writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -85,11 +93,11 @@ function assertNoNullRows(basePath) {
 	}
 }
 
-async function openDatabase(runtime, basePath, collectionSchema = schema) {
+async function openDatabase(runtime, basePath, collectionSchema = schema, multiInstance = false) {
 	const db = await runtime.createRxDatabase({
 		name: join(basePath, 'database'),
 		storage: runtime.getStorage({ basePath }),
-		multiInstance: false,
+		multiInstance,
 	});
 	const { c } = await db.addCollections({ c: { schema: collectionSchema } });
 	return { db, collection: c };
@@ -244,6 +252,148 @@ async function seedHealthy(runtime, basePath, documents) {
 }
 
 for (const runtime of runtimes) {
+	test(`${runtime.dist}: the desktop cap does not change multi-instance changelog reads`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-changelog-multi`);
+		const originalSize = runtime.accessPrototype.getSize;
+		const originalRead = runtime.accessPrototype.read;
+		let db;
+		try {
+			const opened = await openDatabase(runtime, basePath, schema, true);
+			db = opened.db;
+			await opened.collection.insert({ id: 'kept', status: 'kept', note: 'kept' });
+			const state = await storageInternals(opened.collection).statePromise;
+			const changelogPath = join(collectionDirectory(basePath), 'changelog.txt');
+			const bytes = readFileSync(changelogPath);
+			let reads = 0;
+			runtime.accessPrototype.getSize = async function () {
+				return this.fileHandle.filepath === changelogPath
+					? 256 * 1024 * 1024 + 1
+					: originalSize.call(this);
+			};
+			runtime.accessPrototype.read = async function (offset, end) {
+				if (this.fileHandle.filepath === changelogPath) {
+					reads++;
+					return bytes;
+				}
+				return originalRead.call(this, offset, end);
+			};
+			await state.taskQueue.runCleanup((run) => state.changelog.getChangelogOperations(run));
+			assert.equal(reads, 1, 'multi-instance retains its existing replay path');
+		} finally {
+			runtime.accessPrototype.getSize = originalSize;
+			runtime.accessPrototype.read = originalRead;
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+	test(`${runtime.dist}: oversized live cleanup preserves a reinserted record over old tombstone bytes`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-changelog-reinsert`);
+		let db;
+		try {
+			const opened = await openDatabase(runtime, basePath);
+			db = opened.db;
+			const collection = opened.collection;
+			await collection.insert({ id: 'reused', status: 'kept', note: 'old' });
+			for (let i = 0; i < 5; i++) {
+				await (await collection.findOne('reused').exec()).incrementalPatch({ note: `old-${i}` });
+			}
+			await (await collection.findOne('reused').exec()).remove();
+			await collection.storageInstance.cleanup(0); // Purge indexes, not document bytes.
+			await collection.insert({ id: 'reused', status: 'kept', note: 'new' });
+			const state = await storageInternals(collection).statePromise;
+			const getOperations = state.changelog.getChangelogOperations;
+			state.changelog.getChangelogOperations = async function (...args) {
+				state.changelog.getChangelogOperations = getOperations;
+				throw Object.assign(new Error('oversized'), {
+					name: 'WcposChangelogOversized',
+					size: 256 * 1024 * 1024 + 1,
+				});
+			};
+			await fullCleanup(collection);
+			await db.close();
+			const reopened = await openDatabase(runtime, basePath);
+			db = reopened.db;
+			assert.deepEqual(await findAll(reopened.collection), [
+				{ id: 'reused', status: 'kept', note: 'new' },
+			]);
+		} finally {
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+	for (const phase of ['cleanup', 'boot']) {
+		test(`${runtime.dist}: oversized changelog ${phase} avoids the read and reclaims persisted files`, async () => {
+			const basePath = makeDirectory(`${runtime.dist}-changelog-${phase}`);
+			const originalRead = runtime.accessPrototype.read;
+			const originalTruncate = runtime.accessPrototype.truncate;
+			const oversizedBytes = 3 * 1024 * 1024 * 1024;
+			const events = [];
+			let oversized = false;
+			let attemptedReads = 0;
+			const recoveryKind =
+				phase === 'boot' ? 'changelog-oversized-rebuilt' : 'changelog-oversized-compacted';
+			let db;
+			try {
+				const opened = await openDatabase(runtime, basePath);
+				db = opened.db;
+				let collection = opened.collection;
+				await collection.bulkInsert([
+					{ id: 'kept', status: 'kept', note: 'original' },
+					{ id: 'deleted', status: 'gone', note: 'original' },
+				]);
+				for (let i = 0; i < 20; i++) {
+					await (await collection.findOne('kept').exec()).incrementalPatch({ note: `update-${i}` });
+				}
+				await (await collection.findOne('deleted').exec()).remove();
+				// Finish the write run before observing the physical files.
+				await storageInternals(collection).taskQueue.awaitIdle();
+				const directory = collectionDirectory(basePath);
+				const documentsPath = join(directory, 'documents.json');
+				const before = statSync(documentsPath).size;
+				assert.ok(statSync(join(directory, 'changelog.txt')).size > 0);
+				if (phase === 'boot') await db.close();
+				// A real sparse 3 GiB file: exercise stat/truncate without allocating GBs.
+				truncateSync(join(directory, 'changelog.txt'), oversizedBytes);
+				oversized = true;
+				globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+				runtime.accessPrototype.read = async function (offset, end) {
+					if (oversized && this.fileHandle.filepath === join(directory, 'changelog.txt')) {
+						attemptedReads++;
+						throw new RangeError('simulated oversized changelog allocation');
+					}
+					return originalRead.call(this, offset, end);
+				};
+				runtime.accessPrototype.truncate = async function (size) {
+					await originalTruncate.call(this, size);
+					if (this.fileHandle.filepath === join(directory, 'changelog.txt') && size === 0)
+						oversized = false;
+				};
+				if (phase === 'boot') {
+					const reopened = await openDatabase(runtime, basePath);
+					db = reopened.db;
+					collection = reopened.collection;
+				}
+				await fullCleanup(collection);
+				assert.equal(attemptedReads, 0, 'never allocates the oversized changelog');
+				assert.equal(events.filter((event) => event.kind === recoveryKind).length, 1);
+				assert.ok(events.find((event) => event.kind === recoveryKind).bytes >= oversizedBytes);
+				assert.equal(statSync(join(directory, 'changelog.txt')).size, 0);
+				assert.ok(statSync(documentsPath).size < before, 'documents.json shrinks after recovery');
+				await db.close();
+				const reopened = await openDatabase(runtime, basePath);
+				db = reopened.db;
+				assert.deepEqual(await findAll(reopened.collection), [
+					{ id: 'kept', status: 'kept', note: 'update-19' },
+				]);
+			} finally {
+				runtime.accessPrototype.read = originalRead;
+				runtime.accessPrototype.truncate = originalTruncate;
+				delete globalThis.__wcposOnStorageRecovery;
+				await db?.close();
+				rmSync(basePath, { recursive: true, force: true });
+			}
+		});
+	}
 	test(`${runtime.dist}: compaction shrinks dead gaps under a simulated string cap`, async () => {
 		const basePath = makeDirectory(`${runtime.dist}-large-gap`);
 		let db;

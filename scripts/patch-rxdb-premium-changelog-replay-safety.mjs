@@ -14,9 +14,22 @@ export const MARKER = 'WCPOS_CHANGELOG_REPLAY_SAFETY_PATCH';
 // Bumped whenever the prelude or a rewrite changes: a dist patched by an older
 // script cannot be upgraded in place (the prelude text is unknown), so it must
 // be restored from the licensed package and re-patched.
-export const PATCH_VERSION = 2;
+export const PATCH_VERSION = 3;
 
 const MARKER_PRELUDE = `globalThis.${MARKER}=${PATCH_VERSION};\n`;
+// Multi-instance (web) retains its existing replay/recovery contract.
+// Parsing also allocates a string and operation arrays; stop well before a GB-sized allocation.
+const CHANGELOG_PRELUDE = `${MARKER_PRELUDE}
+const CHANGELOG_MAX_BYTES=256*1024*1024;
+class WcposChangelogOversized extends Error{
+constructor(size){super("Changelog exceeds "+CHANGELOG_MAX_BYTES+" bytes: "+size);this.name="WcposChangelogOversized";this.size=size}
+}
+async function __wcposReadChangelog(handle,singleInstance){
+var size=await handle.getSize();
+if(singleInstance&&size>CHANGELOG_MAX_BYTES)throw new WcposChangelogOversized(size);
+return handle.read(0,size)
+}
+`;
 const HASH_PRELUDE = `${MARKER_PRELUDE}function __wcposHash(raw){
 var h1=3735928559,h2=1103547991;
 for(var i=0;i<raw.length;i++){var code=raw.charCodeAt(i);h1=Math.imul(h1^code,2654435761);h2=Math.imul(h2^code,1597334677)}
@@ -119,6 +132,7 @@ await stampAccess.truncate(0);
 }catch(rebuildError){try{rebuildError.message="index rebuild failed ("+reason+"): "+rebuildError.message}catch(ignored){}throw rebuildError}
 var report={db:databaseName,col:collectionName,reason:reason,documents:kept.length,skipped:skipped};
 console.warn("[wcpos] rebuilt storage indexes from documents.json",report);
+if(options.changelogBytes!==undefined&&typeof globalThis.__wcposOnStorageRecovery==="function")globalThis.__wcposOnStorageRecovery({kind:"changelog-oversized-rebuilt",target:databaseName+"/"+collectionName,bytes:options.changelogBytes,documents:kept.length});
 if(typeof globalThis.__wcposOnIndexRebuild==="function")globalThis.__wcposOnIndexRebuild({target:databaseName+"/"+collectionName,reason:reason,documents:kept.length,skipped:skipped})
 }
 `;
@@ -130,13 +144,13 @@ const DISTS = [
 		files: [
 			{
 				file: 'changelog.js',
-				prelude: MARKER_PRELUDE,
+				prelude: CHANGELOG_PRELUDE,
 				rewrites: [
 					{
 						name: 'rememberRaw',
 						before: 'n=await i.read(0),o=a.storageInstance._decode(n),r=new Map',
 						after:
-							'n=await i.read(0),o=a.storageInstance._decode(n);this.__wcposLastRaw=o;var r=new Map',
+							'n=await __wcposReadChangelog(i,this.__wcposSingleInstance),o=a.storageInstance._decode(n);this.__wcposLastRaw=o;var r=new Map',
 					},
 				],
 			},
@@ -158,11 +172,15 @@ const DISTS = [
 							'export async function cleanupDocumentJsonFile(a,t){for(var r=await a.internals.statePromise,n=e(r.indexStates.find((e=>"_meta.lwt"===e.index[0]&&e.index[1]===a.primaryPath&&2===e.index.length))),i=await o(r.documentFileHandle,t),s=await i.getSize(),l=50,g=0,d=0,m=0;;){if(d>=l)return d;var u=n.rows[m];if(m+=1,!u)return g<s&&await i.truncate(g),d;var w=u[1],h=u[2];if(w===g)g=h;else{d+=1;var f=(await p(r,i,t,[u]))[0],v=g,x=w-v,D,C,E=a._encode(JSON.stringify(f));if(x>=E.byteLength){D=await i.getWritable(),await D.write(E,{at:v}),C=E.byteLength}else{var y=a._encode(" ".repeat(x));D=await i.getWritable();await D.write(y,{at:v});var P=[];for(var S of r.indexStates){var O=S.changeDocumentPosition(f,[v,h]);P.push(O)}await r.changelog.addChangelogOperations(t,P),await c(a,r,P);C=h-w;var b=JSON.stringify(f)+" ".repeat(x),j=a._encode(b);D=await i.getWritable(),await D.write(j,{at:v})}var F=v+C,I=[];for(var J of r.indexStates){var _=J.changeDocumentPosition(f,[v,F]);I.push(_)}await r.changelog.addChangelogOperations(t,I),await c(a,r,I),g+=C}}}',
 					},
 					{
+						// Single-instance memory already includes every write. On oversize bake ALL
+						// indexes, never reconstruct live state from old document/tombstone bytes.
+						// Until empty() succeeds the oversized file makes boot rebuild; the
+						// sentinel cannot be mistaken for a normal content-hash stamp.
 						name: 'stampBeforeBake',
 						before:
 							'export async function cleanupChangelogOperations(a,e){var t=await a.internals.statePromise,r=await t.changelog.getChangelogOperations(e),n=t.indexStates.filter((a=>{var e=r.get(a.indexId);return!(!e||0===e.length)}));for(var i of n)await i.persistInMemoryRows(e);return n.length>0&&await t.changelog.empty(e),n}',
 						after:
-							'export async function cleanupChangelogOperations(a,e){var t=await a.internals.statePromise,r=await t.changelog.getChangelogOperations(e),n=t.indexStates.filter((a=>{var e=r.get(a.indexId);return!(!e||0===e.length)}));if(n.length>0){var h=await(await t.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),f=await o(h,e),v=await f.getWritable(),x=e.storageInstance._encode(__wcposHash(t.changelog.__wcposLastRaw));await v.write(x,{at:0}),await f.truncate(x.byteLength),await __wcposFlushRun(e);for(var i of n)await i.persistInMemoryRows(e);await __wcposFlushRun(e),await t.changelog.empty(e),await f.truncate(0)}return n}',
+							'export async function cleanupChangelogOperations(a,e){var t=await a.internals.statePromise,r,oversizedBytes;try{r=await t.changelog.getChangelogOperations(e)}catch(error){if(!error||error.name!=="WcposChangelogOversized"||t.params.multiInstance)throw error;oversizedBytes=error.size}var n=oversizedBytes!==undefined?t.indexStates:t.indexStates.filter((a=>{var e=r.get(a.indexId);return!(!e||0===e.length)}));if(n.length>0){var h=await(await t.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),f=await o(h,e),v=await f.getWritable(),x=e.storageInstance._encode(oversizedBytes!==undefined?"oversized:"+oversizedBytes:__wcposHash(t.changelog.__wcposLastRaw));await v.write(x,{at:0}),await f.truncate(x.byteLength),await __wcposFlushRun(e);for(var i of n)await i.persistInMemoryRows(e);await __wcposFlushRun(e),await t.changelog.empty(e),await f.truncate(0)}if(oversizedBytes!==undefined&&typeof globalThis.__wcposOnStorageRecovery==="function")globalThis.__wcposOnStorageRecovery({kind:"changelog-oversized-compacted",target:a.databaseName+"/"+a.collectionName,bytes:oversizedBytes});return n}',
 					},
 				],
 			},
@@ -179,7 +197,7 @@ const DISTS = [
 						before:
 							'if(await b.getSize()>0){var[,S]=await Promise.all([Promise.all(y.map((e=>e.initRead(n)))),v.getChangelogOperations(n)]);Array.from(S.entries()).map((([e,a])=>{var t=y[e];a.forEach((e=>t.runChangelogOperation(e)))}))}',
 						after:
-							'if(await b.getSize()>0){var E=await(await u).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await r(E,n),reason=null;try{var settled=await Promise.allSettled(y.map((e=>e.initRead(n)))),failed=settled.find((e=>"rejected"===e.status));if(failed)throw failed.reason;var S=await v.getChangelogOperations(n),stamp=n.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(v.__wcposLastRaw))reason="stale-changelog-after-compaction";else reason=__wcposReplayChangelog(y,S);if(!reason)reason=__wcposValidateRows(y,x)}catch(error){reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:n,docsAccessHandle:b,indexStates:y,changelog:v,stampHandle:E,decode:n.storageInstance._decode.bind(n.storageInstance),primaryPath:g,databaseName:d.databaseName,collectionName:d.collectionName})}',
+							'v.__wcposSingleInstance=!d.multiInstance;if(await b.getSize()>0){var E=await(await u).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await r(E,n),reason=null,oversizedBytes;try{var settled=await Promise.allSettled(y.map((e=>e.initRead(n)))),failed=settled.find((e=>"rejected"===e.status));if(failed)throw failed.reason;var S=await v.getChangelogOperations(n),stamp=n.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(v.__wcposLastRaw))reason="stale-changelog-after-compaction";else reason=__wcposReplayChangelog(y,S);if(!reason)reason=__wcposValidateRows(y,x)}catch(error){if(error&&error.name==="WcposChangelogOversized"){if(d.multiInstance)throw error;oversizedBytes=error.size}reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:n,docsAccessHandle:b,indexStates:y,changelog:v,stampHandle:E,decode:n.storageInstance._decode.bind(n.storageInstance),primaryPath:g,databaseName:d.databaseName,collectionName:d.collectionName,changelogBytes:oversizedBytes})}',
 					},
 				],
 			},
@@ -190,13 +208,13 @@ const DISTS = [
 		files: [
 			{
 				file: 'changelog.js',
-				prelude: MARKER_PRELUDE,
+				prelude: CHANGELOG_PRELUDE,
 				rewrites: [
 					{
 						name: 'rememberRaw',
 						before: 'n=await i.read(0),s=t.storageInstance._decode(n),o=new Map',
 						after:
-							'n=await i.read(0),s=t.storageInstance._decode(n);this.__wcposLastRaw=s;var o=new Map',
+							'n=await __wcposReadChangelog(i,this.__wcposSingleInstance),s=t.storageInstance._decode(n);this.__wcposLastRaw=s;var o=new Map',
 					},
 				],
 			},
@@ -214,11 +232,15 @@ const DISTS = [
 							'async function d(t,i){for(var o=await t.internals.statePromise,s=(0,e.ensureNotFalsy)(o.indexStates.find((e=>"_meta.lwt"===e.index[0]&&e.index[1]===t.primaryPath&&2===e.index.length))),g=await(0,a.getAccessHandle)(o.documentFileHandle,i),d=await g.getSize(),l=50,u=0,c=0,p=0;;){if(c>=l)return c;var w=s.rows[p];if(p+=1,!w)return u<d&&await g.truncate(u),c;var h=w[1],m=w[2];if(h===u)u=m;else{c+=1;var x=(await(0,r.getDocumentsJson)(o,g,i,[w]))[0],f=u,v=h-f,I,O,E=t._encode(JSON.stringify(x));if(v>=E.byteLength){I=await g.getWritable(),await I.write(E,{at:f}),O=E.byteLength}else{var y=t._encode(" ".repeat(v));I=await g.getWritable();await I.write(y,{at:f});var b=[];for(var S of o.indexStates){var C=S.changeDocumentPosition(x,[f,m]);b.push(C)}await o.changelog.addChangelogOperations(i,b),await(0,n.broadcastChangelogOperations)(t,o,b);O=m-h;var P=JSON.stringify(x)+" ".repeat(v),D=t._encode(P);I=await g.getWritable(),await I.write(D,{at:f})}var F=f+O,q=[];for(var _ of o.indexStates){var j=_.changeDocumentPosition(x,[f,F]);q.push(j)}await o.changelog.addChangelogOperations(i,q),await(0,n.broadcastChangelogOperations)(t,o,q),u+=O}}}',
 					},
 					{
+						// Single-instance memory already includes every write. On oversize bake ALL
+						// indexes, never reconstruct live state from old document/tombstone bytes.
+						// Until empty() succeeds the oversized file makes boot rebuild; the
+						// sentinel cannot be mistaken for a normal content-hash stamp.
 						name: 'stampBeforeBake',
 						before:
 							'async function g(e,a){var t=await e.internals.statePromise,r=await t.changelog.getChangelogOperations(a),n=t.indexStates.filter((e=>{var a=r.get(e.indexId);return!(!a||0===a.length)}));for(var i of n)await i.persistInMemoryRows(a);return n.length>0&&await t.changelog.empty(a),n}',
 						after:
-							'async function g(e,t){var r=await e.internals.statePromise,n=await r.changelog.getChangelogOperations(t),i=r.indexStates.filter((e=>{var a=n.get(e.indexId);return!(!a||0===a.length)}));if(i.length>0){var o=await(await r.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),s=await(0,a.getAccessHandle)(o,t),g=await s.getWritable(),l=t.storageInstance._encode(__wcposHash(r.changelog.__wcposLastRaw));await g.write(l,{at:0}),await s.truncate(l.byteLength),await __wcposFlushRun(t);for(var h of i)await h.persistInMemoryRows(t);await __wcposFlushRun(t),await r.changelog.empty(t),await s.truncate(0)}return i}',
+							'async function g(e,t){var r=await e.internals.statePromise,n,oversizedBytes;try{n=await r.changelog.getChangelogOperations(t)}catch(error){if(!error||error.name!=="WcposChangelogOversized"||r.params.multiInstance)throw error;oversizedBytes=error.size}var i=oversizedBytes!==undefined?r.indexStates:r.indexStates.filter((e=>{var a=n.get(e.indexId);return!(!a||0===a.length)}));if(i.length>0){var o=await(await r.dirHandle).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),s=await(0,a.getAccessHandle)(o,t),g=await s.getWritable(),l=t.storageInstance._encode(oversizedBytes!==undefined?"oversized:"+oversizedBytes:__wcposHash(r.changelog.__wcposLastRaw));await g.write(l,{at:0}),await s.truncate(l.byteLength),await __wcposFlushRun(t);for(var h of i)await h.persistInMemoryRows(t);await __wcposFlushRun(t),await r.changelog.empty(t),await s.truncate(0)}if(oversizedBytes!==undefined&&typeof globalThis.__wcposOnStorageRecovery==="function")globalThis.__wcposOnStorageRecovery({kind:"changelog-oversized-compacted",target:e.databaseName+"/"+e.collectionName,bytes:oversizedBytes});return i}',
 					},
 				],
 			},
@@ -231,7 +253,7 @@ const DISTS = [
 						before:
 							'if(await y.getSize()>0){var[,w]=await Promise.all([Promise.all(h.map((e=>e.initRead(o)))),x.getChangelogOperations(o)]);Array.from(w.entries()).map((([e,a])=>{var t=h[e];a.forEach((e=>t.runChangelogOperation(e)))}))}',
 						after:
-							'if(await y.getSize()>0){var E=await(await m).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await(0,a.getAccessHandle)(E,o),reason=null;try{var settled=await Promise.allSettled(h.map((e=>e.initRead(o)))),failed=settled.find((e=>"rejected"===e.status));if(failed)throw failed.reason;var w=await x.getChangelogOperations(o),stamp=o.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(x.__wcposLastRaw))reason="stale-changelog-after-compaction";else reason=__wcposReplayChangelog(h,w);if(!reason)reason=__wcposValidateRows(h,f)}catch(error){reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:o,docsAccessHandle:y,indexStates:h,changelog:x,stampHandle:E,decode:o.storageInstance._decode.bind(o.storageInstance),primaryPath:g,databaseName:i.databaseName,collectionName:i.collectionName})}',
+							'x.__wcposSingleInstance=!i.multiInstance;if(await y.getSize()>0){var E=await(await m).getFileHandle("wcpos-changelog-baked.txt",{create:!0}),R=await(0,a.getAccessHandle)(E,o),reason=null,oversizedBytes;try{var settled=await Promise.allSettled(h.map((e=>e.initRead(o)))),failed=settled.find((e=>"rejected"===e.status));if(failed)throw failed.reason;var w=await x.getChangelogOperations(o),stamp=o.storageInstance._decode(await R.read(0));if(""!==stamp&&stamp===__wcposHash(x.__wcposLastRaw))reason="stale-changelog-after-compaction";else reason=__wcposReplayChangelog(h,w);if(!reason)reason=__wcposValidateRows(h,f)}catch(error){if(error&&error.name==="WcposChangelogOversized"){if(i.multiInstance)throw error;oversizedBytes=error.size}reason="boot-failed:"+(error&&error.message)}if(reason!==null)await __wcposRebuildIndexes({reason:reason,runState:o,docsAccessHandle:y,indexStates:h,changelog:x,stampHandle:E,decode:o.storageInstance._decode.bind(o.storageInstance),primaryPath:g,databaseName:i.databaseName,collectionName:i.collectionName,changelogBytes:oversizedBytes})}',
 					},
 				],
 			},
