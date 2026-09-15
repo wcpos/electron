@@ -35,11 +35,15 @@ const installStarted: string[] = [];
 // test a fetch it resolves by hand with a body it closes by hand.
 const STALLED_ASSET_URL = 'https://updates.test/app.zip';
 const STREAMING_ASSET_URL = 'https://updates.test/app-streaming.zip';
+const FAILING_ASSET_URL = 'https://updates.test/app-failing.zip';
 let assetUrl = STALLED_ASSET_URL;
 const pendingDownloads: ((response: unknown) => void)[] = [];
 const foundUpdatePayload = async (url: string): Promise<unknown> => {
 	if (url === STALLED_ASSET_URL) {
 		return new Promise<never>(() => {});
+	}
+	if (url === FAILING_ASSET_URL) {
+		throw new Error('download failed');
 	}
 	if (url === STREAMING_ASSET_URL) {
 		return new Promise<unknown>((resolve) => {
@@ -149,15 +153,18 @@ const streamingResponse = (
 		},
 	}),
 });
-// Installers written so far, one per accepted update's own directory. The file takes the
-// manifest's asset name, whichever URL it was fetched from.
-const downloadedInstallers = () => {
+// Per-update download directories on disk, and the installers inside them. The file takes
+// the manifest's asset name, whichever URL it was fetched from.
+const updateDirs = () => {
 	const root = path.join(tempRoot, 'NTWRK');
 	return readdirSync(root)
 		.filter((entry) => entry.startsWith('update-'))
-		.map((entry) => path.join(root, entry, 'app.zip'))
-		.filter((file) => existsSync(file));
+		.map((entry) => path.join(root, entry));
 };
+const downloadedInstallers = () =>
+	updateDirs()
+		.map((dir) => path.join(dir, 'app.zip'))
+		.filter((file) => existsSync(file));
 
 (async () => {
 	try {
@@ -300,6 +307,21 @@ const downloadedInstallers = () => {
 			3,
 			'each accepted update kept its own installer on disk'
 		);
+
+		// A download that fails leaves nothing worth keeping, so its directory goes with it.
+		const dirsBeforeFailure = updateDirs().length;
+		assetUrl = FAILING_ASSET_URL;
+		const failing = updater.checkForUpdates();
+		await flush();
+		openDialogs[9].resolve({ response: 0 });
+		await failing;
+		await waitFor(() => loggedErrors.some((m) => m.includes('applying')));
+		assert.equal(updateDirs().length, dirsBeforeFailure, 'a failed download removed its directory');
+
+		// Boot sweeps whatever earlier sessions left behind.
+		assert.ok(updateDirs().length > 0, 'precondition: earlier updates left directories');
+		new AutoUpdater({ isDestroyed: () => false } as never);
+		assert.deepEqual(updateDirs(), [], 'a new updater sweeps stale update directories');
 
 		console.log('update.test.ts passed');
 	} catch (error) {

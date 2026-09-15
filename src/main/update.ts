@@ -1,4 +1,4 @@
-import { createWriteStream, mkdtempSync, writeFileSync } from 'fs';
+import { createWriteStream, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
@@ -62,6 +62,23 @@ export class AutoUpdater implements UpdaterHandle {
 		const tempDirPath = path.join(app.getPath('temp'), 'NTWRK');
 		createDir(tempDirPath);
 		this.tempDirPath = tempDirPath;
+		this.sweepStaleDownloads();
+	}
+
+	// Each accepted update downloads into its own directory (see downloadAndInstallUpdates),
+	// and an installed update restarts the app before anything could tidy up. Boot is the one
+	// moment no download is active, so leftovers from earlier sessions go here. A Linux user
+	// who was shown an installer and never ran it loses it, and the next check offers it again.
+	private sweepStaleDownloads(): void {
+		try {
+			for (const entry of readdirSync(this.tempDirPath)) {
+				if (entry.startsWith('update-')) {
+					rmSync(path.join(this.tempDirPath, entry), { recursive: true, force: true });
+				}
+			}
+		} catch (error) {
+			logger.warn('Could not sweep stale update downloads', error);
+		}
 	}
 
 	public setMainWindow(mainWindow: BrowserWindow): void {
@@ -212,9 +229,12 @@ export class AutoUpdater implements UpdaterHandle {
 		} catch (error) {
 			logger.error('Error applying the updates', error, error.stack);
 			// A finished download that failed to install is still useful: reveal it so
-			// the user can run it by hand. A partial download is never recorded here.
+			// the user can run it by hand. A partial download is never recorded here, and
+			// there is nothing worth keeping in its directory.
 			if (targetPath) {
 				shell.showItemInFolder(targetPath);
+			} else {
+				rmSync(dir, { recursive: true, force: true });
 			}
 		}
 	}
