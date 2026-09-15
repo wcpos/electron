@@ -253,7 +253,11 @@ export class AutoUpdater implements UpdaterHandle {
 				reject(error);
 			};
 			const onDownloaded = () => {
-				release();
+				// The listeners have done their job, but the guard deliberately stays set: the
+				// app is committed to restarting, and the restart dialog below can sit open for
+				// a long time. Releasing here would let a later accepted update hand off and
+				// raise a second dialog before this one calls quitAndInstall.
+				removeListeners();
 				dialog
 					.showMessageBox({
 						title: t('update.install_updates'),
@@ -269,11 +273,15 @@ export class AutoUpdater implements UpdaterHandle {
 			const onUnavailable = () => release();
 			// Listeners were previously added per call and never removed, so they also
 			// accumulated across retries within one session.
-			const release = () => {
-				this.installing = false;
+			const removeListeners = () => {
 				autoUpdater.removeListener('error', onError);
 				autoUpdater.removeListener('update-downloaded', onDownloaded);
 				autoUpdater.removeListener('update-not-available', onUnavailable);
+			};
+			// Only for outcomes that leave nothing pending, so a later update may hand off.
+			const release = () => {
+				this.installing = false;
+				removeListeners();
 			};
 
 			autoUpdater.on('error', onError);

@@ -332,8 +332,9 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		assert.equal(installStarted.length, 1, 'the downloaded installer reached the installer');
 		assert.equal(downloadedInstallers().length, 1);
 
-		// Squirrel reports the download; that is what releases the install guard in a real run.
-		electronStub.autoUpdater.handlers.get('update-downloaded')?.();
+		// Squirrel answering that there is nothing to install releases the guard, so a later
+		// update can hand off. Without this a session would wedge after one hand-off.
+		electronStub.autoUpdater.handlers.get('update-not-available')?.();
 		await flush();
 		assert.deepEqual(
 			electronStub.autoUpdater.listeners,
@@ -384,18 +385,48 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 			['error', 'update-downloaded', 'update-not-available'],
 			'and register one set of listeners, not one per hand-off'
 		);
+
 		assert.equal(
 			downloadedInstallers().length,
 			3,
 			'each accepted update kept its own installer on disk'
 		);
 
+		// Squirrel reports the download and the restart dialog opens. That dialog can sit open
+		// for a long time, and the app is committed to restarting, so the guard must stay set:
+		// a later accepted update handing off here would raise a second restart dialog.
+		const feedsAtRestart = feeds();
+		electronStub.autoUpdater.handlers.get('update-downloaded')?.();
+		await flush();
+		assert.deepEqual(
+			electronStub.autoUpdater.listeners,
+			[],
+			'the hand-off drops its listeners once the download is reported'
+		);
+		const downloadsAtRestart = pendingDownloads.length;
+		const afterRestartPrompt = updater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await afterRestartPrompt;
+		await waitFor(() => pendingDownloads.length > downloadsAtRestart);
+		const tail: ReadableStreamDefaultController<Uint8Array>[] = [];
+		for (const resolve of pendingDownloads.slice(downloadsAtRestart)) {
+			resolve(streamingResponse((controller) => tail.push(controller)));
+		}
+		await waitFor(() => tail.length > 0);
+		for (const controller of tail) {
+			controller.close();
+		}
+		// Long enough for a hand-off to show up if the guard were released.
+		await waitFor(() => feeds() > feedsAtRestart, 100);
+		assert.equal(feeds(), feedsAtRestart, 'no second hand-off while the restart dialog is open');
+
 		// A download that fails leaves nothing worth keeping, so its directory goes with it.
 		const dirsBeforeFailure = updateDirs().length;
 		assetUrl = FAILING_ASSET_URL;
 		const failing = updater.checkForUpdates();
 		await flush();
-		openDialogs[9].resolve({ response: 0 });
+		openDialogs[10].resolve({ response: 0 });
 		await failing;
 		await waitFor(() => loggedErrors.some((m) => m.includes('applying')));
 		assert.equal(updateDirs().length, dirsBeforeFailure, 'a failed download removed its directory');
@@ -434,7 +465,7 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 			const writersBefore = writers.length;
 			const check = updater.checkForUpdates();
 			await flush();
-			openDialogs[10 + Number(cleanupFailure)].resolve({ response: 0 });
+			openDialogs[11 + Number(cleanupFailure)].resolve({ response: 0 });
 			assert.equal(await check, true, 'check settles before downloads finish');
 			const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
 			for (const resolve of pendingDownloads.slice(downloadsBefore)) {
@@ -471,7 +502,7 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		const writersBeforeNupkg = writers.length;
 		const nupkgCheck = updater.checkForUpdates();
 		await flush();
-		openDialogs[12].resolve({ response: 0 });
+		openDialogs[13].resolve({ response: 0 });
 		await nupkgCheck;
 		const nupkgControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
 		for (const resolve of pendingDownloads.slice(downloadsBeforeNupkg)) {
@@ -497,7 +528,7 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		const errorsBeforeMkdtemp = loggedErrors.length;
 		const mkdtempCheck = updater.checkForUpdates();
 		await flush();
-		openDialogs[13].resolve({ response: 0 });
+		openDialogs[14].resolve({ response: 0 });
 		assert.equal(await mkdtempCheck, true, 'the check still settles when the directory fails');
 		await waitFor(() => loggedErrors.length > errorsBeforeMkdtemp);
 		await flush();
