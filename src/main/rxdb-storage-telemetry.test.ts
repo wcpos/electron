@@ -53,6 +53,8 @@ async function main() {
 	// report() calls and the patch prelude — so a renamed kind fails here
 	// instead of silently reporting at the wrong level.
 	assert.deepEqual(Object.keys(KIND_LEVELS).sort(), [
+		'changelog-oversized-compacted',
+		'changelog-oversized-rebuilt',
 		'changes-file-discarded',
 		'changes-file-salvage',
 		'cleanup-recovery',
@@ -258,6 +260,14 @@ async function main() {
 		'capture retains the exact first cause'
 	);
 
+	for (const kind of ['changelog-oversized-rebuilt', 'changelog-oversized-compacted']) {
+		seams.__wcposOnStorageRecovery!({ kind, target: 'large/coverageRecords', bytes: 3221225472 });
+		const oversizedCapture: (typeof captured)[number] = captured[captured.length - 1];
+		assert.equal(oversizedCapture.event.code, kind);
+		assert.equal(oversizedCapture.context.level, 'warning');
+		assert.equal(oversizedCapture.context.tags['rxdb-fs.collection'], 'coverageRecords');
+		assert.equal(oversizedCapture.context.extra.bytes, 3221225472);
+	}
 	delete seams.__wcposOnStorageRunFailure;
 	delete seams.__wcposOnIndexRebuild;
 	delete seams.__wcposOnStorageRecovery;

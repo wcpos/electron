@@ -40,6 +40,8 @@ const capturedEvents = new Set<string>();
  */
 export const KIND_LEVELS: Readonly<Record<string, 'warning' | 'error'>> = {
 	'index-rebuilt': 'warning',
+	'changelog-oversized-rebuilt': 'warning',
+	'changelog-oversized-compacted': 'warning',
 	'changes-file-salvage': 'warning',
 	'hollow-row-dropped': 'warning',
 	'log-row-discarded': 'warning',
