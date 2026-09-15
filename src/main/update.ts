@@ -1,4 +1,4 @@
-import { createWriteStream, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { createWriteStream, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
@@ -37,6 +37,11 @@ const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 // captive portal) must fail on its own rather than hold every later check. The manifest is
 // a few KB; 30 s is generous for it and well inside the hourly cadence.
 const UPDATE_CHECK_TIMEOUT = 30 * 1000;
+// How long a download directory must be untouched before the boot sweep removes it. A live
+// download refreshes its installer's mtime as every chunk lands, so this only has to outlast
+// the gap between chunks, not the whole transfer; a download that has written nothing for
+// this long is not going to finish.
+const ACTIVE_DOWNLOAD_GRACE_MS = 15 * 60 * 1000;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
@@ -66,19 +71,46 @@ export class AutoUpdater implements UpdaterHandle {
 	}
 
 	// Each accepted update downloads into its own directory (see downloadAndInstallUpdates),
-	// and an installed update restarts the app before anything could tidy up. Boot is the one
-	// moment no download is active, so leftovers from earlier sessions go here. A Linux user
-	// who was shown an installer and never ran it loses it, and the next check offers it again.
+	// and an installed update restarts the app before anything could tidy up, so leftovers
+	// from earlier runs are cleared here.
+	//
+	// Boot is NOT a moment when nothing is downloading: the app takes no single-instance
+	// lock, so on Windows a second process can start while the first is mid-download. An
+	// unconditional sweep deleted that download out from under it. A directory still being
+	// written belongs to a live download, in this process or another one, so it is spared.
 	private sweepStaleDownloads(): void {
+		let entries: string[];
 		try {
-			for (const entry of readdirSync(this.tempDirPath)) {
-				if (entry.startsWith('update-')) {
-					rmSync(path.join(this.tempDirPath, entry), { recursive: true, force: true });
-				}
-			}
+			entries = readdirSync(this.tempDirPath);
 		} catch (error) {
-			logger.warn('Could not sweep stale update downloads', error);
+			logger.warn('Could not list update downloads', error);
+			return;
 		}
+
+		for (const entry of entries) {
+			if (!entry.startsWith('update-')) continue;
+			const dir = path.join(this.tempDirPath, entry);
+			try {
+				if (this.writtenWithin(dir, ACTIVE_DOWNLOAD_GRACE_MS)) {
+					logger.info('Leaving an update download that is still being written', dir);
+					continue;
+				}
+				rmSync(dir, { recursive: true, force: true });
+			} catch (error) {
+				logger.warn('Could not sweep an update download', error);
+			}
+		}
+	}
+
+	// The newest write anywhere in the directory. A download in progress rewrites its
+	// installer continuously as chunks arrive, so a live one always lands inside the window.
+	private writtenWithin(dir: string, windowMs: number): boolean {
+		const cutoff = Date.now() - windowMs;
+		let newest = statSync(dir).mtimeMs;
+		for (const name of readdirSync(dir)) {
+			newest = Math.max(newest, statSync(path.join(dir, name)).mtimeMs);
+		}
+		return newest > cutoff;
 	}
 
 	public setMainWindow(mainWindow: BrowserWindow): void {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync } from 'node:fs';
 import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -353,8 +353,21 @@ const downloadedInstallers = () =>
 		await waitFor(() => loggedErrors.some((m) => m.includes('applying')));
 		assert.equal(updateDirs().length, dirsBeforeFailure, 'a failed download removed its directory');
 
-		// Boot sweeps whatever earlier sessions left behind.
+		// A second process can boot while this one is downloading, so the sweep must spare a
+		// directory that is still being written. These were just written by the cases above.
 		assert.ok(updateDirs().length > 0, 'precondition: earlier updates left directories');
+		const liveDirs = updateDirs().length;
+		new AutoUpdater({ isDestroyed: () => false } as never);
+		assert.equal(updateDirs().length, liveDirs, 'a live download survives another boot sweep');
+
+		// Age them past the grace window and they are leftovers, so the next boot clears them.
+		const stale = new Date(Date.now() - 60 * 60 * 1000);
+		for (const dir of updateDirs()) {
+			for (const name of readdirSync(dir)) {
+				utimesSync(path.join(dir, name), stale, stale);
+			}
+			utimesSync(dir, stale, stale);
+		}
 		new AutoUpdater({ isDestroyed: () => false } as never);
 		assert.deepEqual(updateDirs(), [], 'a new updater sweeps stale update directories');
 
