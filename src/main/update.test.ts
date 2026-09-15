@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -354,22 +355,25 @@ const downloadedInstallers = () =>
 		assert.equal(updateDirs().length, dirsBeforeFailure, 'a failed download removed its directory');
 
 		// A second process can boot while this one is downloading, so the sweep must spare a
-		// directory that is still being written. These were just written by the cases above.
+		// directory owned by a running process. These belong to this very process.
 		assert.ok(updateDirs().length > 0, 'precondition: earlier updates left directories');
 		const liveDirs = updateDirs().length;
 		new AutoUpdater({ isDestroyed: () => false } as never);
 		assert.equal(updateDirs().length, liveDirs, 'a live download survives another boot sweep');
 
-		// Age them past the grace window and they are leftovers, so the next boot clears them.
-		const stale = new Date(Date.now() - 60 * 60 * 1000);
-		for (const dir of updateDirs()) {
-			for (const name of readdirSync(dir)) {
-				utimesSync(path.join(dir, name), stale, stale);
-			}
-			utimesSync(dir, stale, stale);
-		}
+		// A directory whose owning process has exited is a leftover. spawnSync returns the pid
+		// of a process that has already finished, so this pid is reliably dead.
+		const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+		const orphan = path.join(tempRoot, 'NTWRK', `update-${deadPid}-orphan`);
+		mkdirSync(orphan, { recursive: true });
+		// Named by the pre-pid scheme, so it cannot be attributed to any owner.
+		const unowned = path.join(tempRoot, 'NTWRK', 'update-legacy');
+		mkdirSync(unowned, { recursive: true });
+
 		new AutoUpdater({ isDestroyed: () => false } as never);
-		assert.deepEqual(updateDirs(), [], 'a new updater sweeps stale update directories');
+		assert.equal(existsSync(orphan), false, 'a dead owner’s directory is swept');
+		assert.equal(existsSync(unowned), false, 'an unattributable directory is swept');
+		assert.equal(updateDirs().length, liveDirs, 'and the live ones are still spared');
 
 		// A failed asset must wait for its open RELEASES sibling; cleanup errors are swallowed.
 		const unhandled: unknown[] = [];

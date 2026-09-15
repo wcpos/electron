@@ -37,11 +37,15 @@ const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 // captive portal) must fail on its own rather than hold every later check. The manifest is
 // a few KB; 30 s is generous for it and well inside the hourly cadence.
 const UPDATE_CHECK_TIMEOUT = 30 * 1000;
-// How long a download directory must be untouched before the boot sweep removes it. A live
-// download refreshes its installer's mtime as every chunk lands, so this only has to outlast
-// the gap between chunks, not the whole transfer; a download that has written nothing for
-// this long is not going to finish.
-const ACTIVE_DOWNLOAD_GRACE_MS = 15 * 60 * 1000;
+// Each download directory is named for the process that owns it, so another process can tell
+// a live download from a leftover without trusting a timestamp. mtime is not usable here: on
+// Windows, the platform this matters on, a file's last-write time is not finalised while a
+// write handle stays open, so a download running for hours can still report an early mtime.
+const DOWNLOAD_DIR_PREFIX = 'update-';
+// Backstop for the one case ownership cannot settle: the owning process is gone but its id has
+// since been reused, so the directory looks live forever. A week is far longer than any
+// download and still bounds the disk use.
+const ORPHAN_DIR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
@@ -76,8 +80,8 @@ export class AutoUpdater implements UpdaterHandle {
 	//
 	// Boot is NOT a moment when nothing is downloading: the app takes no single-instance
 	// lock, so on Windows a second process can start while the first is mid-download. An
-	// unconditional sweep deleted that download out from under it. A directory still being
-	// written belongs to a live download, in this process or another one, so it is spared.
+	// unconditional sweep deleted that download out from under it. A directory owned by a
+	// process that is still running is left alone.
 	private sweepStaleDownloads(): void {
 		let entries: string[];
 		try {
@@ -88,11 +92,11 @@ export class AutoUpdater implements UpdaterHandle {
 		}
 
 		for (const entry of entries) {
-			if (!entry.startsWith('update-')) continue;
+			if (!entry.startsWith(DOWNLOAD_DIR_PREFIX)) continue;
 			const dir = path.join(this.tempDirPath, entry);
 			try {
-				if (this.writtenWithin(dir, ACTIVE_DOWNLOAD_GRACE_MS)) {
-					logger.info('Leaving an update download that is still being written', dir);
+				if (this.isOwnedByLiveProcess(entry) && !this.olderThan(dir, ORPHAN_DIR_MAX_AGE_MS)) {
+					logger.info('Leaving an update download owned by a running process', dir);
 					continue;
 				}
 				rmSync(dir, { recursive: true, force: true });
@@ -102,15 +106,26 @@ export class AutoUpdater implements UpdaterHandle {
 		}
 	}
 
-	// The newest write anywhere in the directory. A download in progress rewrites its
-	// installer continuously as chunks arrive, so a live one always lands inside the window.
-	private writtenWithin(dir: string, windowMs: number): boolean {
-		const cutoff = Date.now() - windowMs;
-		let newest = statSync(dir).mtimeMs;
-		for (const name of readdirSync(dir)) {
-			newest = Math.max(newest, statSync(path.join(dir, name)).mtimeMs);
+	// Directory names are `update-<pid>-<random>`. Signal 0 tests for the process without
+	// touching it, on Windows too. An unparseable name predates this scheme, so it is a
+	// leftover by definition and not owned.
+	private isOwnedByLiveProcess(entry: string): boolean {
+		const pid = Number(entry.slice(DOWNLOAD_DIR_PREFIX.length).split('-')[0]);
+		if (!Number.isInteger(pid) || pid <= 0) return false;
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
 		}
-		return newest > cutoff;
+	}
+
+	private olderThan(dir: string, ageMs: number): boolean {
+		try {
+			return statSync(dir).mtimeMs < Date.now() - ageMs;
+		} catch {
+			return false;
+		}
 	}
 
 	public setMainWindow(mainWindow: BrowserWindow): void {
@@ -241,7 +256,8 @@ export class AutoUpdater implements UpdaterHandle {
 		// Every accepted update downloads into its own directory. Two acceptances in one
 		// session (the hourly check prompts again while a download is running) used to write
 		// the same file names into the shared temp dir and truncate each other mid-stream.
-		const dir = mkdtempSync(path.join(this.tempDirPath, 'update-'));
+		// The pid in the name is how another process's boot sweep knows this download is live.
+		const dir = mkdtempSync(path.join(this.tempDirPath, `${DOWNLOAD_DIR_PREFIX}${process.pid}-`));
 		let targetPath = '';
 		try {
 			// Recorded as each download finishes, not after all of them: on Windows the
