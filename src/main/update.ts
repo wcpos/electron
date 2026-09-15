@@ -1,4 +1,4 @@
-import { createWriteStream, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { createWriteStream, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
@@ -37,6 +37,15 @@ const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 // captive portal) must fail on its own rather than hold every later check. The manifest is
 // a few KB; 30 s is generous for it and well inside the hourly cadence.
 const UPDATE_CHECK_TIMEOUT = 30 * 1000;
+// Each download directory is named for the process that owns it, so another process can tell
+// a live download from a leftover without trusting a timestamp. mtime is not usable here: on
+// Windows, the platform this matters on, a file's last-write time is not finalised while a
+// write handle stays open, so a download running for hours can still report an early mtime.
+const DOWNLOAD_DIR_PREFIX = 'update-';
+// Backstop for the one case ownership cannot settle: the owning process is gone but its id has
+// since been reused, so the directory looks live forever. A week is far longer than any
+// download and still bounds the disk use.
+const ORPHAN_DIR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
@@ -55,6 +64,8 @@ export class AutoUpdater implements UpdaterHandle {
 	// used to queue one dialog per hour behind the first, each revealed as the previous one
 	// was dismissed. While this is set, further checks join it instead of starting another.
 	private inFlight: Promise<boolean | undefined> | null = null;
+	// An install hand-off is pending on the singleton electron autoUpdater. See installUpdates.
+	private installing = false;
 
 	constructor(mainWindow: BrowserWindow) {
 		this.mainWindow = mainWindow;
@@ -66,18 +77,56 @@ export class AutoUpdater implements UpdaterHandle {
 	}
 
 	// Each accepted update downloads into its own directory (see downloadAndInstallUpdates),
-	// and an installed update restarts the app before anything could tidy up. Boot is the one
-	// moment no download is active, so leftovers from earlier sessions go here. A Linux user
-	// who was shown an installer and never ran it loses it, and the next check offers it again.
+	// and an installed update restarts the app before anything could tidy up, so leftovers
+	// from earlier runs are cleared here.
+	//
+	// Boot is NOT a moment when nothing is downloading: the app takes no single-instance
+	// lock, so on Windows a second process can start while the first is mid-download. An
+	// unconditional sweep deleted that download out from under it. A directory owned by a
+	// process that is still running is left alone.
 	private sweepStaleDownloads(): void {
+		let entries: string[];
 		try {
-			for (const entry of readdirSync(this.tempDirPath)) {
-				if (entry.startsWith('update-')) {
-					rmSync(path.join(this.tempDirPath, entry), { recursive: true, force: true });
-				}
-			}
+			entries = readdirSync(this.tempDirPath);
 		} catch (error) {
-			logger.warn('Could not sweep stale update downloads', error);
+			logger.warn('Could not list update downloads', error);
+			return;
+		}
+
+		for (const entry of entries) {
+			if (!entry.startsWith(DOWNLOAD_DIR_PREFIX)) continue;
+			const dir = path.join(this.tempDirPath, entry);
+			try {
+				if (this.isOwnedByLiveProcess(entry) && !this.olderThan(dir, ORPHAN_DIR_MAX_AGE_MS)) {
+					logger.info('Leaving an update download owned by a running process', dir);
+					continue;
+				}
+				rmSync(dir, { recursive: true, force: true });
+			} catch (error) {
+				logger.warn('Could not sweep an update download', error);
+			}
+		}
+	}
+
+	// Directory names are `update-<pid>-<random>`. Signal 0 tests for the process without
+	// touching it, on Windows too. An unparseable name predates this scheme, so it is a
+	// leftover by definition and not owned.
+	private isOwnedByLiveProcess(entry: string): boolean {
+		const pid = Number(entry.slice(DOWNLOAD_DIR_PREFIX.length).split('-')[0]);
+		if (!Number.isInteger(pid) || pid <= 0) return false;
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	private olderThan(dir: string, ageMs: number): boolean {
+		try {
+			return statSync(dir).mtimeMs < Date.now() - ageMs;
+		} catch {
+			return false;
 		}
 	}
 
@@ -187,9 +236,28 @@ export class AutoUpdater implements UpdaterHandle {
 			return;
 		}
 
+		// electron's autoUpdater is a module singleton with one feed URL. Two accepted updates
+		// can now be downloading at once, and a second hand-off would overwrite the first's
+		// feed and add a second set of listeners, so one 'update-downloaded' would raise two
+		// restart dialogs and call quitAndInstall twice. The first hand-off restarts the app,
+		// so a second has nothing useful to do.
+		if (this.installing) {
+			logger.info('An update install is already pending; leaving this download on disk');
+			return;
+		}
+		this.installing = true;
+
 		return new Promise((_resolve, reject) => {
-			autoUpdater.on('error', (error: Error) => reject(error));
-			autoUpdater.on('update-downloaded', () => {
+			const onError = (error: Error) => {
+				release();
+				reject(error);
+			};
+			const onDownloaded = () => {
+				// The listeners have done their job, but the guard deliberately stays set: the
+				// app is committed to restarting, and the restart dialog below can sit open for
+				// a long time. Releasing here would let a later accepted update hand off and
+				// raise a second dialog before this one calls quitAndInstall.
+				removeListeners();
 				dialog
 					.showMessageBox({
 						title: t('update.install_updates'),
@@ -198,7 +266,27 @@ export class AutoUpdater implements UpdaterHandle {
 					.then(() => {
 						setImmediate(() => autoUpdater.quitAndInstall());
 					});
-			});
+			};
+			// Squirrel can also answer that there is nothing to install. Releasing on that too
+			// keeps a session from wedging: without it the guard would stay set for good and
+			// every later update would be skipped.
+			const onUnavailable = () => release();
+			// Listeners were previously added per call and never removed, so they also
+			// accumulated across retries within one session.
+			const removeListeners = () => {
+				autoUpdater.removeListener('error', onError);
+				autoUpdater.removeListener('update-downloaded', onDownloaded);
+				autoUpdater.removeListener('update-not-available', onUnavailable);
+			};
+			// Only for outcomes that leave nothing pending, so a later update may hand off.
+			const release = () => {
+				this.installing = false;
+				removeListeners();
+			};
+
+			autoUpdater.on('error', onError);
+			autoUpdater.on('update-downloaded', onDownloaded);
+			autoUpdater.on('update-not-available', onUnavailable);
 
 			autoUpdater.setFeedURL({ url: feedURL });
 			autoUpdater.checkForUpdates();
@@ -209,7 +297,8 @@ export class AutoUpdater implements UpdaterHandle {
 		// Every accepted update downloads into its own directory. Two acceptances in one
 		// session (the hourly check prompts again while a download is running) used to write
 		// the same file names into the shared temp dir and truncate each other mid-stream.
-		const dir = mkdtempSync(path.join(this.tempDirPath, 'update-'));
+		// The pid in the name is how another process's boot sweep knows this download is live.
+		const dir = mkdtempSync(path.join(this.tempDirPath, `${DOWNLOAD_DIR_PREFIX}${process.pid}-`));
 		let targetPath = '';
 		try {
 			// Recorded as each download finishes, not after all of them: on Windows the
