@@ -32,6 +32,11 @@ interface UpdateStoreSchema extends Record<string, unknown> {
 }
 
 const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+// Deadline for fetching and reading the release manifest. Checks that arrive while one is in
+// flight join it rather than starting another, so a manifest request that stalls (proxy,
+// captive portal) must fail on its own rather than hold every later check. The manifest is
+// a few KB; 30 s is generous for it and well inside the hourly cadence.
+const UPDATE_CHECK_TIMEOUT = 30 * 1000;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
@@ -233,7 +238,10 @@ export class AutoUpdater implements UpdaterHandle {
 		this.targetPath = '';
 
 		try {
-			const response = await net.fetch(this.updateUrl);
+			// The signal covers the body read as well, so a stall inside response.json() also
+			// aborts. The user dialog that follows is deliberately not on a deadline.
+			const signal = AbortSignal.timeout(UPDATE_CHECK_TIMEOUT);
+			const response = await net.fetch(this.updateUrl, { signal });
 			if (!response.ok) {
 				throw new Error(`Update check failed: HTTP ${response.status}`);
 			}

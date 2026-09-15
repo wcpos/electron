@@ -23,16 +23,26 @@ type Deferred = { resolve: (value: { response: number }) => void };
 const openDialogs: Deferred[] = [];
 const noUpdateDialogs: unknown[] = [];
 
-const foundUpdatePayload = async () => ({
-	ok: true,
-	json: async () => ({
-		version: '9.9.9',
-		name: 'Next',
-		releaseDate: '2026-09-15',
-		notes: '',
-		assets: [] as unknown[],
-	}),
-});
+// The release manifest names one asset whose download never completes, so a "Yes" answer
+// leaves a download stalled in the background.
+const STALLED_ASSET_URL = 'https://updates.test/app.zip';
+const foundUpdatePayload = async (url: string) => {
+	if (url === STALLED_ASSET_URL) {
+		return new Promise<never>(() => {});
+	}
+	return {
+		ok: true,
+		json: async () => ({
+			version: '9.9.9',
+			name: 'Next',
+			releaseDate: '2026-09-15',
+			notes: '',
+			assets: [
+				{ name: 'app.zip', url: STALLED_ASSET_URL, contentType: 'application/zip', size: 1 },
+			],
+		}),
+	};
+};
 
 const electronStub = {
 	app: {
@@ -135,6 +145,22 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 		assert.equal(openDialogs.length, 3, 'a check after a failed one can prompt again');
 		openDialogs[2].resolve({ response: 2 });
 		await afterFailure;
+
+		// "Yes" hands off to the download, which must not hold the guard: a stalled download
+		// would otherwise silence every later check for the rest of the session.
+		const yes = updater.checkForUpdates();
+		await flush();
+		openDialogs[3].resolve({ response: 0 });
+		assert.equal(
+			await yes,
+			true,
+			'the check settles once the user answers, not when the download ends'
+		);
+		const duringDownload = updater.checkForUpdates();
+		await flush();
+		assert.equal(openDialogs.length, 5, 'a check during a stalled download can prompt again');
+		openDialogs[4].resolve({ response: 2 });
+		await duringDownload;
 
 		console.log('update.test.ts passed');
 	} catch (error) {
