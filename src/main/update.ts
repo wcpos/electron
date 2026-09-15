@@ -117,8 +117,12 @@ export class AutoUpdater implements UpdaterHandle {
 		try {
 			process.kill(pid, 0);
 			return true;
-		} catch {
-			return false;
+		} catch (error) {
+			// Only ESRCH proves the process is gone. EPERM means it exists but is not ours to
+			// signal, and an unrecognised failure proves nothing either, so both count as
+			// owned: deleting a live download is the costly mistake, and the age backstop
+			// still bounds anything genuinely abandoned.
+			return (error as NodeJS.ErrnoException)?.code !== 'ESRCH';
 		}
 	}
 
@@ -265,6 +269,14 @@ export class AutoUpdater implements UpdaterHandle {
 					})
 					.then(() => {
 						setImmediate(() => autoUpdater.quitAndInstall());
+					})
+					.catch((dialogError) => {
+						// The restart never happens, so the commitment that justified holding the
+						// guard is gone. Without releasing it here the guard would stay set for the
+						// rest of the session and no later update could install.
+						logger.error('Could not prompt to restart for the update', dialogError);
+						release();
+						reject(dialogError);
 					});
 			};
 			// Squirrel can also answer that there is nothing to install. Releasing on that too

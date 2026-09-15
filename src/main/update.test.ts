@@ -28,6 +28,7 @@ const openDialogs: Deferred[] = [];
 const noUpdateDialogs: unknown[] = [];
 const loggedErrors: string[] = [];
 const loggedWarnings: string[] = [];
+let failRestartDialog = false;
 const writers: import('node:fs').WriteStream[] = [];
 let failCleanup = false;
 let failMkdtemp = false;
@@ -107,7 +108,9 @@ const electronStub = {
 			const options = (args.length === 2 ? args[1] : args[0]) as { type?: string };
 			if (options.type !== 'question') {
 				noUpdateDialogs.push(options);
-				return Promise.resolve({ response: 0 });
+				return failRestartDialog
+					? Promise.reject(new Error('no display'))
+					: Promise.resolve({ response: 0 });
 			}
 			return new Promise<{ response: number }>((resolve) => {
 				openDialogs.push({ resolve });
@@ -448,6 +451,26 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		mkdirSync(unowned, { recursive: true });
 
 		new AutoUpdater({ isDestroyed: () => false } as never);
+		// A pid we cannot signal is not a dead pid. process.kill throws EPERM when the process
+		// exists but belongs to another user, and treating that as dead would delete a live
+		// download.
+		const guarded = path.join(tempRoot, 'NTWRK', `update-${deadPid + 1}-guarded`);
+		mkdirSync(guarded, { recursive: true });
+		const realKill = process.kill.bind(process);
+		process.kill = ((pid: number, signal?: string | number) => {
+			if (pid === deadPid + 1) {
+				const denied: NodeJS.ErrnoException = new Error('EPERM');
+				denied.code = 'EPERM';
+				throw denied;
+			}
+			return realKill(pid, signal as never);
+		}) as typeof process.kill;
+
+		new AutoUpdater({ isDestroyed: () => false } as never);
+		process.kill = realKill;
+		assert.equal(existsSync(guarded), true, 'a pid we cannot signal counts as a live owner');
+		rmSync(guarded, { recursive: true, force: true });
+
 		assert.equal(existsSync(orphan), false, 'a dead owner’s directory is swept');
 		assert.equal(existsSync(unowned), false, 'an unattributable directory is swept');
 		assert.equal(updateDirs().length, liveDirs, 'and the live ones are still spared');
@@ -537,6 +560,58 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		failMkdtemp = false;
 
 		process.off('unhandledRejection', onUnhandled);
+		// If the restart prompt cannot be shown, the restart never happens, so the commitment
+		// that justified holding the guard is gone. Without releasing it the session could
+		// never install another update. A fresh updater starts with an unheld guard.
+		assetUrl = STREAMING_ASSET_URL;
+		const restartFailUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		failRestartDialog = true;
+		const beforeRestartFail = feeds();
+		const accepted = restartFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await accepted;
+		const queuedAt = pendingDownloads.length - 1;
+		let restartBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[queuedAt](
+			streamingResponse((controller) => {
+				restartBody = controller;
+			})
+		);
+		await flush();
+		restartBody?.close();
+		await waitFor(() => feeds() > beforeRestartFail);
+		assert.equal(feeds(), beforeRestartFail + 1, 'the accepted update handed off');
+
+		electronStub.autoUpdater.handlers.get('update-downloaded')?.();
+		await waitFor(() => loggedErrors.some((m) => m.includes('prompt to restart')));
+		assert.ok(
+			loggedErrors.some((m) => m.includes('prompt to restart')),
+			'the failed restart prompt is reported'
+		);
+
+		// The guard is released, so the next accepted update can still hand off.
+		failRestartDialog = false;
+		const afterFailure2 = restartFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await afterFailure2;
+		const nextQueued = pendingDownloads.length - 1;
+		let nextBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[nextQueued](
+			streamingResponse((controller) => {
+				nextBody = controller;
+			})
+		);
+		await flush();
+		nextBody?.close();
+		await waitFor(() => feeds() > beforeRestartFail + 1);
+		assert.equal(
+			feeds(),
+			beforeRestartFail + 2,
+			'a failed restart prompt does not wedge the session'
+		);
+
 		console.log('update.test.ts passed');
 	} catch (error) {
 		console.error(error);
