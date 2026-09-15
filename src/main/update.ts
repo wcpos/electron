@@ -300,8 +300,16 @@ export class AutoUpdater implements UpdaterHandle {
 			autoUpdater.on('update-downloaded', onDownloaded);
 			autoUpdater.on('update-not-available', onUnavailable);
 
-			autoUpdater.setFeedURL({ url: feedURL });
-			autoUpdater.checkForUpdates();
+			// A synchronous throw here becomes a rejection of this promise, which the caller
+			// catches and logs. Without releasing first, the guard would stay set and the
+			// three listeners would stay registered, so no later update could hand off.
+			try {
+				autoUpdater.setFeedURL({ url: feedURL });
+				autoUpdater.checkForUpdates();
+			} catch (startupError) {
+				release();
+				reject(startupError);
+			}
 		});
 	}
 

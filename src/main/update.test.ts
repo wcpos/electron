@@ -29,6 +29,7 @@ const noUpdateDialogs: unknown[] = [];
 const loggedErrors: string[] = [];
 const loggedWarnings: string[] = [];
 let failRestartDialog = false;
+let failFeedUrl = false;
 const writers: import('node:fs').WriteStream[] = [];
 let failCleanup = false;
 let failMkdtemp = false;
@@ -95,6 +96,7 @@ const electronStub = {
 			electronStub.autoUpdater.handlers.delete(event);
 		},
 		setFeedURL() {
+			if (failFeedUrl) throw new Error('no feed');
 			installStarted.push('feed');
 		},
 		checkForUpdates() {},
@@ -627,6 +629,57 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 			beforeRestartFail + 2,
 			'a failed restart prompt does not wedge the session'
 		);
+
+		// The same applies when the updater itself throws as the hand-off starts: the promise
+		// rejects, the caller logs it, and without releasing first the guard and the listeners
+		// would be left behind so no later update could hand off.
+		const feedFailUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		failFeedUrl = true;
+		const beforeFeedFail = feeds();
+		// An earlier hand-off in this file is still pending, so its listeners are registered.
+		// What matters is that the throwing hand-off adds and removes its own.
+		const listenersBefore = electronStub.autoUpdater.listeners.length;
+		const applying = () => loggedErrors.filter((m) => m.includes('applying')).length;
+		const applyingBefore = applying();
+		const feedAccepted = feedFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await feedAccepted;
+		const feedQueued = pendingDownloads.length - 1;
+		let feedBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[feedQueued](
+			streamingResponse((controller) => {
+				feedBody = controller;
+			})
+		);
+		await flush();
+		feedBody?.close();
+		// Earlier cases already logged "applying" errors, so wait for a NEW one. Waiting on the
+		// bare predicate would return instantly and assert nothing.
+		await waitFor(() => applying() > applyingBefore);
+		assert.equal(applying(), applyingBefore + 1, 'the failed hand-off is reported');
+		assert.equal(
+			electronStub.autoUpdater.listeners.length,
+			listenersBefore,
+			'a throwing hand-off leaves no listeners behind'
+		);
+
+		failFeedUrl = false;
+		const afterFeedFail = feedFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await afterFeedFail;
+		const nextFeedQueued = pendingDownloads.length - 1;
+		let nextFeedBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[nextFeedQueued](
+			streamingResponse((controller) => {
+				nextFeedBody = controller;
+			})
+		);
+		await flush();
+		nextFeedBody?.close();
+		await waitFor(() => feeds() > beforeFeedFail);
+		assert.equal(feeds(), beforeFeedFail + 1, 'a throwing hand-off does not wedge the session');
 
 		console.log('update.test.ts passed');
 	} catch (error) {
