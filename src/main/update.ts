@@ -32,6 +32,11 @@ interface UpdateStoreSchema extends Record<string, unknown> {
 }
 
 const REMIND_LATER_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+// Deadline for fetching and reading the release manifest. Checks that arrive while one is in
+// flight join it rather than starting another, so a manifest request that stalls (proxy,
+// captive portal) must fail on its own rather than hold every later check. The manifest is
+// a few KB; 30 s is generous for it and well inside the hourly cadence.
+const UPDATE_CHECK_TIMEOUT = 30 * 1000;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
@@ -46,6 +51,11 @@ export class AutoUpdater implements UpdaterHandle {
 	private targetPath: string;
 	private tempDirPath: string;
 	private readonly updateUrl = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
+	// The check in progress, if any. A check blocks on the "Found Updates" dialog until the
+	// user answers it, and the hourly timer keeps firing meanwhile: an app left open overnight
+	// used to queue one dialog per hour behind the first, each revealed as the previous one
+	// was dismissed. While this is set, further checks join it instead of starting another.
+	private inFlight: Promise<boolean | undefined> | null = null;
 
 	constructor(mainWindow: BrowserWindow) {
 		this.targetPath = '';
@@ -204,7 +214,19 @@ export class AutoUpdater implements UpdaterHandle {
 		return response;
 	}
 
-	public async checkForUpdates(manual = false) {
+	public checkForUpdates(manual = false): Promise<boolean | undefined> {
+		if (this.inFlight) {
+			logger.info('Update check skipped: a previous check is still waiting on the user.');
+			return this.inFlight;
+		}
+
+		this.inFlight = this.runCheck(manual).finally(() => {
+			this.inFlight = null;
+		});
+		return this.inFlight;
+	}
+
+	private async runCheck(manual: boolean): Promise<boolean | undefined> {
 		const remindLaterTimestamp = store.get('remindLaterTimestamp', 0);
 		const now = Date.now();
 
@@ -216,7 +238,10 @@ export class AutoUpdater implements UpdaterHandle {
 		this.targetPath = '';
 
 		try {
-			const response = await net.fetch(this.updateUrl);
+			// The signal covers the body read as well, so a stall inside response.json() also
+			// aborts. The user dialog that follows is deliberately not on a deadline.
+			const signal = AbortSignal.timeout(UPDATE_CHECK_TIMEOUT);
+			const response = await net.fetch(this.updateUrl, { signal });
 			if (!response.ok) {
 				throw new Error(`Update check failed: HTTP ${response.status}`);
 			}
