@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import Module from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 
 type ModuleWithMutableLoad = typeof Module & {
 	_load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
@@ -22,13 +25,26 @@ class FakeStore {
 type Deferred = { resolve: (value: { response: number }) => void };
 const openDialogs: Deferred[] = [];
 const noUpdateDialogs: unknown[] = [];
+const loggedErrors: string[] = [];
+// One entry per hand-off to the installer: setFeedURL on macOS/Windows, a folder reveal on
+// Linux. The error path also reveals, but it logs "Error applying the updates" first.
+const installStarted: string[] = [];
 
-// The release manifest names one asset whose download never completes, so a "Yes" answer
-// leaves a download stalled in the background.
+// The release manifest names one asset. By default its download never completes, so a "Yes"
+// answer leaves a download stalled in the background; the streaming asset instead hands the
+// test a fetch it resolves by hand with a body it closes by hand.
 const STALLED_ASSET_URL = 'https://updates.test/app.zip';
-const foundUpdatePayload = async (url: string) => {
+const STREAMING_ASSET_URL = 'https://updates.test/app-streaming.zip';
+let assetUrl = STALLED_ASSET_URL;
+const pendingDownloads: ((response: unknown) => void)[] = [];
+const foundUpdatePayload = async (url: string): Promise<unknown> => {
 	if (url === STALLED_ASSET_URL) {
 		return new Promise<never>(() => {});
+	}
+	if (url === STREAMING_ASSET_URL) {
+		return new Promise<unknown>((resolve) => {
+			pendingDownloads.push(resolve);
+		});
 	}
 	return {
 		ok: true,
@@ -37,19 +53,26 @@ const foundUpdatePayload = async (url: string) => {
 			name: 'Next',
 			releaseDate: '2026-09-15',
 			notes: '',
-			assets: [
-				{ name: 'app.zip', url: STALLED_ASSET_URL, contentType: 'application/zip', size: 1 },
-			],
+			assets: [{ name: 'app.zip', url: assetUrl, contentType: 'application/zip', size: 1 }],
 		}),
 	};
 };
 
+// A real temp dir: the streaming case writes the installer to disk through the real pipeline.
+const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'wcpos-update-test-'));
+
 const electronStub = {
 	app: {
 		getVersion: () => '1.0.0',
-		getPath: () => '/tmp',
+		getPath: () => tempRoot,
 	},
-	autoUpdater: { on() {}, setFeedURL() {}, checkForUpdates() {} },
+	autoUpdater: {
+		on() {},
+		setFeedURL() {
+			installStarted.push('feed');
+		},
+		checkForUpdates() {},
+	},
 	BrowserWindow: class FakeBrowserWindow {},
 	dialog: {
 		showMessageBox(...args: unknown[]) {
@@ -64,7 +87,11 @@ const electronStub = {
 		},
 	},
 	net: { fetch: foundUpdatePayload },
-	shell: { showItemInFolder() {} },
+	shell: {
+		showItemInFolder() {
+			installStarted.push('reveal');
+		},
+	},
 };
 
 const mutableModule = Module as ModuleWithMutableLoad;
@@ -77,15 +104,37 @@ mutableModule._load = function patchedLoad(
 	if (request === 'electron') return electronStub;
 	if (request === 'electron-store') return FakeStore;
 	if (request === './log') {
-		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
+		return {
+			logger: {
+				error(...args: unknown[]) {
+					loggedErrors.push(String(args[0]));
+				},
+				info() {},
+				warn() {},
+				debug() {},
+			},
+		};
 	}
 	if (request === './progress-bar') return { ProgressBar: class {} };
 	if (request === './translations') return { t: (key: string) => key };
-	if (request === './util') return { createDir() {}, isDevelopment: false };
+	if (request === './util') {
+		return {
+			createDir(dir: string) {
+				mkdirSync(dir, { recursive: true });
+			},
+			isDevelopment: false,
+		};
+	}
 	return originalLoad.call(this, request, parent, isMain);
 };
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+// The streaming case runs a real file pipeline, so give it wall-clock time (up to 2 s).
+const waitFor = async (ready: () => boolean) => {
+	for (let i = 0; i < 200 && !ready(); i++) {
+		await new Promise<void>((resolve) => setTimeout(resolve, 10));
+	}
+};
 
 (async () => {
 	try {
@@ -162,11 +211,50 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 		openDialogs[4].resolve({ response: 2 });
 		await duringDownload;
 
+		// A check that starts while the installer is still streaming must not disturb that
+		// download. The path used to live on the instance and every check reset it, so the
+		// install then failed with "No update file downloaded".
+		assetUrl = STREAMING_ASSET_URL;
+		const accept = updater.checkForUpdates();
+		await flush();
+		openDialogs[5].resolve({ response: 0 });
+		await accept;
+		await flush();
+		assert.equal(pendingDownloads.length, 1, 'the installer download started');
+		let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[0]({
+			ok: true,
+			status: 200,
+			headers: { get: (): string | null => null },
+			body: new ReadableStream<Uint8Array>({
+				start(controller) {
+					body = controller;
+					controller.enqueue(new Uint8Array([1]));
+				},
+			}),
+		});
+		await flush();
+		const midStream = updater.checkForUpdates();
+		await flush();
+		openDialogs[6].resolve({ response: 2 });
+		await midStream;
+		body?.close();
+		await waitFor(
+			() => installStarted.length > 0 || loggedErrors.some((m) => m.includes('applying'))
+		);
+		assert.deepEqual(
+			loggedErrors.filter((m) => m.includes('applying')),
+			[],
+			'the install was not disturbed by the concurrent check'
+		);
+		assert.equal(installStarted.length, 1, 'the downloaded installer reached the installer');
+
 		console.log('update.test.ts passed');
 	} catch (error) {
 		console.error(error);
 		process.exit(1);
 	} finally {
 		mutableModule._load = originalLoad;
+		rmSync(tempRoot, { recursive: true, force: true });
 	}
 })();

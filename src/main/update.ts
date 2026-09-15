@@ -48,7 +48,6 @@ export interface UpdaterHandle {
 
 export class AutoUpdater implements UpdaterHandle {
 	private mainWindow: BrowserWindow;
-	private targetPath: string;
 	private tempDirPath: string;
 	private readonly updateUrl = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
 	// The check in progress, if any. A check blocks on the "Found Updates" dialog until the
@@ -58,7 +57,6 @@ export class AutoUpdater implements UpdaterHandle {
 	private inFlight: Promise<boolean | undefined> | null = null;
 
 	constructor(mainWindow: BrowserWindow) {
-		this.targetPath = '';
 		this.mainWindow = mainWindow;
 
 		const tempDirPath = path.join(app.getPath('temp'), 'NTWRK');
@@ -105,7 +103,14 @@ export class AutoUpdater implements UpdaterHandle {
 		}, 3600 * 1000); // 1 hour interval
 	}
 
-	private async download(name: string, url: string, showProgress = true): Promise<void> {
+	// Resolves with the downloaded installer's path (undefined for the Windows RELEASES
+	// manifest). The path is returned rather than stored on the instance: a check that
+	// starts while a download is streaming must not be able to clear it.
+	private async download(
+		name: string,
+		url: string,
+		showProgress = true
+	): Promise<string | undefined> {
 		const pipeline = promisify(stream.pipeline);
 		const filePath = `${this.tempDirPath}/${name}`;
 		// Chromium's stack (net.fetch): downloads honor the system proxy and OS trust
@@ -119,10 +124,6 @@ export class AutoUpdater implements UpdaterHandle {
 		// never leaks the file descriptor.
 		const writer = createWriteStream(filePath, { flags: 'w+' });
 		const data = stream.Readable.fromWeb(response.body as import('stream/web').ReadableStream);
-
-		if (name !== 'RELEASES') {
-			this.targetPath = filePath;
-		}
 
 		let progressBar: ProgressBar | undefined;
 		const total = Number(response.headers.get('content-length')) || 0;
@@ -143,23 +144,25 @@ export class AutoUpdater implements UpdaterHandle {
 			progressBar?.close();
 			progressBar = undefined;
 		}
+
+		return name !== 'RELEASES' ? filePath : undefined;
 	}
 
-	private async installUpdates() {
+	private async installUpdates(targetPath: string) {
 		let feedURL = this.tempDirPath;
 
-		if (!this.targetPath) {
+		if (!targetPath) {
 			throw new Error('No update file downloaded');
 		}
 
 		if (process.platform === 'darwin') {
-			const json = { url: `file://${this.targetPath}` };
+			const json = { url: `file://${targetPath}` };
 			writeFileSync(this.tempDirPath + '/feed.json', JSON.stringify(json));
 			feedURL = `file://${this.tempDirPath}/feed.json`;
 		}
 
 		if (process.platform === 'linux') {
-			shell.showItemInFolder(this.targetPath);
+			shell.showItemInFolder(targetPath);
 			return;
 		}
 
@@ -182,13 +185,17 @@ export class AutoUpdater implements UpdaterHandle {
 	}
 
 	private async downloadAndInstallUpdates(assets: Asset[]) {
+		let targetPath = '';
 		try {
-			await Promise.all(assets.map((asset) => this.download(asset.name, asset.url)));
-			await this.installUpdates();
+			const paths = await Promise.all(assets.map((asset) => this.download(asset.name, asset.url)));
+			targetPath = paths.find((filePath) => Boolean(filePath)) ?? '';
+			await this.installUpdates(targetPath);
 		} catch (error) {
 			logger.error('Error applying the updates', error, error.stack);
-			if (this.targetPath) {
-				shell.showItemInFolder(this.targetPath);
+			// A finished download that failed to install is still useful: reveal it so
+			// the user can run it by hand.
+			if (targetPath) {
+				shell.showItemInFolder(targetPath);
 			}
 		}
 	}
@@ -234,8 +241,6 @@ export class AutoUpdater implements UpdaterHandle {
 			logger.info('Update check skipped due to Remind me later selection.');
 			return false;
 		}
-
-		this.targetPath = '';
 
 		try {
 			// The signal covers the body read as well, so a stall inside response.json() also
