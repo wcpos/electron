@@ -26,6 +26,10 @@ type Deferred = { resolve: (value: { response: number }) => void };
 const openDialogs: Deferred[] = [];
 const noUpdateDialogs: unknown[] = [];
 const loggedErrors: string[] = [];
+const loggedWarnings: string[] = [];
+const writers: import('node:fs').WriteStream[] = [];
+let failCleanup = false;
+let failMkdtemp = false;
 // One entry per hand-off to the installer: setFeedURL on macOS/Windows, a folder reveal on
 // Linux. The error path also reveals, but it logs "Error applying the updates" first.
 const installStarted: string[] = [];
@@ -37,6 +41,7 @@ const STALLED_ASSET_URL = 'https://updates.test/app.zip';
 const STREAMING_ASSET_URL = 'https://updates.test/app-streaming.zip';
 const FAILING_ASSET_URL = 'https://updates.test/app-failing.zip';
 let assetUrl = STALLED_ASSET_URL;
+let assetNames = ['app.zip'];
 const pendingDownloads: ((response: unknown) => void)[] = [];
 const foundUpdatePayload = async (url: string): Promise<unknown> => {
 	if (url === STALLED_ASSET_URL) {
@@ -57,7 +62,12 @@ const foundUpdatePayload = async (url: string): Promise<unknown> => {
 			name: 'Next',
 			releaseDate: '2026-09-15',
 			notes: '',
-			assets: [{ name: 'app.zip', url: assetUrl, contentType: 'application/zip', size: 1 }],
+			assets: assetNames.map((name) => ({
+				name,
+				url: assetUrl,
+				contentType: 'application/zip',
+				size: 1,
+			})),
 		}),
 	};
 };
@@ -105,6 +115,29 @@ mutableModule._load = function patchedLoad(
 	parent: NodeModule | null,
 	isMain: boolean
 ) {
+	if (request === 'fs') {
+		const fs = originalLoad.call(this, request, parent, isMain) as typeof import('node:fs');
+		return {
+			...fs,
+			createWriteStream(...args: Parameters<typeof fs.createWriteStream>) {
+				const writer = fs.createWriteStream(...args);
+				writers.push(writer);
+				return writer;
+			},
+			mkdtempSync(...args: Parameters<typeof fs.mkdtempSync>) {
+				if (failMkdtemp) throw new Error('ENOSPC');
+				return fs.mkdtempSync(...args);
+			},
+			rmSync(...args: Parameters<typeof rmSync>) {
+				assert.ok(
+					writers.every((writer) => writer.closed),
+					'cleanup waits for every writer'
+				);
+				if (failCleanup) throw new Error('EPERM');
+				return rmSync(...args);
+			},
+		};
+	}
 	if (request === 'electron') return electronStub;
 	if (request === 'electron-store') return FakeStore;
 	if (request === './log') {
@@ -114,7 +147,9 @@ mutableModule._load = function patchedLoad(
 					loggedErrors.push(String(args[0]));
 				},
 				info() {},
-				warn() {},
+				warn(message: string) {
+					loggedWarnings.push(message);
+				},
 				debug() {},
 			},
 		};
@@ -323,6 +358,61 @@ const downloadedInstallers = () =>
 		new AutoUpdater({ isDestroyed: () => false } as never);
 		assert.deepEqual(updateDirs(), [], 'a new updater sweeps stale update directories');
 
+		// A failed asset must wait for its open RELEASES sibling; cleanup errors are swallowed.
+		const unhandled: unknown[] = [];
+		const onUnhandled = (error: unknown) => unhandled.push(error);
+		process.on('unhandledRejection', onUnhandled);
+		assetNames = ['app.zip', 'RELEASES'];
+		assetUrl = STREAMING_ASSET_URL;
+		for (const cleanupFailure of [false, true]) {
+			failCleanup = cleanupFailure;
+			const errorsBefore = loggedErrors.length;
+			const downloadsBefore = pendingDownloads.length;
+			const writersBefore = writers.length;
+			const check = updater.checkForUpdates();
+			await flush();
+			openDialogs[10 + Number(cleanupFailure)].resolve({ response: 0 });
+			assert.equal(await check, true, 'check settles before downloads finish');
+			const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+			for (const resolve of pendingDownloads.slice(downloadsBefore)) {
+				resolve(streamingResponse((controller) => controllers.push(controller)));
+			}
+			await waitFor(
+				() =>
+					writers.length === writersBefore + 2 &&
+					writers.slice(writersBefore).every((w) => !w.pending)
+			);
+			controllers[0].error(new Error('download failed'));
+			await waitFor(() => writers[writersBefore].closed);
+			assert.ok(writers[writersBefore].closed, 'failed download has settled');
+			assert.equal(loggedErrors.length, errorsBefore, 'no cleanup while sibling streams');
+			assert.equal(writers[writersBefore + 1].closed, false);
+			const dir = path.dirname(String(writers[writersBefore + 1].path));
+			assert.ok(existsSync(dir), 'open sibling directory remains');
+			controllers[1].close();
+			await waitFor(() => loggedErrors.length > errorsBefore);
+			await flush();
+			assert.equal(loggedErrors[errorsBefore], 'Error applying the updates');
+			assert.equal(existsSync(dir), cleanupFailure);
+			assert.equal(loggedWarnings.length, Number(cleanupFailure));
+			assert.deepEqual(unhandled, []);
+		}
+		// The download directory is created before the try block, so a failure there rejects
+		// downloadAndInstallUpdates itself. The check hands that promise off without awaiting
+		// it, so the rejection has to be observed at the call site or it goes unhandled.
+		failMkdtemp = true;
+		const errorsBeforeMkdtemp = loggedErrors.length;
+		const mkdtempCheck = updater.checkForUpdates();
+		await flush();
+		openDialogs[12].resolve({ response: 0 });
+		assert.equal(await mkdtempCheck, true, 'the check still settles when the directory fails');
+		await waitFor(() => loggedErrors.length > errorsBeforeMkdtemp);
+		await flush();
+		assert.equal(loggedErrors[errorsBeforeMkdtemp], 'Error downloading and installing updates');
+		assert.deepEqual(unhandled, [], 'the rejected download promise was observed');
+		failMkdtemp = false;
+
+		process.off('unhandledRejection', onUnhandled);
 		console.log('update.test.ts passed');
 	} catch (error) {
 		console.error(error);

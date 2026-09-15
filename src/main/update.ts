@@ -217,7 +217,7 @@ export class AutoUpdater implements UpdaterHandle {
 			// should still be revealed below if its sibling fails. Windows also ships the
 			// Squirrel package (.nupkg) beside the setup program; the reveal must point at the
 			// program the user can run, so the package never displaces a recorded installer.
-			await Promise.all(
+			const downloads = await Promise.allSettled(
 				assets.map(async (asset) => {
 					const filePath = await this.download(dir, asset.name, asset.url);
 					if (filePath && (!targetPath || targetPath.endsWith('.nupkg'))) {
@@ -225,6 +225,9 @@ export class AutoUpdater implements UpdaterHandle {
 					}
 				})
 			);
+			for (const download of downloads) {
+				if (download.status === 'rejected') throw download.reason;
+			}
 			await this.installUpdates(dir, targetPath);
 		} catch (error) {
 			logger.error('Error applying the updates', error, error.stack);
@@ -234,7 +237,11 @@ export class AutoUpdater implements UpdaterHandle {
 			if (targetPath) {
 				shell.showItemInFolder(targetPath);
 			} else {
-				rmSync(dir, { recursive: true, force: true });
+				try {
+					rmSync(dir, { recursive: true, force: true });
+				} catch (cleanupError) {
+					logger.warn('Could not remove failed update downloads', cleanupError);
+				}
 			}
 		}
 	}
@@ -301,7 +308,9 @@ export class AutoUpdater implements UpdaterHandle {
 			const userChoice = await this.confirmUpdateDialog(version, name, releaseDate, notes);
 
 			if (userChoice === 0) {
-				this.downloadAndInstallUpdates(assets);
+				this.downloadAndInstallUpdates(assets).catch((error) => {
+					logger.error('Error downloading and installing updates', error);
+				});
 			} else if (userChoice === 1) {
 				store.set('remindLaterTimestamp', Date.now());
 			} else {
