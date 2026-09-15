@@ -28,6 +28,8 @@ const openDialogs: Deferred[] = [];
 const noUpdateDialogs: unknown[] = [];
 const loggedErrors: string[] = [];
 const loggedWarnings: string[] = [];
+let failRestartDialog = false;
+let failFeedUrl = false;
 const writers: import('node:fs').WriteStream[] = [];
 let failCleanup = false;
 let failMkdtemp = false;
@@ -94,6 +96,7 @@ const electronStub = {
 			electronStub.autoUpdater.handlers.delete(event);
 		},
 		setFeedURL() {
+			if (failFeedUrl) throw new Error('no feed');
 			installStarted.push('feed');
 		},
 		checkForUpdates() {},
@@ -107,7 +110,9 @@ const electronStub = {
 			const options = (args.length === 2 ? args[1] : args[0]) as { type?: string };
 			if (options.type !== 'question') {
 				noUpdateDialogs.push(options);
-				return Promise.resolve({ response: 0 });
+				return failRestartDialog
+					? Promise.reject(new Error('no display'))
+					: Promise.resolve({ response: 0 });
 			}
 			return new Promise<{ response: number }>((resolve) => {
 				openDialogs.push({ resolve });
@@ -404,19 +409,35 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 			'the hand-off drops its listeners once the download is reported'
 		);
 		const downloadsAtRestart = pendingDownloads.length;
+		const writersAtRestart = writers.length;
 		const afterRestartPrompt = updater.checkForUpdates();
 		await flush();
 		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
 		await afterRestartPrompt;
+		// waitFor returns silently when it times out, so each wait is followed by an assertion
+		// that the thing actually happened. Without these the final check could pass because
+		// the later download never started, rather than because the guard held.
 		await waitFor(() => pendingDownloads.length > downloadsAtRestart);
+		assert.ok(
+			pendingDownloads.length > downloadsAtRestart,
+			'the later accepted update started downloading'
+		);
 		const tail: ReadableStreamDefaultController<Uint8Array>[] = [];
 		for (const resolve of pendingDownloads.slice(downloadsAtRestart)) {
 			resolve(streamingResponse((controller) => tail.push(controller)));
 		}
 		await waitFor(() => tail.length > 0);
+		assert.ok(tail.length > 0, 'and its body was handed to the download');
 		for (const controller of tail) {
 			controller.close();
 		}
+		const writtenHere = () => writers.slice(writersAtRestart);
+		await waitFor(() => writtenHere().length > 0 && writtenHere().every((w) => w.closed));
+		assert.ok(writtenHere().length > 0, 'the later download opened a writer');
+		assert.ok(
+			writtenHere().every((writer) => writer.closed),
+			'and finished writing, so it reached the install hand-off path'
+		);
 		// Long enough for a hand-off to show up if the guard were released.
 		await waitFor(() => feeds() > feedsAtRestart, 100);
 		assert.equal(feeds(), feedsAtRestart, 'no second hand-off while the restart dialog is open');
@@ -448,6 +469,26 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		mkdirSync(unowned, { recursive: true });
 
 		new AutoUpdater({ isDestroyed: () => false } as never);
+		// A pid we cannot signal is not a dead pid. process.kill throws EPERM when the process
+		// exists but belongs to another user, and treating that as dead would delete a live
+		// download.
+		const guarded = path.join(tempRoot, 'NTWRK', `update-${deadPid + 1}-guarded`);
+		mkdirSync(guarded, { recursive: true });
+		const realKill = process.kill.bind(process);
+		process.kill = ((pid: number, signal?: string | number) => {
+			if (pid === deadPid + 1) {
+				const denied: NodeJS.ErrnoException = new Error('EPERM');
+				denied.code = 'EPERM';
+				throw denied;
+			}
+			return realKill(pid, signal as never);
+		}) as typeof process.kill;
+
+		new AutoUpdater({ isDestroyed: () => false } as never);
+		process.kill = realKill;
+		assert.equal(existsSync(guarded), true, 'a pid we cannot signal counts as a live owner');
+		rmSync(guarded, { recursive: true, force: true });
+
 		assert.equal(existsSync(orphan), false, 'a dead owner’s directory is swept');
 		assert.equal(existsSync(unowned), false, 'an unattributable directory is swept');
 		assert.equal(updateDirs().length, liveDirs, 'and the live ones are still spared');
@@ -537,6 +578,109 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		failMkdtemp = false;
 
 		process.off('unhandledRejection', onUnhandled);
+		// If the restart prompt cannot be shown, the restart never happens, so the commitment
+		// that justified holding the guard is gone. Without releasing it the session could
+		// never install another update. A fresh updater starts with an unheld guard.
+		assetUrl = STREAMING_ASSET_URL;
+		const restartFailUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		failRestartDialog = true;
+		const beforeRestartFail = feeds();
+		const accepted = restartFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await accepted;
+		const queuedAt = pendingDownloads.length - 1;
+		let restartBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[queuedAt](
+			streamingResponse((controller) => {
+				restartBody = controller;
+			})
+		);
+		await flush();
+		restartBody?.close();
+		await waitFor(() => feeds() > beforeRestartFail);
+		assert.equal(feeds(), beforeRestartFail + 1, 'the accepted update handed off');
+
+		electronStub.autoUpdater.handlers.get('update-downloaded')?.();
+		await waitFor(() => loggedErrors.some((m) => m.includes('prompt to restart')));
+		assert.ok(
+			loggedErrors.some((m) => m.includes('prompt to restart')),
+			'the failed restart prompt is reported'
+		);
+
+		// The guard is released, so the next accepted update can still hand off.
+		failRestartDialog = false;
+		const afterFailure2 = restartFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await afterFailure2;
+		const nextQueued = pendingDownloads.length - 1;
+		let nextBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[nextQueued](
+			streamingResponse((controller) => {
+				nextBody = controller;
+			})
+		);
+		await flush();
+		nextBody?.close();
+		await waitFor(() => feeds() > beforeRestartFail + 1);
+		assert.equal(
+			feeds(),
+			beforeRestartFail + 2,
+			'a failed restart prompt does not wedge the session'
+		);
+
+		// The same applies when the updater itself throws as the hand-off starts: the promise
+		// rejects, the caller logs it, and without releasing first the guard and the listeners
+		// would be left behind so no later update could hand off.
+		const feedFailUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		failFeedUrl = true;
+		const beforeFeedFail = feeds();
+		// An earlier hand-off in this file is still pending, so its listeners are registered.
+		// What matters is that the throwing hand-off adds and removes its own.
+		const listenersBefore = electronStub.autoUpdater.listeners.length;
+		const applying = () => loggedErrors.filter((m) => m.includes('applying')).length;
+		const applyingBefore = applying();
+		const feedAccepted = feedFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await feedAccepted;
+		const feedQueued = pendingDownloads.length - 1;
+		let feedBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[feedQueued](
+			streamingResponse((controller) => {
+				feedBody = controller;
+			})
+		);
+		await flush();
+		feedBody?.close();
+		// Earlier cases already logged "applying" errors, so wait for a NEW one. Waiting on the
+		// bare predicate would return instantly and assert nothing.
+		await waitFor(() => applying() > applyingBefore);
+		assert.equal(applying(), applyingBefore + 1, 'the failed hand-off is reported');
+		assert.equal(
+			electronStub.autoUpdater.listeners.length,
+			listenersBefore,
+			'a throwing hand-off leaves no listeners behind'
+		);
+
+		failFeedUrl = false;
+		const afterFeedFail = feedFailUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await afterFeedFail;
+		const nextFeedQueued = pendingDownloads.length - 1;
+		let nextFeedBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[nextFeedQueued](
+			streamingResponse((controller) => {
+				nextFeedBody = controller;
+			})
+		);
+		await flush();
+		nextFeedBody?.close();
+		await waitFor(() => feeds() > beforeFeedFail);
+		assert.equal(feeds(), beforeFeedFail + 1, 'a throwing hand-off does not wedge the session');
+
 		console.log('update.test.ts passed');
 	} catch (error) {
 		console.error(error);
