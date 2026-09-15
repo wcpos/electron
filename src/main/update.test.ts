@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -135,6 +135,29 @@ const waitFor = async (ready: () => boolean) => {
 		await new Promise<void>((resolve) => setTimeout(resolve, 10));
 	}
 };
+// A fetch response whose body stays open until the test closes the handed-out controller.
+const streamingResponse = (
+	onController: (controller: ReadableStreamDefaultController<Uint8Array>) => void
+) => ({
+	ok: true,
+	status: 200,
+	headers: { get: (): string | null => null },
+	body: new ReadableStream<Uint8Array>({
+		start(controller) {
+			onController(controller);
+			controller.enqueue(new Uint8Array([1]));
+		},
+	}),
+});
+// Installers written so far, one per accepted update's own directory. The file takes the
+// manifest's asset name, whichever URL it was fetched from.
+const downloadedInstallers = () => {
+	const root = path.join(tempRoot, 'NTWRK');
+	return readdirSync(root)
+		.filter((entry) => entry.startsWith('update-'))
+		.map((entry) => path.join(root, entry, 'app.zip'))
+		.filter((file) => existsSync(file));
+};
 
 (async () => {
 	try {
@@ -222,17 +245,11 @@ const waitFor = async (ready: () => boolean) => {
 		await flush();
 		assert.equal(pendingDownloads.length, 1, 'the installer download started');
 		let body: ReadableStreamDefaultController<Uint8Array> | undefined;
-		pendingDownloads[0]({
-			ok: true,
-			status: 200,
-			headers: { get: (): string | null => null },
-			body: new ReadableStream<Uint8Array>({
-				start(controller) {
-					body = controller;
-					controller.enqueue(new Uint8Array([1]));
-				},
-			}),
-		});
+		pendingDownloads[0](
+			streamingResponse((controller) => {
+				body = controller;
+			})
+		);
 		await flush();
 		const midStream = updater.checkForUpdates();
 		await flush();
@@ -248,6 +265,41 @@ const waitFor = async (ready: () => boolean) => {
 			'the install was not disturbed by the concurrent check'
 		);
 		assert.equal(installStarted.length, 1, 'the downloaded installer reached the installer');
+		assert.equal(downloadedInstallers().length, 1);
+
+		// Two accepted updates in one session download into separate directories, so the
+		// second cannot truncate the first's installer while it is still streaming.
+		const first = updater.checkForUpdates();
+		await flush();
+		openDialogs[7].resolve({ response: 0 });
+		await first;
+		await flush();
+		const second = updater.checkForUpdates();
+		await flush();
+		openDialogs[8].resolve({ response: 0 });
+		await second;
+		await flush();
+		assert.equal(pendingDownloads.length, 3, 'both accepted updates started downloading');
+		const bodies: ReadableStreamDefaultController<Uint8Array>[] = [];
+		for (const resolve of pendingDownloads.slice(1)) {
+			resolve(streamingResponse((controller) => bodies.push(controller)));
+		}
+		await flush();
+		for (const controller of bodies) {
+			controller.close();
+		}
+		await waitFor(
+			() => installStarted.length >= 3 || loggedErrors.some((m) => m.includes('applying'))
+		);
+		assert.deepEqual(
+			loggedErrors.filter((m) => m.includes('applying')),
+			[]
+		);
+		assert.equal(
+			downloadedInstallers().length,
+			3,
+			'each accepted update kept its own installer on disk'
+		);
 
 		console.log('update.test.ts passed');
 	} catch (error) {

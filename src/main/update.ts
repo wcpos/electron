@@ -1,4 +1,4 @@
-import { createWriteStream, writeFileSync } from 'fs';
+import { createWriteStream, mkdtempSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
@@ -107,12 +107,13 @@ export class AutoUpdater implements UpdaterHandle {
 	// manifest). The path is returned rather than stored on the instance: a check that
 	// starts while a download is streaming must not be able to clear it.
 	private async download(
+		dir: string,
 		name: string,
 		url: string,
 		showProgress = true
 	): Promise<string | undefined> {
 		const pipeline = promisify(stream.pipeline);
-		const filePath = `${this.tempDirPath}/${name}`;
+		const filePath = path.join(dir, name);
 		// Chromium's stack (net.fetch): downloads honor the system proxy and OS trust
 		// store — a corporate-proxy network must not silently break auto-update while
 		// the migrated app transport (main/http-bridge.ts) keeps working.
@@ -148,8 +149,10 @@ export class AutoUpdater implements UpdaterHandle {
 		return name !== 'RELEASES' ? filePath : undefined;
 	}
 
-	private async installUpdates(targetPath: string) {
-		let feedURL = this.tempDirPath;
+	// `dir` is the operation's download directory: on Windows Squirrel reads RELEASES and
+	// the package from it, on macOS it holds the feed.json that points at the installer.
+	private async installUpdates(dir: string, targetPath: string) {
+		let feedURL = dir;
 
 		if (!targetPath) {
 			throw new Error('No update file downloaded');
@@ -157,8 +160,9 @@ export class AutoUpdater implements UpdaterHandle {
 
 		if (process.platform === 'darwin') {
 			const json = { url: `file://${targetPath}` };
-			writeFileSync(this.tempDirPath + '/feed.json', JSON.stringify(json));
-			feedURL = `file://${this.tempDirPath}/feed.json`;
+			const feedPath = path.join(dir, 'feed.json');
+			writeFileSync(feedPath, JSON.stringify(json));
+			feedURL = `file://${feedPath}`;
 		}
 
 		if (process.platform === 'linux') {
@@ -185,20 +189,26 @@ export class AutoUpdater implements UpdaterHandle {
 	}
 
 	private async downloadAndInstallUpdates(assets: Asset[]) {
+		// Every accepted update downloads into its own directory. Two acceptances in one
+		// session (the hourly check prompts again while a download is running) used to write
+		// the same file names into the shared temp dir and truncate each other mid-stream.
+		const dir = mkdtempSync(path.join(this.tempDirPath, 'update-'));
 		let targetPath = '';
 		try {
 			// Recorded as each download finishes, not after all of them: on Windows the
 			// installer and the RELEASES manifest download together, and a finished installer
-			// should still be revealed below if its sibling fails.
+			// should still be revealed below if its sibling fails. Windows also ships the
+			// Squirrel package (.nupkg) beside the setup program; the reveal must point at the
+			// program the user can run, so the package never displaces a recorded installer.
 			await Promise.all(
 				assets.map(async (asset) => {
-					const filePath = await this.download(asset.name, asset.url);
-					if (filePath) {
+					const filePath = await this.download(dir, asset.name, asset.url);
+					if (filePath && (!targetPath || targetPath.endsWith('.nupkg'))) {
 						targetPath = filePath;
 					}
 				})
 			);
-			await this.installUpdates(targetPath);
+			await this.installUpdates(dir, targetPath);
 		} catch (error) {
 			logger.error('Error applying the updates', error, error.stack);
 			// A finished download that failed to install is still useful: reveal it so
