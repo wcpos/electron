@@ -397,6 +397,36 @@ const downloadedInstallers = () =>
 			assert.equal(loggedWarnings.length, Number(cleanupFailure));
 			assert.deepEqual(unhandled, []);
 		}
+		// The loop leaves the stub throwing; later cases expect cleanup to work.
+		failCleanup = false;
+		// Windows ships a runnable setup program beside a .nupkg. If only the package survives
+		// there is nothing the user can run, so it is removed rather than revealed.
+		assetNames = ['wcpos-setup.exe', 'wcpos.nupkg'];
+		const revealsBefore = installStarted.length;
+		const downloadsBeforeNupkg = pendingDownloads.length;
+		const errorsBeforeNupkg = loggedErrors.length;
+		const writersBeforeNupkg = writers.length;
+		const nupkgCheck = updater.checkForUpdates();
+		await flush();
+		openDialogs[12].resolve({ response: 0 });
+		await nupkgCheck;
+		const nupkgControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+		for (const resolve of pendingDownloads.slice(downloadsBeforeNupkg)) {
+			resolve(streamingResponse((controller) => nupkgControllers.push(controller)));
+		}
+		// The controllers are captured synchronously, so wait for the writers themselves
+		// before reading the directory off one.
+		await waitFor(() => writers.length === writersBeforeNupkg + 2);
+		const nupkgDir = path.dirname(String(writers[writersBeforeNupkg].path));
+		nupkgControllers[0].error(new Error('setup download failed'));
+		await waitFor(() => writers[writersBeforeNupkg].closed);
+		nupkgControllers[1].close();
+		await waitFor(() => loggedErrors.length > errorsBeforeNupkg);
+		await flush();
+		assert.equal(installStarted.length, revealsBefore, 'a lone .nupkg is never revealed');
+		assert.equal(existsSync(nupkgDir), false, 'its directory is removed instead');
+		assetNames = ['app.zip'];
+
 		// The download directory is created before the try block, so a failure there rejects
 		// downloadAndInstallUpdates itself. The check hands that promise off without awaiting
 		// it, so the rejection has to be observed at the call site or it goes unhandled.
@@ -404,7 +434,7 @@ const downloadedInstallers = () =>
 		const errorsBeforeMkdtemp = loggedErrors.length;
 		const mkdtempCheck = updater.checkForUpdates();
 		await flush();
-		openDialogs[12].resolve({ response: 0 });
+		openDialogs[13].resolve({ response: 0 });
 		assert.equal(await mkdtempCheck, true, 'the check still settles when the directory fails');
 		await waitFor(() => loggedErrors.length > errorsBeforeMkdtemp);
 		await flush();

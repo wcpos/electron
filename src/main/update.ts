@@ -233,8 +233,9 @@ export class AutoUpdater implements UpdaterHandle {
 			logger.error('Error applying the updates', error, error.stack);
 			// A finished download that failed to install is still useful: reveal it so
 			// the user can run it by hand. A partial download is never recorded here, and
-			// there is nothing worth keeping in its directory.
-			if (targetPath) {
+			// there is nothing worth keeping in its directory. The Windows .nupkg is not
+			// runnable on its own, so if only it survived there is nothing to offer either.
+			if (targetPath && !targetPath.endsWith('.nupkg')) {
 				shell.showItemInFolder(targetPath);
 			} else {
 				try {
