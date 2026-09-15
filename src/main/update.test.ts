@@ -182,9 +182,11 @@ mutableModule._load = function patchedLoad(
 };
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
-// The streaming case runs a real file pipeline, so give it wall-clock time (up to 2 s).
-const waitFor = async (ready: () => boolean) => {
-	for (let i = 0; i < 200 && !ready(); i++) {
+// The streaming cases run a real file pipeline, so they need wall-clock time. The budget is
+// generous because a loaded CI runner is far slower than a laptop, and it is only spent in
+// full when the condition never arrives, which is a real failure.
+const waitFor = async (ready: () => boolean, attempts = 2000) => {
+	for (let i = 0; i < attempts && !ready(); i++) {
 		await new Promise<void>((resolve) => setTimeout(resolve, 10));
 	}
 };
