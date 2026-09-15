@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import Module from 'node:module';
 import os from 'node:os';
@@ -81,11 +82,24 @@ const electronStub = {
 		getPath: () => tempRoot,
 	},
 	autoUpdater: {
-		on() {},
+		listeners: [] as string[],
+		handlers: new Map<string, () => void>(),
+		on(event: string, handler: () => void) {
+			electronStub.autoUpdater.listeners.push(event);
+			electronStub.autoUpdater.handlers.set(event, handler);
+		},
+		removeListener(event: string) {
+			const at = electronStub.autoUpdater.listeners.indexOf(event);
+			if (at >= 0) electronStub.autoUpdater.listeners.splice(at, 1);
+			electronStub.autoUpdater.handlers.delete(event);
+		},
 		setFeedURL() {
 			installStarted.push('feed');
 		},
 		checkForUpdates() {},
+		quitAndInstall() {
+			installStarted.push('quit');
+		},
 	},
 	BrowserWindow: class FakeBrowserWindow {},
 	dialog: {
@@ -168,9 +182,11 @@ mutableModule._load = function patchedLoad(
 };
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
-// The streaming case runs a real file pipeline, so give it wall-clock time (up to 2 s).
-const waitFor = async (ready: () => boolean) => {
-	for (let i = 0; i < 200 && !ready(); i++) {
+// The streaming cases run a real file pipeline, so they need wall-clock time. The budget is
+// generous because a loaded CI runner is far slower than a laptop, and it is only spent in
+// full when the condition never arrives, which is a real failure.
+const waitFor = async (ready: () => boolean, attempts = 2000) => {
+	for (let i = 0; i < attempts && !ready(); i++) {
 		await new Promise<void>((resolve) => setTimeout(resolve, 10));
 	}
 };
@@ -200,6 +216,13 @@ const downloadedInstallers = () =>
 	updateDirs()
 		.map((dir) => path.join(dir, 'app.zip'))
 		.filter((file) => existsSync(file));
+
+// The install hand-off this file exercises only exists on macOS and Windows: on Linux
+// installUpdates reveals the file and returns before touching the singleton autoUpdater. CI
+// runs on Linux and a laptop does not, so pin the platform rather than assert different
+// things on each. Restored in the finally block below.
+const realPlatform = process.platform;
+Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
 
 (async () => {
 	try {
@@ -309,8 +332,22 @@ const downloadedInstallers = () =>
 		assert.equal(installStarted.length, 1, 'the downloaded installer reached the installer');
 		assert.equal(downloadedInstallers().length, 1);
 
+		// Squirrel answering that there is nothing to install releases the guard, so a later
+		// update can hand off. Without this a session would wedge after one hand-off.
+		electronStub.autoUpdater.handlers.get('update-not-available')?.();
+		await flush();
+		assert.deepEqual(
+			electronStub.autoUpdater.listeners,
+			[],
+			'a settled install leaves no listeners on the singleton updater'
+		);
+
 		// Two accepted updates in one session download into separate directories, so the
 		// second cannot truncate the first's installer while it is still streaming.
+		// Count feed hand-offs specifically: installStarted also records reveals and the
+		// quitAndInstall that follows a completed install.
+		const feeds = () => installStarted.filter((entry) => entry === 'feed').length;
+		const feedsBefore = feeds();
 		const first = updater.checkForUpdates();
 		await flush();
 		openDialogs[7].resolve({ response: 0 });
@@ -330,33 +367,90 @@ const downloadedInstallers = () =>
 		for (const controller of bodies) {
 			controller.close();
 		}
-		await waitFor(
-			() => installStarted.length >= 3 || loggedErrors.some((m) => m.includes('applying'))
-		);
+		await waitFor(() => feeds() > feedsBefore || loggedErrors.some((m) => m.includes('applying')));
+		await flush();
 		assert.deepEqual(
 			loggedErrors.filter((m) => m.includes('applying')),
 			[]
 		);
+		// electron's autoUpdater is a singleton with one feed URL, so only the first of the two
+		// hands off; a second would overwrite that feed and double the restart dialog.
+		assert.equal(
+			feeds() - feedsBefore,
+			1,
+			'two concurrent installs hand off to the singleton updater once'
+		);
+		assert.deepEqual(
+			electronStub.autoUpdater.listeners,
+			['error', 'update-downloaded', 'update-not-available'],
+			'and register one set of listeners, not one per hand-off'
+		);
+
 		assert.equal(
 			downloadedInstallers().length,
 			3,
 			'each accepted update kept its own installer on disk'
 		);
 
+		// Squirrel reports the download and the restart dialog opens. That dialog can sit open
+		// for a long time, and the app is committed to restarting, so the guard must stay set:
+		// a later accepted update handing off here would raise a second restart dialog.
+		const feedsAtRestart = feeds();
+		electronStub.autoUpdater.handlers.get('update-downloaded')?.();
+		await flush();
+		assert.deepEqual(
+			electronStub.autoUpdater.listeners,
+			[],
+			'the hand-off drops its listeners once the download is reported'
+		);
+		const downloadsAtRestart = pendingDownloads.length;
+		const afterRestartPrompt = updater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		await afterRestartPrompt;
+		await waitFor(() => pendingDownloads.length > downloadsAtRestart);
+		const tail: ReadableStreamDefaultController<Uint8Array>[] = [];
+		for (const resolve of pendingDownloads.slice(downloadsAtRestart)) {
+			resolve(streamingResponse((controller) => tail.push(controller)));
+		}
+		await waitFor(() => tail.length > 0);
+		for (const controller of tail) {
+			controller.close();
+		}
+		// Long enough for a hand-off to show up if the guard were released.
+		await waitFor(() => feeds() > feedsAtRestart, 100);
+		assert.equal(feeds(), feedsAtRestart, 'no second hand-off while the restart dialog is open');
+
 		// A download that fails leaves nothing worth keeping, so its directory goes with it.
 		const dirsBeforeFailure = updateDirs().length;
 		assetUrl = FAILING_ASSET_URL;
 		const failing = updater.checkForUpdates();
 		await flush();
-		openDialogs[9].resolve({ response: 0 });
+		openDialogs[10].resolve({ response: 0 });
 		await failing;
 		await waitFor(() => loggedErrors.some((m) => m.includes('applying')));
 		assert.equal(updateDirs().length, dirsBeforeFailure, 'a failed download removed its directory');
 
-		// Boot sweeps whatever earlier sessions left behind.
+		// A second process can boot while this one is downloading, so the sweep must spare a
+		// directory owned by a running process. These belong to this very process.
 		assert.ok(updateDirs().length > 0, 'precondition: earlier updates left directories');
+		const liveDirs = updateDirs().length;
 		new AutoUpdater({ isDestroyed: () => false } as never);
-		assert.deepEqual(updateDirs(), [], 'a new updater sweeps stale update directories');
+		assert.equal(updateDirs().length, liveDirs, 'a live download survives another boot sweep');
+
+		// A directory whose owning process has exited is a leftover. spawnSync returns the pid
+		// of a process that has already finished, so this pid is reliably dead.
+		const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+		const orphan = path.join(tempRoot, 'NTWRK', `update-${deadPid}-orphan`);
+		mkdirSync(orphan, { recursive: true });
+		// Named by the pre-pid scheme, so it cannot be attributed to any owner.
+		const unowned = path.join(tempRoot, 'NTWRK', 'update-legacy');
+		mkdirSync(unowned, { recursive: true });
+
+		new AutoUpdater({ isDestroyed: () => false } as never);
+		assert.equal(existsSync(orphan), false, 'a dead owner’s directory is swept');
+		assert.equal(existsSync(unowned), false, 'an unattributable directory is swept');
+		assert.equal(updateDirs().length, liveDirs, 'and the live ones are still spared');
 
 		// A failed asset must wait for its open RELEASES sibling; cleanup errors are swallowed.
 		const unhandled: unknown[] = [];
@@ -371,7 +465,7 @@ const downloadedInstallers = () =>
 			const writersBefore = writers.length;
 			const check = updater.checkForUpdates();
 			await flush();
-			openDialogs[10 + Number(cleanupFailure)].resolve({ response: 0 });
+			openDialogs[11 + Number(cleanupFailure)].resolve({ response: 0 });
 			assert.equal(await check, true, 'check settles before downloads finish');
 			const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
 			for (const resolve of pendingDownloads.slice(downloadsBefore)) {
@@ -408,7 +502,7 @@ const downloadedInstallers = () =>
 		const writersBeforeNupkg = writers.length;
 		const nupkgCheck = updater.checkForUpdates();
 		await flush();
-		openDialogs[12].resolve({ response: 0 });
+		openDialogs[13].resolve({ response: 0 });
 		await nupkgCheck;
 		const nupkgControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
 		for (const resolve of pendingDownloads.slice(downloadsBeforeNupkg)) {
@@ -434,7 +528,7 @@ const downloadedInstallers = () =>
 		const errorsBeforeMkdtemp = loggedErrors.length;
 		const mkdtempCheck = updater.checkForUpdates();
 		await flush();
-		openDialogs[13].resolve({ response: 0 });
+		openDialogs[14].resolve({ response: 0 });
 		assert.equal(await mkdtempCheck, true, 'the check still settles when the directory fails');
 		await waitFor(() => loggedErrors.length > errorsBeforeMkdtemp);
 		await flush();
@@ -449,6 +543,7 @@ const downloadedInstallers = () =>
 		process.exit(1);
 	} finally {
 		mutableModule._load = originalLoad;
+		Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
 		rmSync(tempRoot, { recursive: true, force: true });
 	}
 })();
