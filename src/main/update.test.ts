@@ -407,19 +407,35 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 			'the hand-off drops its listeners once the download is reported'
 		);
 		const downloadsAtRestart = pendingDownloads.length;
+		const writersAtRestart = writers.length;
 		const afterRestartPrompt = updater.checkForUpdates();
 		await flush();
 		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
 		await afterRestartPrompt;
+		// waitFor returns silently when it times out, so each wait is followed by an assertion
+		// that the thing actually happened. Without these the final check could pass because
+		// the later download never started, rather than because the guard held.
 		await waitFor(() => pendingDownloads.length > downloadsAtRestart);
+		assert.ok(
+			pendingDownloads.length > downloadsAtRestart,
+			'the later accepted update started downloading'
+		);
 		const tail: ReadableStreamDefaultController<Uint8Array>[] = [];
 		for (const resolve of pendingDownloads.slice(downloadsAtRestart)) {
 			resolve(streamingResponse((controller) => tail.push(controller)));
 		}
 		await waitFor(() => tail.length > 0);
+		assert.ok(tail.length > 0, 'and its body was handed to the download');
 		for (const controller of tail) {
 			controller.close();
 		}
+		const writtenHere = () => writers.slice(writersAtRestart);
+		await waitFor(() => writtenHere().length > 0 && writtenHere().every((w) => w.closed));
+		assert.ok(writtenHere().length > 0, 'the later download opened a writer');
+		assert.ok(
+			writtenHere().every((writer) => writer.closed),
+			'and finished writing, so it reached the install hand-off path'
+		);
 		// Long enough for a hand-off to show up if the guard were released.
 		await waitFor(() => feeds() > feedsAtRestart, 100);
 		assert.equal(feeds(), feedsAtRestart, 'no second hand-off while the restart dialog is open');
