@@ -1,0 +1,146 @@
+import assert from 'node:assert/strict';
+import Module from 'node:module';
+
+type ModuleWithMutableLoad = typeof Module & {
+	_load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
+};
+
+// Regression: the hourly timer kept firing while the "Found Updates" dialog sat unanswered,
+// so an app left open overnight stacked one dialog per hour behind the first. A check that
+// starts while another is still waiting on the user must join it, not open a second dialog.
+
+const backing = new Map<string, unknown>();
+class FakeStore {
+	get(key: string, fallback?: unknown) {
+		return backing.has(key) ? backing.get(key) : fallback;
+	}
+	set(key: string, value: unknown) {
+		backing.set(key, value);
+	}
+}
+
+type Deferred = { resolve: (value: { response: number }) => void };
+const openDialogs: Deferred[] = [];
+const noUpdateDialogs: unknown[] = [];
+
+const foundUpdatePayload = async () => ({
+	ok: true,
+	json: async () => ({
+		version: '9.9.9',
+		name: 'Next',
+		releaseDate: '2026-09-15',
+		notes: '',
+		assets: [] as unknown[],
+	}),
+});
+
+const electronStub = {
+	app: {
+		getVersion: () => '1.0.0',
+		getPath: () => '/tmp',
+	},
+	autoUpdater: { on() {}, setFeedURL() {}, checkForUpdates() {} },
+	BrowserWindow: class FakeBrowserWindow {},
+	dialog: {
+		showMessageBox(...args: unknown[]) {
+			const options = (args.length === 2 ? args[1] : args[0]) as { type?: string };
+			if (options.type !== 'question') {
+				noUpdateDialogs.push(options);
+				return Promise.resolve({ response: 0 });
+			}
+			return new Promise<{ response: number }>((resolve) => {
+				openDialogs.push({ resolve });
+			});
+		},
+	},
+	net: { fetch: foundUpdatePayload },
+	shell: { showItemInFolder() {} },
+};
+
+const mutableModule = Module as ModuleWithMutableLoad;
+const originalLoad = mutableModule._load;
+mutableModule._load = function patchedLoad(
+	request: string,
+	parent: NodeModule | null,
+	isMain: boolean
+) {
+	if (request === 'electron') return electronStub;
+	if (request === 'electron-store') return FakeStore;
+	if (request === './log') {
+		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
+	}
+	if (request === './progress-bar') return { ProgressBar: class {} };
+	if (request === './translations') return { t: (key: string) => key };
+	if (request === './util') return { createDir() {}, isDevelopment: false };
+	return originalLoad.call(this, request, parent, isMain);
+};
+
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+(async () => {
+	try {
+		const { AutoUpdater } = await import('./update');
+		const updater = new AutoUpdater({ isDestroyed: () => false } as never);
+
+		// Three hourly ticks land while the first dialog is still open.
+		const ticks = [updater.checkForUpdates(), updater.checkForUpdates(), updater.checkForUpdates()];
+		await flush();
+		assert.equal(
+			openDialogs.length,
+			1,
+			'only one Found Updates dialog opens while one is unanswered'
+		);
+
+		// A manual check from the menu joins the open dialog too: no second box, and no
+		// "up to date" box when it settles.
+		const menuItem = { enabled: true };
+		const manual = updater.manualCheckForUpdates(menuItem as never);
+		await flush();
+		assert.equal(openDialogs.length, 1, 'manual check joins the open dialog');
+		assert.equal(menuItem.enabled, false, 'menu item is disabled while the check is pending');
+
+		// User picks "Remind me later"; every waiter settles on that single answer.
+		openDialogs[0].resolve({ response: 1 });
+		const results = await Promise.all(ticks);
+		await manual;
+		assert.deepEqual(results, [true, true, true]);
+		assert.equal(
+			noUpdateDialogs.length,
+			0,
+			'no "up to date" box after joining a found-update dialog'
+		);
+		assert.equal(menuItem.enabled, true, 'menu item re-enabled once the check settles');
+		assert.ok(backing.get('remindLaterTimestamp'), 'Remind me later is recorded');
+
+		// The next tick honours Remind me later without opening anything.
+		assert.equal(await updater.checkForUpdates(), false);
+		assert.equal(openDialogs.length, 1);
+
+		// Once the snooze lapses a new check may prompt again: the guard was released.
+		backing.delete('remindLaterTimestamp');
+		const later = updater.checkForUpdates();
+		await flush();
+		assert.equal(openDialogs.length, 2, 'a fresh check after the dialog closed prompts again');
+		openDialogs[1].resolve({ response: 2 });
+		assert.equal(await later, true);
+
+		// A failed check releases the guard as well.
+		electronStub.net.fetch = async () => {
+			throw new Error('offline');
+		};
+		assert.equal(await updater.checkForUpdates(), undefined);
+		electronStub.net.fetch = foundUpdatePayload;
+		const afterFailure = updater.checkForUpdates();
+		await flush();
+		assert.equal(openDialogs.length, 3, 'a check after a failed one can prompt again');
+		openDialogs[2].resolve({ response: 2 });
+		await afterFailure;
+
+		console.log('update.test.ts passed');
+	} catch (error) {
+		console.error(error);
+		process.exit(1);
+	} finally {
+		mutableModule._load = originalLoad;
+	}
+})();
