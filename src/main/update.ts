@@ -64,6 +64,8 @@ export class AutoUpdater implements UpdaterHandle {
 	// used to queue one dialog per hour behind the first, each revealed as the previous one
 	// was dismissed. While this is set, further checks join it instead of starting another.
 	private inFlight: Promise<boolean | undefined> | null = null;
+	// An install hand-off is pending on the singleton electron autoUpdater. See installUpdates.
+	private installing = false;
 
 	constructor(mainWindow: BrowserWindow) {
 		this.mainWindow = mainWindow;
@@ -234,9 +236,24 @@ export class AutoUpdater implements UpdaterHandle {
 			return;
 		}
 
+		// electron's autoUpdater is a module singleton with one feed URL. Two accepted updates
+		// can now be downloading at once, and a second hand-off would overwrite the first's
+		// feed and add a second set of listeners, so one 'update-downloaded' would raise two
+		// restart dialogs and call quitAndInstall twice. The first hand-off restarts the app,
+		// so a second has nothing useful to do.
+		if (this.installing) {
+			logger.info('An update install is already pending; leaving this download on disk');
+			return;
+		}
+		this.installing = true;
+
 		return new Promise((_resolve, reject) => {
-			autoUpdater.on('error', (error: Error) => reject(error));
-			autoUpdater.on('update-downloaded', () => {
+			const onError = (error: Error) => {
+				release();
+				reject(error);
+			};
+			const onDownloaded = () => {
+				release();
 				dialog
 					.showMessageBox({
 						title: t('update.install_updates'),
@@ -245,7 +262,23 @@ export class AutoUpdater implements UpdaterHandle {
 					.then(() => {
 						setImmediate(() => autoUpdater.quitAndInstall());
 					});
-			});
+			};
+			// Squirrel can also answer that there is nothing to install. Releasing on that too
+			// keeps a session from wedging: without it the guard would stay set for good and
+			// every later update would be skipped.
+			const onUnavailable = () => release();
+			// Listeners were previously added per call and never removed, so they also
+			// accumulated across retries within one session.
+			const release = () => {
+				this.installing = false;
+				autoUpdater.removeListener('error', onError);
+				autoUpdater.removeListener('update-downloaded', onDownloaded);
+				autoUpdater.removeListener('update-not-available', onUnavailable);
+			};
+
+			autoUpdater.on('error', onError);
+			autoUpdater.on('update-downloaded', onDownloaded);
+			autoUpdater.on('update-not-available', onUnavailable);
 
 			autoUpdater.setFeedURL({ url: feedURL });
 			autoUpdater.checkForUpdates();

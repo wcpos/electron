@@ -82,11 +82,24 @@ const electronStub = {
 		getPath: () => tempRoot,
 	},
 	autoUpdater: {
-		on() {},
+		listeners: [] as string[],
+		handlers: new Map<string, () => void>(),
+		on(event: string, handler: () => void) {
+			electronStub.autoUpdater.listeners.push(event);
+			electronStub.autoUpdater.handlers.set(event, handler);
+		},
+		removeListener(event: string) {
+			const at = electronStub.autoUpdater.listeners.indexOf(event);
+			if (at >= 0) electronStub.autoUpdater.listeners.splice(at, 1);
+			electronStub.autoUpdater.handlers.delete(event);
+		},
 		setFeedURL() {
 			installStarted.push('feed');
 		},
 		checkForUpdates() {},
+		quitAndInstall() {
+			installStarted.push('quit');
+		},
 	},
 	BrowserWindow: class FakeBrowserWindow {},
 	dialog: {
@@ -310,8 +323,21 @@ const downloadedInstallers = () =>
 		assert.equal(installStarted.length, 1, 'the downloaded installer reached the installer');
 		assert.equal(downloadedInstallers().length, 1);
 
+		// Squirrel reports the download; that is what releases the install guard in a real run.
+		electronStub.autoUpdater.handlers.get('update-downloaded')?.();
+		await flush();
+		assert.deepEqual(
+			electronStub.autoUpdater.listeners,
+			[],
+			'a settled install leaves no listeners on the singleton updater'
+		);
+
 		// Two accepted updates in one session download into separate directories, so the
 		// second cannot truncate the first's installer while it is still streaming.
+		// Count feed hand-offs specifically: installStarted also records reveals and the
+		// quitAndInstall that follows a completed install.
+		const feeds = () => installStarted.filter((entry) => entry === 'feed').length;
+		const feedsBefore = feeds();
 		const first = updater.checkForUpdates();
 		await flush();
 		openDialogs[7].resolve({ response: 0 });
@@ -331,12 +357,23 @@ const downloadedInstallers = () =>
 		for (const controller of bodies) {
 			controller.close();
 		}
-		await waitFor(
-			() => installStarted.length >= 3 || loggedErrors.some((m) => m.includes('applying'))
-		);
+		await waitFor(() => feeds() > feedsBefore || loggedErrors.some((m) => m.includes('applying')));
+		await flush();
 		assert.deepEqual(
 			loggedErrors.filter((m) => m.includes('applying')),
 			[]
+		);
+		// electron's autoUpdater is a singleton with one feed URL, so only the first of the two
+		// hands off; a second would overwrite that feed and double the restart dialog.
+		assert.equal(
+			feeds() - feedsBefore,
+			1,
+			'two concurrent installs hand off to the singleton updater once'
+		);
+		assert.deepEqual(
+			electronStub.autoUpdater.listeners,
+			['error', 'update-downloaded', 'update-not-available'],
+			'and register one set of listeners, not one per hand-off'
 		);
 		assert.equal(
 			downloadedInstallers().length,
