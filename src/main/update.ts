@@ -1,4 +1,4 @@
-import { createWriteStream, writeFileSync } from 'fs';
+import { createWriteStream, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as stream from 'stream';
 import { promisify } from 'util';
@@ -48,7 +48,6 @@ export interface UpdaterHandle {
 
 export class AutoUpdater implements UpdaterHandle {
 	private mainWindow: BrowserWindow;
-	private targetPath: string;
 	private tempDirPath: string;
 	private readonly updateUrl = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
 	// The check in progress, if any. A check blocks on the "Found Updates" dialog until the
@@ -58,12 +57,28 @@ export class AutoUpdater implements UpdaterHandle {
 	private inFlight: Promise<boolean | undefined> | null = null;
 
 	constructor(mainWindow: BrowserWindow) {
-		this.targetPath = '';
 		this.mainWindow = mainWindow;
 
 		const tempDirPath = path.join(app.getPath('temp'), 'NTWRK');
 		createDir(tempDirPath);
 		this.tempDirPath = tempDirPath;
+		this.sweepStaleDownloads();
+	}
+
+	// Each accepted update downloads into its own directory (see downloadAndInstallUpdates),
+	// and an installed update restarts the app before anything could tidy up. Boot is the one
+	// moment no download is active, so leftovers from earlier sessions go here. A Linux user
+	// who was shown an installer and never ran it loses it, and the next check offers it again.
+	private sweepStaleDownloads(): void {
+		try {
+			for (const entry of readdirSync(this.tempDirPath)) {
+				if (entry.startsWith('update-')) {
+					rmSync(path.join(this.tempDirPath, entry), { recursive: true, force: true });
+				}
+			}
+		} catch (error) {
+			logger.warn('Could not sweep stale update downloads', error);
+		}
 	}
 
 	public setMainWindow(mainWindow: BrowserWindow): void {
@@ -105,9 +120,17 @@ export class AutoUpdater implements UpdaterHandle {
 		}, 3600 * 1000); // 1 hour interval
 	}
 
-	private async download(name: string, url: string, showProgress = true): Promise<void> {
+	// Resolves with the downloaded installer's path (undefined for the Windows RELEASES
+	// manifest). The path is returned rather than stored on the instance: a check that
+	// starts while a download is streaming must not be able to clear it.
+	private async download(
+		dir: string,
+		name: string,
+		url: string,
+		showProgress = true
+	): Promise<string | undefined> {
 		const pipeline = promisify(stream.pipeline);
-		const filePath = `${this.tempDirPath}/${name}`;
+		const filePath = path.join(dir, name);
 		// Chromium's stack (net.fetch): downloads honor the system proxy and OS trust
 		// store — a corporate-proxy network must not silently break auto-update while
 		// the migrated app transport (main/http-bridge.ts) keeps working.
@@ -119,10 +142,6 @@ export class AutoUpdater implements UpdaterHandle {
 		// never leaks the file descriptor.
 		const writer = createWriteStream(filePath, { flags: 'w+' });
 		const data = stream.Readable.fromWeb(response.body as import('stream/web').ReadableStream);
-
-		if (name !== 'RELEASES') {
-			this.targetPath = filePath;
-		}
 
 		let progressBar: ProgressBar | undefined;
 		const total = Number(response.headers.get('content-length')) || 0;
@@ -143,23 +162,28 @@ export class AutoUpdater implements UpdaterHandle {
 			progressBar?.close();
 			progressBar = undefined;
 		}
+
+		return name !== 'RELEASES' ? filePath : undefined;
 	}
 
-	private async installUpdates() {
-		let feedURL = this.tempDirPath;
+	// `dir` is the operation's download directory: on Windows Squirrel reads RELEASES and
+	// the package from it, on macOS it holds the feed.json that points at the installer.
+	private async installUpdates(dir: string, targetPath: string) {
+		let feedURL = dir;
 
-		if (!this.targetPath) {
+		if (!targetPath) {
 			throw new Error('No update file downloaded');
 		}
 
 		if (process.platform === 'darwin') {
-			const json = { url: `file://${this.targetPath}` };
-			writeFileSync(this.tempDirPath + '/feed.json', JSON.stringify(json));
-			feedURL = `file://${this.tempDirPath}/feed.json`;
+			const json = { url: `file://${targetPath}` };
+			const feedPath = path.join(dir, 'feed.json');
+			writeFileSync(feedPath, JSON.stringify(json));
+			feedURL = `file://${feedPath}`;
 		}
 
 		if (process.platform === 'linux') {
-			shell.showItemInFolder(this.targetPath);
+			shell.showItemInFolder(targetPath);
 			return;
 		}
 
@@ -182,13 +206,43 @@ export class AutoUpdater implements UpdaterHandle {
 	}
 
 	private async downloadAndInstallUpdates(assets: Asset[]) {
+		// Every accepted update downloads into its own directory. Two acceptances in one
+		// session (the hourly check prompts again while a download is running) used to write
+		// the same file names into the shared temp dir and truncate each other mid-stream.
+		const dir = mkdtempSync(path.join(this.tempDirPath, 'update-'));
+		let targetPath = '';
 		try {
-			await Promise.all(assets.map((asset) => this.download(asset.name, asset.url)));
-			await this.installUpdates();
+			// Recorded as each download finishes, not after all of them: on Windows the
+			// installer and the RELEASES manifest download together, and a finished installer
+			// should still be revealed below if its sibling fails. Windows also ships the
+			// Squirrel package (.nupkg) beside the setup program; the reveal must point at the
+			// program the user can run, so the package never displaces a recorded installer.
+			const downloads = await Promise.allSettled(
+				assets.map(async (asset) => {
+					const filePath = await this.download(dir, asset.name, asset.url);
+					if (filePath && (!targetPath || targetPath.endsWith('.nupkg'))) {
+						targetPath = filePath;
+					}
+				})
+			);
+			for (const download of downloads) {
+				if (download.status === 'rejected') throw download.reason;
+			}
+			await this.installUpdates(dir, targetPath);
 		} catch (error) {
 			logger.error('Error applying the updates', error, error.stack);
-			if (this.targetPath) {
-				shell.showItemInFolder(this.targetPath);
+			// A finished download that failed to install is still useful: reveal it so
+			// the user can run it by hand. A partial download is never recorded here, and
+			// there is nothing worth keeping in its directory. The Windows .nupkg is not
+			// runnable on its own, so if only it survived there is nothing to offer either.
+			if (targetPath && !targetPath.endsWith('.nupkg')) {
+				shell.showItemInFolder(targetPath);
+			} else {
+				try {
+					rmSync(dir, { recursive: true, force: true });
+				} catch (cleanupError) {
+					logger.warn('Could not remove failed update downloads', cleanupError);
+				}
 			}
 		}
 	}
@@ -235,8 +289,6 @@ export class AutoUpdater implements UpdaterHandle {
 			return false;
 		}
 
-		this.targetPath = '';
-
 		try {
 			// The signal covers the body read as well, so a stall inside response.json() also
 			// aborts. The user dialog that follows is deliberately not on a deadline.
@@ -257,7 +309,9 @@ export class AutoUpdater implements UpdaterHandle {
 			const userChoice = await this.confirmUpdateDialog(version, name, releaseDate, notes);
 
 			if (userChoice === 0) {
-				this.downloadAndInstallUpdates(assets);
+				this.downloadAndInstallUpdates(assets).catch((error) => {
+					logger.error('Error downloading and installing updates', error);
+				});
 			} else if (userChoice === 1) {
 				store.set('remindLaterTimestamp', Date.now());
 			} else {
