@@ -217,6 +217,13 @@ const downloadedInstallers = () =>
 		.map((dir) => path.join(dir, 'app.zip'))
 		.filter((file) => existsSync(file));
 
+// The install hand-off this file exercises only exists on macOS and Windows: on Linux
+// installUpdates reveals the file and returns before touching the singleton autoUpdater. CI
+// runs on Linux and a laptop does not, so pin the platform rather than assert different
+// things on each. Restored in the finally block below.
+const realPlatform = process.platform;
+Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+
 (async () => {
 	try {
 		const { AutoUpdater } = await import('./update');
@@ -505,6 +512,7 @@ const downloadedInstallers = () =>
 		process.exit(1);
 	} finally {
 		mutableModule._load = originalLoad;
+		Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
 		rmSync(tempRoot, { recursive: true, force: true });
 	}
 })();
