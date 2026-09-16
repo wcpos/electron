@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { normalizeMangoQuery, prepareQuery } from "rxdb";
-import { getRxStorageFilesystemNode } from "rxdb-premium/plugins/storage-filesystem-node";
+import { getRxStorageAbstractFilesystem } from "rxdb-premium/plugins/storage-abstract-filesystem";
+import {
+  getRxStorageFilesystemNode,
+  NodeFilesystem,
+} from "rxdb-premium/plugins/storage-filesystem-node";
 
 const schema = {
   title: "targeted recovery probe",
@@ -483,13 +494,20 @@ test("re-probes after the raw write itself reports malformed bytes", async () =>
   assert.equal(probeCalls, 1);
 
   failNextWrite = true;
-  await assert.rejects(
-    recovering.bulkWrite([{ document: record }], "rotted"),
-    /stored bytes rotted/,
+  // The raw write's own read is the first to see the damage: the write is
+  // repaired by id and run once more instead of surfacing the parse error.
+  assert.deepEqual(
+    await recovering.bulkWrite([{ document: record }], "rotted"),
+    { error: [] },
   );
+  assert.equal(probeCalls, 2, "the repair re-probes before the retry");
 
-  await recovering.bulkWrite([{ document: record }], "retry");
-  assert.ok(probeCalls > 1, "retry after a malformed write must re-probe");
+  await recovering.bulkWrite([{ document: record }], "after");
+  assert.equal(
+    probeCalls,
+    3,
+    "a malformed write drops the cache, so the next write probes again",
+  );
 });
 
 for (const method of [
@@ -868,12 +886,26 @@ test("refuses a matching id whose recovered index values differ", async () => {
     const recovering = await withTargetedOpfsRecovery(
       getRxStorageFilesystemNode({ basePath }),
     ).createStorageInstance(storageParams("index-mismatch-recovering"));
-    await assert.rejects(recovering.findDocumentsById([id], false), {
-      name: "SyntaxError",
-      message: new RegExp(
-        `targeted recovery failed for ${id}: index-mismatch$`,
-      ),
-    });
+    const capture = captureRecoveryEvents();
+    try {
+      await assert.rejects(recovering.findDocumentsById([id], false), {
+        name: "SyntaxError",
+        message: new RegExp(
+          `targeted recovery failed for ${id}: index-mismatch$`,
+        ),
+      });
+    } finally {
+      capture.stop();
+    }
+    // The refusal reaches the storage telemetry, not only the thrown message.
+    assert.deepEqual(capture.events, [
+      {
+        kind: "document-repair-refused",
+        target: "targeted-recovery-db/products",
+        reason: "index-mismatch",
+        id,
+      },
+    ]);
     await recovering.close();
   } finally {
     await rm(basePath, { recursive: true, force: true });
@@ -1796,10 +1828,20 @@ for (const [filler, fill] of [
           }
         } else if (filler === "NUL") {
           // A NUL range fails JSON parsing, so the per-id repair path refuses
-          // it by name under multi-instance and no row moves.
-          await assert.rejects(
-            () => recovering.findDocumentsById([damaged.id], true),
-            /targeted recovery refused: multi-instance/,
+          // it by name under multi-instance and no row moves — and the
+          // refusal is reported, not only thrown.
+          const capture = captureRecoveryEvents();
+          try {
+            await assert.rejects(
+              () => recovering.findDocumentsById([damaged.id], true),
+              /targeted recovery refused: multi-instance/,
+            );
+          } finally {
+            capture.stop();
+          }
+          assert.deepEqual(
+            capture.events.map(({ kind, id, reason }) => [kind, id, reason]),
+            [["document-repair-refused", damaged.id, "multi-instance"]],
           );
           assert.deepEqual(
             state.indexStates.map((index) => index.rows),
@@ -1906,6 +1948,256 @@ test("drops a hollow index row so a pending write lands instead of dereferencing
   } finally {
     capture.stop();
     await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+// filesystem-node hands its task queue the `web-locks` package, and that
+// package resolves `request()` whatever the callback did: a storage task that
+// throws inside a run surfaces as an unhandled promise rejection instead of
+// rejecting the queue, so the containment patch's run-failure report never
+// fires and the rejection would fail this test file from outside any test.
+// `navigator.locks` settles with the callback's outcome; this lock does the
+// same (the Electron main process substitutes one for the same reason — its
+// src/main/storage-lock.ts), so a raw write that throws on purpose is seen by
+// the queue healer and reported.
+function propagatingLock() {
+  const tails = new Map();
+  return {
+    request(name, options, handler) {
+      const callback = typeof options === "function" ? options : handler;
+      const previous = tails.get(name) ?? Promise.resolve();
+      const run = previous.then(() => callback({ name, mode: "exclusive" }));
+      tails.set(
+        name,
+        run.catch(() => {}),
+      );
+      return run;
+    },
+  };
+}
+
+function filesystemNodeWithPropagatingLock(basePath) {
+  return getRxStorageAbstractFilesystem({
+    name: "filesystem-node",
+    abstractFilesystem: new NodeFilesystem(basePath),
+    abstractLock: propagatingLock(),
+    inWorker: false,
+  });
+}
+
+function captureRunFailures() {
+  const failures = [];
+  const hook = (failure) => failures.push(failure);
+  globalThis.__wcposOnStorageRunFailure = hook;
+  return {
+    failures,
+    stop() {
+      if (globalThis.__wcposOnStorageRunFailure === hook)
+        delete globalThis.__wcposOnStorageRunFailure;
+    },
+  };
+}
+
+// Moves every in-memory index row for `id` to a range past the end of
+// documents.json without the wrapper seeing it. That is what a second storage
+// instance's compaction leaves behind when it relocates the tail record and
+// truncates the file under this instance's rows — a range filesystem-node
+// reads as NUL bytes, since a read past EOF returns a zero-filled buffer
+// (Sentry WOOCOMMERCE-POS-2M8).
+async function moveRowsPastEof(instance, basePath, id) {
+  const state = await instance.internals.statePromise;
+  const directory = join(basePath, (await readdir(basePath))[0]);
+  const { size } = await stat(join(directory, "documents.json"));
+  let moved = 0;
+  for (const indexState of state.indexStates) {
+    for (const row of indexState.rows) {
+      if (!row[0].includes(id)) continue;
+      const length = row[2] - row[1];
+      row[1] = size;
+      row[2] = size + length;
+      moved += 1;
+    }
+  }
+  assert.equal(moved, state.indexStates.length, "one row per index moved");
+}
+
+test("repairs and retries a write whose rows moved past EOF after the preflight verified them", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-moved-rows-write-"));
+  const moved = document("order:moved", 0);
+  const sibling = document("order:sibling", 1);
+  const capture = captureRecoveryEvents();
+  const runFailures = captureRunFailures();
+  let recovering;
+  try {
+    await (
+      await seedCompacted(basePath, [moved, sibling], "moved-seed")
+    ).close();
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    recovering = await withTargetedOpfsRecovery(
+      filesystemNodeWithPropagatingLock(basePath),
+    ).createStorageInstance(storageParams("moved-recovering"));
+    // Verified clean by a read, so the write preflight skips this id and
+    // the storage's own pre-write read is the first to touch the moved row.
+    assert.deepEqual(await recovering.findDocumentsById([moved.id], false), [
+      moved,
+    ]);
+    await moveRowsPastEof(recovering, basePath, moved.id);
+
+    const updated = {
+      ...moved,
+      value: "updated",
+      _rev: "2-moved",
+      _meta: { lwt: moved._meta.lwt + 100 },
+    };
+    const written = await recovering.bulkWrite(
+      [{ previous: moved, document: updated }],
+      "update",
+    );
+    assert.deepEqual(written.error, []);
+    assert.deepEqual(
+      capture.events.map(({ kind, id }) => [kind, id]),
+      [["hollow-row-dropped", moved.id]],
+    );
+    // The storage's own write run threw before the repair: the failed run is
+    // reported through the containment patch's seam, not lost.
+    assert.deepEqual(
+      runFailures.failures.map(({ target, error }) => [target, error?.name]),
+      [["targeted-recovery-db/products/v0", "SyntaxError"]],
+    );
+    assert.deepEqual(
+      (await recovering.findDocumentsById([moved.id, sibling.id], false)).map(
+        (row) => [row.id, row.value],
+      ),
+      [
+        [moved.id, "updated"],
+        [sibling.id, sibling.value],
+      ],
+    );
+    const state = await recovering.internals.statePromise;
+    for (const indexState of state.indexStates) {
+      assert.equal(
+        indexState.rows.filter((row) => row[0].includes(moved.id)).length,
+        1,
+        "exactly one row per index for the re-inserted document",
+      );
+    }
+    await recovering.close();
+    recovering = undefined;
+
+    const reopened = await getRxStorageFilesystemNode({
+      basePath,
+    }).createStorageInstance(storageParams("moved-reopened"));
+    assert.deepEqual(
+      (await reopened.findDocumentsById([moved.id, sibling.id], false)).map(
+        (row) => [row.id, row.value],
+      ),
+      [
+        [moved.id, "updated"],
+        [sibling.id, sibling.value],
+      ],
+    );
+    await reopened.close();
+  } finally {
+    await recovering?.close();
+    runFailures.stop();
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("reports a write whose moved row cannot be repaired under multi-instance", async () => {
+  const basePath = await mkdtemp(join(tmpdir(), "wcpos-moved-rows-multi-"));
+  const moved = document("order:moved", 0);
+  const capture = captureRecoveryEvents();
+  const runFailures = captureRunFailures();
+  let recovering;
+  try {
+    await (await seedCompacted(basePath, [moved], "moved-multi-seed")).close();
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    recovering = await withTargetedOpfsRecovery(
+      filesystemNodeWithPropagatingLock(basePath),
+    ).createStorageInstance({
+      ...storageParams("moved-multi"),
+      multiInstance: true,
+    });
+    assert.deepEqual(await recovering.findDocumentsById([moved.id], false), [
+      moved,
+    ]);
+    await moveRowsPastEof(recovering, basePath, moved.id);
+    const state = await recovering.internals.statePromise;
+    const before = structuredClone(
+      state.indexStates.map((index) => index.rows),
+    );
+
+    await assert.rejects(
+      recovering.bulkWrite(
+        [{ previous: moved, document: { ...moved, value: "updated" } }],
+        "update",
+      ),
+      {
+        name: "SyntaxError",
+        message: /targeted recovery refused: multi-instance$/,
+      },
+    );
+    assert.deepEqual(
+      capture.events.map(({ kind, id, reason }) => [kind, id, reason]),
+      [["document-repair-refused", moved.id, "multi-instance"]],
+    );
+    assert.deepEqual(
+      runFailures.failures.map(({ target, error }) => [target, error?.name]),
+      [["targeted-recovery-db/products/v0", "SyntaxError"]],
+    );
+    assert.deepEqual(
+      state.indexStates.map((index) => index.rows),
+      before,
+    );
+  } finally {
+    await recovering?.close();
+    runFailures.stop();
+    capture.stop();
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("reports a write that still fails after its repair retry", async () => {
+  // The repair found nothing to fix (the read parses), yet the storage's own
+  // write keeps throwing malformed JSON: one retry, then the failure is
+  // reported and surfaces instead of looping.
+  let writes = 0;
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => "[]",
+    bulkWrite: async () => {
+      writes += 1;
+      throw new SyntaxError("Unexpected token ' ', \"[\" is not valid JSON");
+    },
+    query: async () => JSON.stringify({ documents: [] }),
+    getChangedDocumentsSince: async () => JSON.stringify({ documents: [] }),
+  };
+  const capture = captureRecoveryEvents();
+  try {
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery({
+      createStorageInstance: async () => instance,
+    }).createStorageInstance(storageParams("write-retry-failed"));
+    await assert.rejects(
+      recovering.bulkWrite([{ document: document("order:stuck", 0) }], "w"),
+      { name: "SyntaxError" },
+    );
+    assert.equal(writes, 2, "the write ran once more after the repair");
+    assert.deepEqual(
+      capture.events.map(({ kind, target, error }) => [
+        kind,
+        target,
+        error?.name,
+      ]),
+      [["write-retry-failed", "targeted-recovery-db/products", "SyntaxError"]],
+    );
+  } finally {
+    capture.stop();
   }
 });
 

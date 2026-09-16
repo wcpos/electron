@@ -606,6 +606,22 @@ export function withTargetedOpfsRecovery(storage) {
         return refused;
       };
 
+      // A per-document repair that cannot proceed rethrows the parse error
+      // with the reason appended, which reaches the caller (and the renderer
+      // log) but not the storage telemetry: a till refusing every login this
+      // way stayed silent in Sentry (WOOCOMMERCE-POS-2M8). Every refusal is
+      // reported by name before it throws. `id` only when the batch is one
+      // document — a multi-document refusal is one event class, not one per
+      // id, and the telemetry keys on everything but `id`.
+      const reportRepairRefusal = (batch, reason) =>
+        report("document-repair-refused", {
+          target,
+          reason,
+          ...(batch.length === 1
+            ? { id: batch[0] }
+            : { batchSize: batch.length }),
+        });
+
       const repairMalformedIds = async (ids, onMalformedBatch) => {
         const repairBatch = async (batch) => {
           let documents;
@@ -614,6 +630,7 @@ export function withTargetedOpfsRecovery(storage) {
           } catch (error) {
             if (!isMalformedJson(error)) throw error;
             if (params.multiInstance) {
+              reportRepairRefusal(batch, "multi-instance");
               error.message += "; targeted recovery refused: multi-instance";
               throw error;
             }
@@ -635,6 +652,7 @@ export function withTargetedOpfsRecovery(storage) {
                 return true;
               }
               if (typeof failure === "string") {
+                reportRepairRefusal(batch, failure);
                 error.message += `; targeted recovery failed for ${batch[0]}: ${failure}`;
                 throw error;
               }
@@ -871,6 +889,18 @@ export function withTargetedOpfsRecovery(storage) {
         return writes;
       };
 
+      // One document per raw write once damage was seen in the batch:
+      // parallel singleton writes could interleave revisions of one
+      // document, so they run in sequence.
+      const writeSingly = async (writes, context) => {
+        const results = [];
+        for (const row of writes) {
+          results.push(await bulkWrite([row], context));
+        }
+        await instance.taskQueue?.awaitIdle?.();
+        return { error: results.flatMap((result) => result.error) };
+      };
+
       instance.bulkWrite = async (documentWrites, context) => {
         const ids = documentWrites.map(
           (row) => row.document[instance.primaryPath],
@@ -887,16 +917,7 @@ export function withTargetedOpfsRecovery(storage) {
         }
         const writes = await withoutStalePrevious(documentWrites);
         if (malformedBatch && writes.length > 1) {
-          // Sequential on purpose: parallel singleton writes can
-          // interleave revisions of the same document.
-          const results = [];
-          for (const row of writes) {
-            results.push(await bulkWrite([row], context));
-          }
-          await instance.taskQueue?.awaitIdle?.();
-          return {
-            error: results.flatMap((result) => result.error),
-          };
+          return writeSingly(writes, context);
         }
         try {
           return await bulkWrite(writes, context);
@@ -906,7 +927,31 @@ export function withTargetedOpfsRecovery(storage) {
           // a verified id — so drop the cache: retries re-probe and can
           // repair instead of skipping the preflight forever.
           cleanIds.clear();
-          throw error;
+          if (!isMalformedJson(error)) throw error;
+          // The storage's own write path reads every written id's row before
+          // it categorises the write, and that read is the one that threw:
+          // a row the preflight verified (or skipped as verified from an
+          // earlier read) no longer holds a document. The preflight is a
+          // separate task-queue run, so rows can move between the two —
+          // compaction relocating records and truncating documents.json
+          // under an instance whose in-memory rows still point at the old
+          // tail — and a verified id is never re-probed, so the write is the
+          // first thing to see the damage (Sentry WOOCOMMERCE-POS-2M8: a NUL
+          // range past EOF under a live primary row, at every login).
+          // Nothing was persisted: the throw precedes the event bulk. So the
+          // damage is repaired the way a read's would be and the write runs
+          // once more; `previous` is re-derived because a dropped row makes
+          // it stale. A refusal has already been reported by name; a retry
+          // that fails again is reported as such and the failure surfaces.
+          await repairMalformedIds(ids);
+          const retried = await withoutStalePrevious(documentWrites);
+          try {
+            return await writeSingly(retried, context);
+          } catch (retryError) {
+            cleanIds.clear();
+            report("write-retry-failed", { target, error: retryError });
+            throw retryError;
+          }
         }
       };
 
