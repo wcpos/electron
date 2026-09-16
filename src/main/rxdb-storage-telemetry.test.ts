@@ -59,6 +59,7 @@ async function main() {
 		'changes-file-salvage',
 		'cleanup-recovery',
 		'count-recovery',
+		'document-repair-refused',
 		'hollow-row-dropped',
 		'hollow-row-refused',
 		'index-rebuilt',
@@ -67,6 +68,7 @@ async function main() {
 		'stale-secondary-dropped',
 		'stale-secondary-refused',
 		'task-queue-run-failed',
+		'write-retry-failed',
 	]);
 
 	const captured: { event: StorageEvent; context: any }[] = [];
