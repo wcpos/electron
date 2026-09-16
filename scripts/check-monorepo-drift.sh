@@ -11,6 +11,8 @@ readonly pairs=(
   "scripts/patch-rxdb-premium-task-queue-containment.mjs:scripts/patch-rxdb-premium-task-queue-containment.mjs"
   "scripts/rxdb-premium-task-queue-containment.test.mjs:scripts/rxdb-premium-task-queue-containment.test.mjs"
   "scripts/patch-rxdb-premium-changelog-replay-safety.mjs:scripts/patch-rxdb-premium-changelog-replay-safety.mjs"
+  "scripts/patch-rxdb-premium-cleanup-compaction-batch.mjs:scripts/patch-rxdb-premium-cleanup-compaction-batch.mjs"
+  "scripts/rxdb-premium-cleanup-compaction-batch.test.mjs:scripts/rxdb-premium-cleanup-compaction-batch.test.mjs"
   "scripts/patch-rxdb-premium-changelog-identity.mjs:scripts/patch-rxdb-premium-changelog-identity.mjs"
   "scripts/rxdb-premium-changelog-identity.test.mjs:scripts/rxdb-premium-changelog-identity.test.mjs"
 )
