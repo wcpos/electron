@@ -2203,6 +2203,57 @@ test("reports a write that still fails after its repair retry", async () => {
   }
 });
 
+test("repairs and retries a serialized singleton write that throws after a malformed preflight", async () => {
+  // A batch whose preflight saw damage is written one document at a time;
+  // one of those singleton writes can still hit a row that moved since, and
+  // it takes the same repair-and-retry path as a combined write.
+  const first = document("order:first", 0);
+  const second = document("order:second", 1);
+  let probes = 0;
+  let rawWrites = 0;
+  let throwOnce = true;
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => {
+      probes += 1;
+      // The first probe is malformed (repaired singly by the bisect), every
+      // later one is clean.
+      return probes === 1 ? "[{malformed" : "[]";
+    },
+    bulkWrite: async (rows) => {
+      rawWrites += 1;
+      if (rows[0].document.id === second.id && throwOnce) {
+        throwOnce = false;
+        throw new SyntaxError("row moved under a serialized write");
+      }
+      return { error: [] };
+    },
+    query: async () => JSON.stringify({ documents: [] }),
+    getChangedDocumentsSince: async () => JSON.stringify({ documents: [] }),
+  };
+  const capture = captureRecoveryEvents();
+  try {
+    const { withTargetedOpfsRecovery } =
+      await import("./opfs-targeted-recovery.mjs");
+    const recovering = await withTargetedOpfsRecovery({
+      createStorageInstance: async () => instance,
+    }).createStorageInstance(storageParams("serialized-write-retry"));
+    assert.deepEqual(
+      await recovering.bulkWrite(
+        [{ document: first }, { document: second }],
+        "serialized",
+      ),
+      { error: [] },
+    );
+    // first, second (throws), second again after the repair — never first
+    // again, which has already landed.
+    assert.equal(rawWrites, 3);
+    assert.deepEqual(capture.events, []);
+  } finally {
+    capture.stop();
+  }
+});
+
 test("does not verify a hollow id as clean on a withDeleted read", async () => {
   const basePath = await mkdtemp(join(tmpdir(), "wcpos-hollow-read-"));
   const hollow = document("order:hollow", 0);
