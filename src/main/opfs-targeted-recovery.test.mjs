@@ -2171,7 +2171,9 @@ test("reports a write that still fails after its repair retry", async () => {
     findDocumentsById: async () => "[]",
     bulkWrite: async () => {
       writes += 1;
-      throw new SyntaxError("Unexpected token ' ', \"[\" is not valid JSON");
+      throw new SyntaxError(
+        "Unexpected token '\u0000', \"[\" is not valid JSON",
+      );
     },
     query: async () => JSON.stringify({ documents: [] }),
     getChangedDocumentsSince: async () => JSON.stringify({ documents: [] }),
