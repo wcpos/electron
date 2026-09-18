@@ -80,10 +80,10 @@ export class AutoUpdater implements UpdaterHandle {
 	// and an installed update restarts the app before anything could tidy up, so leftovers
 	// from earlier runs are cleared here.
 	//
-	// Boot is NOT a moment when nothing is downloading: the app takes no single-instance
-	// lock, so on Windows a second process can start while the first is mid-download. An
-	// unconditional sweep deleted that download out from under it. A directory owned by a
-	// process that is still running is left alone.
+	// Boot is NOT a moment when nothing is downloading: before the single-instance lock
+	// (claimLaunch), a second Windows process could start while the first was mid-download,
+	// and an unconditional sweep deleted that download out from under it. The ownership
+	// check stays as the guard for any process that reaches here alongside another.
 	private sweepStaleDownloads(): void {
 		let entries: string[];
 		try {

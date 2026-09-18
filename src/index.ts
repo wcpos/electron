@@ -1,6 +1,6 @@
 import { app, BrowserWindow, net, powerMonitor, session } from 'electron';
 
-import { type AppContext, boot, type BootDeps, recreateMainWindow } from './main/boot';
+import { type AppContext, boot, type BootDeps, claimLaunch, recreateMainWindow } from './main/boot';
 import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
@@ -41,11 +41,6 @@ if (process.env.NODE_ENV === 'development') {
 	app.commandLine.appendSwitch('ignore-certificate-errors');
 }
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (require('electron-squirrel-startup')) {
-	app.quit();
-}
-
 const bootDeps: BootDeps = {
 	whenReady: () =>
 		app.whenReady().then(() => {
@@ -75,14 +70,34 @@ const bootDeps: BootDeps = {
 
 let appContext: AppContext | null = null;
 
-boot(bootDeps)
-	.then((context) => {
-		appContext = context;
-	})
-	.catch((err) => {
-		logger.error('Error starting app');
-		logger.error(err);
+// Squirrel shortcut events on Windows install/uninstall, then the single-instance
+// lock: see claimLaunch for why a second process must never reach boot.
+const launched = claimLaunch({
+	handledSquirrelEvent: Boolean(require('electron-squirrel-startup')),
+	requestSingleInstanceLock: () => app.requestSingleInstanceLock(),
+	quit: () => app.quit(),
+	logger,
+});
+
+if (launched) {
+	// A second launch (double-clicked shortcut, a slow first window) lands here in
+	// the running process instead of starting another one; bring the till forward.
+	app.on('second-instance', () => {
+		const mainWindow = getMainWindow();
+		if (!mainWindow || mainWindow.isDestroyed()) return;
+		if (mainWindow.isMinimized()) mainWindow.restore();
+		mainWindow.focus();
 	});
+
+	boot(bootDeps)
+		.then((context) => {
+			appContext = context;
+		})
+		.catch((err) => {
+			logger.error('Error starting app');
+			logger.error(err);
+		});
+}
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
