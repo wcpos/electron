@@ -86,6 +86,7 @@ if (launched) {
 		const mainWindow = getMainWindow();
 		if (!mainWindow || mainWindow.isDestroyed()) return;
 		if (mainWindow.isMinimized()) mainWindow.restore();
+		mainWindow.show(); // a window hidden with Cmd+H is neither minimized nor destroyed
 		mainWindow.focus();
 	});
 
