@@ -33,6 +33,37 @@ export interface BootDeps {
 	};
 }
 
+export interface LaunchDeps {
+	/** electron-squirrel-startup handled an install/update event and will quit on its own. */
+	handledSquirrelEvent: boolean;
+	requestSingleInstanceLock: () => boolean;
+	quit: () => void;
+	logger: BootDeps['logger'];
+}
+
+/**
+ * Decide whether this process is the one that boots. Only one WCPOS process may
+ * touch an install's storage: two processes on the same `wcpos_fsdbs` files each
+ * keep their own index rows in memory, so the second one's compaction moves
+ * documents out from under the first, whose first cleanup round then reads the
+ * old ranges as blank and drops them — the login row included (Sentry 2MN/2RG,
+ * every drop boot carried two `app_start_time`s seconds apart). A Squirrel event
+ * process never boots either: it used to open a window, and therefore storage,
+ * while the running app still owned the files.
+ */
+export function claimLaunch(deps: LaunchDeps): boolean {
+	if (deps.handledSquirrelEvent) {
+		deps.quit();
+		return false;
+	}
+	if (!deps.requestSingleInstanceLock()) {
+		deps.logger.info('Another WCPOS process already owns this install; quitting this one');
+		deps.quit();
+		return false;
+	}
+	return true;
+}
+
 /**
  * The phases run, in order. Each entry is the human-readable name plus the thunk.
  * Exported so a test can assert the sequence without launching Electron.
