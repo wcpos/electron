@@ -627,9 +627,13 @@ test("a row truncated past EOF between its blank read and the drop is refused, a
   const fullSize = await inner.getSize();
   let bbbEnd;
   for (const [, start, end] of state.firstIdx.rows) {
-    if ((await inner.read(start, end)).every((byte) => byte === 0x20)) bbbEnd = end;
+    if ((await inner.read(start, end)).every((byte) => byte === 0x20))
+      bbbEnd = end;
   }
-  assert.ok(bbbEnd, "the fixture holds exactly the blank row this test truncates under");
+  assert.ok(
+    bbbEnd,
+    "the fixture holds exactly the blank row this test truncates under",
+  );
   // Another process truncates the file right after this one reads the blank
   // row: the size seen before the read still covered it, the size seen after
   // does not. Independent processes share no task queue.
@@ -681,11 +685,13 @@ test("no row is dropped when a later row in the scan is past EOF", async () => {
     { id: "yyy", name: "a", _deleted: false, _meta: { lwt: 200 } },
     { id: "zzz", name: "b", _deleted: false, _meta: { lwt: 300 } },
   ];
-  const { instance, indexStates, changelogOperations } = createFakeOpfsInstance({
-    documents,
-    corruptId: "xxx",
-    gapBefore: "xxx",
-  });
+  const { instance, indexStates, changelogOperations } = createFakeOpfsInstance(
+    {
+      documents,
+      corruptId: "xxx",
+      gapBefore: "xxx",
+    },
+  );
   const state = await instance.internals.statePromise;
   const inner = await state.documentFileHandle.createAccessHandle();
   const fullSize = await inner.getSize();
@@ -700,7 +706,11 @@ test("no row is dropped when a later row in the scan is past EOF", async () => {
   // Premise: index 0 is sorted by name, so the scan (descending) reaches the
   // blank row before the past-EOF one.
   const scan = [];
-  for (let position = indexStates[0].rows.length - 1; position >= 0; position -= 1) {
+  for (
+    let position = indexStates[0].rows.length - 1;
+    position >= 0;
+    position -= 1
+  ) {
     const [, start, end] = indexStates[0].rows[position];
     const bytes = await inner.read(start, end);
     scan.push({
@@ -711,7 +721,10 @@ test("no row is dropped when a later row in the scan is past EOF", async () => {
   }
   const firstBlank = scan.findIndex((entry) => entry.blank);
   const firstPastEof = scan.findIndex((entry) => entry.pastEof);
-  assert.ok(firstBlank !== -1 && firstPastEof !== -1, "the fixture holds both shapes");
+  assert.ok(
+    firstBlank !== -1 && firstPastEof !== -1,
+    "the fixture holds both shapes",
+  );
   assert.ok(
     firstBlank < firstPastEof,
     `the droppable row must be scanned first: ${JSON.stringify(scan)}`,
@@ -729,7 +742,11 @@ test("no row is dropped when a later row in the scan is past EOF", async () => {
     globalThis.__wcposOnStorageRecovery = previousHook;
   }
   for (const indexState of indexStates) {
-    assert.equal(indexState.rows.length, 3, "every row survives the refused scan");
+    assert.equal(
+      indexState.rows.length,
+      3,
+      "every row survives the refused scan",
+    );
   }
   assert.deepEqual(changelogOperations, [], "nothing is broadcast");
   assert.deepEqual(
@@ -739,7 +756,8 @@ test("no row is dropped when a later row in the scan is past EOF", async () => {
   assert.ok(
     events.some(
       (event) =>
-        event.kind === "hollow-row-refused" && event.reason === "range-past-eof",
+        event.kind === "hollow-row-refused" &&
+        event.reason === "range-past-eof",
     ),
     "the refusal is reported by reason",
   );
@@ -762,7 +780,9 @@ test("a hollow read batch drops nothing when one of its rows is past EOF", async
     indexId,
     primaryKeyLength: 6,
     rows: ids.map((rowId) => [`0${rowId}`, ...ranges.get(rowId)]),
-    metaIdMap: new Map(ids.map((rowId) => [rowId, [`0${rowId}`, ...ranges.get(rowId)]])),
+    metaIdMap: new Map(
+      ids.map((rowId) => [rowId, [`0${rowId}`, ...ranges.get(rowId)]]),
+    ),
     runChangelogOperation([, position]) {
       const [row] = this.rows.splice(position, 1);
       this.metaIdMap.delete(row[0].slice(1));
@@ -777,7 +797,9 @@ test("a hollow read batch drops nothing when one of its rows is past EOF", async
         getSize: async () => bytes.length,
       }),
     },
-    changelog: { addChangelogOperations: async (_, ops) => operations.push(...ops) },
+    changelog: {
+      addChangelogOperations: async (_, ops) => operations.push(...ops),
+    },
   };
   const instance = {
     primaryPath: "id",
@@ -803,7 +825,10 @@ test("a hollow read batch drops nothing when one of its rows is past EOF", async
   const previousHook = globalThis.__wcposOnStorageRecovery;
   globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
   try {
-    await assert.rejects(recovering.findDocumentsById(ids, true), /range-past-eof/);
+    await assert.rejects(
+      recovering.findDocumentsById(ids, true),
+      /range-past-eof/,
+    );
   } finally {
     globalThis.__wcposOnStorageRecovery = previousHook;
   }
@@ -838,7 +863,9 @@ test("a hollow read drops nothing when the id's secondary row is past EOF", asyn
     primaryKeyLength: 5,
     // The secondary row points past the end of the file; the primary does not.
     rows: [
-      indexId === "primary" ? ["0alpha", 0, bytes.length] : ["0alpha", bytes.length, bytes.length + 8],
+      indexId === "primary"
+        ? ["0alpha", 0, bytes.length]
+        : ["0alpha", bytes.length, bytes.length + 8],
     ],
     metaIdMap: new Map([["alpha", ["0alpha", 0, bytes.length]]]),
     runChangelogOperation([, position]) {
@@ -855,7 +882,9 @@ test("a hollow read drops nothing when the id's secondary row is past EOF", asyn
         getSize: async () => bytes.length,
       }),
     },
-    changelog: { addChangelogOperations: async (_, ops) => operations.push(...ops) },
+    changelog: {
+      addChangelogOperations: async (_, ops) => operations.push(...ops),
+    },
   };
   const instance = {
     primaryPath: "id",
@@ -881,7 +910,10 @@ test("a hollow read drops nothing when the id's secondary row is past EOF", asyn
   const previousHook = globalThis.__wcposOnStorageRecovery;
   globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
   try {
-    await assert.rejects(recovering.findDocumentsById(["alpha"], true), /range-past-eof/);
+    await assert.rejects(
+      recovering.findDocumentsById(["alpha"], true),
+      /range-past-eof/,
+    );
   } finally {
     globalThis.__wcposOnStorageRecovery = previousHook;
   }
@@ -920,7 +952,9 @@ test("a write repairing a past-EOF range drops only the written id's rows", asyn
         getSize: async () => bytes.length,
       }),
     },
-    changelog: { addChangelogOperations: async (_, ops) => operations.push(...ops) },
+    changelog: {
+      addChangelogOperations: async (_, ops) => operations.push(...ops),
+    },
   };
   let rawWrites = 0;
   const instance = {
@@ -928,7 +962,9 @@ test("a write repairing a past-EOF range drops only the written id's rows", asyn
     // The preflight read is malformed, which is what sends the write into the
     // repair; the retry then succeeds.
     findDocumentsById: async () => {
-      throw new SyntaxError('Unexpected token \u0000, "[\u0000\u0000" is not valid JSON');
+      throw new SyntaxError(
+        'Unexpected token \u0000, "[\u0000\u0000" is not valid JSON',
+      );
     },
     bulkWrite: async () => {
       rawWrites += 1;
@@ -972,7 +1008,9 @@ test("a write repairing a past-EOF range drops only the written id's rows", asyn
     );
   }
   assert.ok(
-    events.some((event) => event.kind === "hollow-row-dropped" && event.id === "aaaaa"),
+    events.some(
+      (event) => event.kind === "hollow-row-dropped" && event.id === "aaaaa",
+    ),
     "the drop is reported for the written id",
   );
 });

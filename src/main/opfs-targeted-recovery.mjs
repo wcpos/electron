@@ -115,7 +115,11 @@ function extractDocument(text, primaryPath, expectedId) {
 async function repairDocument(
   instance,
   documentId,
-  { discardInvalid = false, ownsRepairs = () => true, dropPastEof = false } = {},
+  {
+    discardInvalid = false,
+    ownsRepairs = () => true,
+    dropPastEof = false,
+  } = {},
 ) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
@@ -217,8 +221,7 @@ async function repairDocument(
 async function readRange(accessHandle, start, end) {
   if (end > (await accessHandle.getSize())) return { pastEof: true };
   const bytes = await accessHandle.read(start, end);
-  const pastEof =
-    isBlankBytes(bytes) && end > (await accessHandle.getSize());
+  const pastEof = isBlankBytes(bytes) && end > (await accessHandle.getSize());
   return { bytes, pastEof };
 }
 
@@ -296,7 +299,11 @@ async function dropWhitespaceRows(instance, target, ownsRepairs = () => true) {
       let position = indexState.rows.length;
       while (position--) {
         const row = indexState.rows[position];
-        const { bytes, pastEof } = await readRange(accessHandle, row[1], row[2]);
+        const { bytes, pastEof } = await readRange(
+          accessHandle,
+          row[1],
+          row[2],
+        );
         if (pastEof) {
           stale = refusePastEof(indexState, row);
           continue;
@@ -359,7 +366,11 @@ async function dropWhitespaceRows(instance, target, ownsRepairs = () => true) {
 async function dropHollowRows(
   instance,
   documentIds,
-  { discardForeign = false, ownsRepairs = () => true, dropPastEof = false } = {},
+  {
+    discardForeign = false,
+    ownsRepairs = () => true,
+    dropPastEof = false,
+  } = {},
 ) {
   const state = await instance.internals.statePromise;
   return instance.taskQueue.runCleanup(async (runState) => {
@@ -435,7 +446,6 @@ async function dropHollowRows(
     return outcomes;
   });
 }
-
 
 // Drops every index row (primary and secondary) pointing at one byte range,
 // inside the caller's cleanup run. Only safe for a range nothing else can
