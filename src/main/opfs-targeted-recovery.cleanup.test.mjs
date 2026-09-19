@@ -117,6 +117,7 @@ function createFakeOpfsInstance({ documents, corruptId, gapBefore }) {
   const changelogOperations = [];
   const accessHandle = {
     read: async (start, end) => documentBytes.subarray(start, end),
+    getSize: async () => documentBytes.length,
   };
 
   return {
@@ -273,7 +274,11 @@ test("propagates the retry error and reports the initial cleanup error", async (
   const retryError = new Error("retry cleanup failure");
   let cleanupCalls = 0;
   const documentFileHandle = {
-    createAccessHandle: async () => ({ read: async () => Buffer.alloc(0) }),
+    // Every range reads blank inside a file large enough to hold it.
+    createAccessHandle: async () => ({
+      read: async () => Buffer.alloc(0),
+      getSize: async () => Number.MAX_SAFE_INTEGER,
+    }),
   };
   const instance = {
     primaryPath: "id",
@@ -355,7 +360,10 @@ for (const collectionName of ["logs", "orders"]) {
         firstIdx: indexes[0],
         indexStates: indexes,
         documentFileHandle: {
-          createAccessHandle: async () => ({ read: async () => bytes }),
+          createAccessHandle: async () => ({
+            read: async () => bytes,
+            getSize: async () => bytes.length,
+          }),
         },
         changelog: {
           addChangelogOperations: async (_, ops) => operations.push(...ops),
@@ -460,7 +468,10 @@ test("drops every index row sharing one whitespace range, not just the first", a
     firstIdx: indexes[0],
     indexStates: indexes,
     documentFileHandle: {
-      createAccessHandle: async () => ({ read: async () => bytes }),
+      createAccessHandle: async () => ({
+        read: async () => bytes,
+        getSize: async () => bytes.length,
+      }),
     },
     changelog: {
       addChangelogOperations: async (_, ops) => operations.push(...ops),
@@ -601,4 +612,367 @@ test("recovers and broadcasts whitespace-row drops in multi-instance mode as sol
     db: "scope-db",
     col: "orders",
   });
+});
+
+test("a row truncated past EOF between its blank read and the drop is refused, and cleanup fails loudly", async () => {
+  const { instance, indexStates, changelogOperations } = createFakeOpfsInstance(
+    {
+      documents: DOCUMENTS,
+      corruptId: "bbb",
+      gapBefore: "bbb",
+    },
+  );
+  const state = await instance.internals.statePromise;
+  const inner = await state.documentFileHandle.createAccessHandle();
+  const fullSize = await inner.getSize();
+  let bbbEnd;
+  for (const [, start, end] of state.firstIdx.rows) {
+    if ((await inner.read(start, end)).every((byte) => byte === 0x20)) bbbEnd = end;
+  }
+  assert.ok(bbbEnd, "the fixture holds exactly the blank row this test truncates under");
+  // Another process truncates the file right after this one reads the blank
+  // row: the size seen before the read still covered it, the size seen after
+  // does not. Independent processes share no task queue.
+  let lastReadBlank = false;
+  state.documentFileHandle.createAccessHandle = async () => ({
+    read: async (start, end) => {
+      const bytes = await inner.read(start, end);
+      lastReadBlank = bytes.every((byte) => byte === 0x20);
+      return bytes;
+    },
+    getSize: async () => (lastReadBlank ? bbbEnd - 1 : fullSize),
+  });
+  const events = [];
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+  try {
+    const recovering = await withTargetedOpfsRecovery({
+      createStorageInstance: async () => instance,
+    }).createStorageInstance({ multiInstance: false });
+    await assert.rejects(() => recovering.cleanup(0), /range-past-eof/);
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
+  }
+  for (const indexState of indexStates) {
+    assert.equal(indexState.rows.length, 3, "no row is dropped past EOF");
+  }
+  assert.deepEqual(changelogOperations, []);
+  assert.deepEqual(
+    events
+      .filter((event) => event.kind === "hollow-row-refused")
+      .map((event) => [event.id, event.reason]),
+    [["bbb", "range-past-eof"]],
+  );
+  assert.ok(
+    events.some((event) => event.kind === "cleanup-recovery"),
+    "the failed round is reported, not retried into a bake of stale rows",
+  );
+});
+
+// Index order and file order differ, so the scan meets a droppable blank row
+// BEFORE the row that proves the index stale. Dropping as it goes would delete
+// a live document's row and broadcast it; the refusal that follows cannot undo
+// that. The whole scan is classified first, so nothing is dropped.
+test("no row is dropped when a later row in the scan is past EOF", async () => {
+  const documents = [
+    // File order: the blank one first (compaction's fill over bytes the other
+    // process already moved), the row that ends past EOF last.
+    { id: "xxx", name: "z", _deleted: false, _meta: { lwt: 100 } },
+    { id: "yyy", name: "a", _deleted: false, _meta: { lwt: 200 } },
+    { id: "zzz", name: "b", _deleted: false, _meta: { lwt: 300 } },
+  ];
+  const { instance, indexStates, changelogOperations } = createFakeOpfsInstance({
+    documents,
+    corruptId: "xxx",
+    gapBefore: "xxx",
+  });
+  const state = await instance.internals.statePromise;
+  const inner = await state.documentFileHandle.createAccessHandle();
+  const fullSize = await inner.getSize();
+  // The other process compacted and truncated by one byte: this instance's
+  // last row now ends past EOF.
+  const truncatedSize = fullSize - 1;
+  state.documentFileHandle.createAccessHandle = async () => ({
+    read: async (start, end) => inner.read(start, end),
+    getSize: async () => truncatedSize,
+  });
+
+  // Premise: index 0 is sorted by name, so the scan (descending) reaches the
+  // blank row before the past-EOF one.
+  const scan = [];
+  for (let position = indexStates[0].rows.length - 1; position >= 0; position -= 1) {
+    const [, start, end] = indexStates[0].rows[position];
+    const bytes = await inner.read(start, end);
+    scan.push({
+      position,
+      blank: bytes.every((byte) => byte === 0x20),
+      pastEof: end > truncatedSize,
+    });
+  }
+  const firstBlank = scan.findIndex((entry) => entry.blank);
+  const firstPastEof = scan.findIndex((entry) => entry.pastEof);
+  assert.ok(firstBlank !== -1 && firstPastEof !== -1, "the fixture holds both shapes");
+  assert.ok(
+    firstBlank < firstPastEof,
+    `the droppable row must be scanned first: ${JSON.stringify(scan)}`,
+  );
+
+  const events = [];
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+  try {
+    const recovering = await withTargetedOpfsRecovery({
+      createStorageInstance: async () => instance,
+    }).createStorageInstance({ multiInstance: false });
+    await assert.rejects(() => recovering.cleanup(0), /range-past-eof/);
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
+  }
+  for (const indexState of indexStates) {
+    assert.equal(indexState.rows.length, 3, "every row survives the refused scan");
+  }
+  assert.deepEqual(changelogOperations, [], "nothing is broadcast");
+  assert.deepEqual(
+    events.filter((event) => event.kind === "hollow-row-dropped"),
+    [],
+  );
+  assert.ok(
+    events.some(
+      (event) =>
+        event.kind === "hollow-row-refused" && event.reason === "range-past-eof",
+    ),
+    "the refusal is reported by reason",
+  );
+});
+
+// The read-repair path drops per id, so a batch holding a droppable blank row
+// AND a row past EOF must refuse the whole batch: the blank range on a stale
+// index is as likely to be compaction's fill over a document the other process
+// already moved, and a drop is broadcast and cannot be taken back.
+test("a hollow read batch drops nothing when one of its rows is past EOF", async () => {
+  const bytes = Buffer.from("        ");
+  const ids = ["first", "second"];
+  const operations = [];
+  // "first" is blank and inside the file; "second" ends past EOF.
+  const ranges = new Map([
+    ["first", [0, bytes.length]],
+    ["second", [bytes.length, bytes.length + 8]],
+  ]);
+  const indexes = ["primary", "secondary"].map((indexId) => ({
+    indexId,
+    primaryKeyLength: 6,
+    rows: ids.map((rowId) => [`0${rowId}`, ...ranges.get(rowId)]),
+    metaIdMap: new Map(ids.map((rowId) => [rowId, [`0${rowId}`, ...ranges.get(rowId)]])),
+    runChangelogOperation([, position]) {
+      const [row] = this.rows.splice(position, 1);
+      this.metaIdMap.delete(row[0].slice(1));
+    },
+  }));
+  const state = {
+    firstIdx: indexes[0],
+    indexStates: indexes,
+    documentFileHandle: {
+      createAccessHandle: async () => ({
+        read: async (start, end) => bytes.subarray(start, end),
+        getSize: async () => bytes.length,
+      }),
+    },
+    changelog: { addChangelogOperations: async (_, ops) => operations.push(...ops) },
+  };
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => "[]",
+    bulkWrite: async () => ({ error: [] }),
+    query: async () => ({ documents: [] }),
+    getChangedDocumentsSince: async () => ({ documents: [] }),
+    cleanup: async () => true,
+    internals: { statePromise: Promise.resolve(state) },
+    taskQueue: {
+      runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
+    },
+    _decode: (value) => value.toString(),
+  };
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance({
+    databaseName: "store_v6_test",
+    collectionName: "orders",
+    multiInstance: false,
+  });
+  const events = [];
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+  try {
+    await assert.rejects(recovering.findDocumentsById(ids, true), /range-past-eof/);
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
+  }
+  for (const index of indexes) {
+    assert.equal(index.rows.length, 2, `${index.indexId}: both rows survive`);
+  }
+  assert.deepEqual(operations, [], "nothing is broadcast");
+  assert.deepEqual(
+    events.filter((event) => event.kind === "hollow-row-dropped"),
+    [],
+  );
+  assert.deepEqual(
+    events
+      .filter((event) => event.kind === "hollow-row-refused")
+      .map((event) => [event.id, event.reason])
+      .sort(),
+    [
+      ["first", "range-past-eof"],
+      ["second", "range-past-eof"],
+    ],
+  );
+});
+
+// A stale SECONDARY row is proof of a stale index too, and the read path only
+// ever looks at the primary row. The primary here is blank and inside the
+// file — ordinarily droppable — while the id's secondary row ends past EOF.
+test("a hollow read drops nothing when the id's secondary row is past EOF", async () => {
+  const bytes = Buffer.from("        ");
+  const operations = [];
+  const indexes = ["primary", "secondary"].map((indexId) => ({
+    indexId,
+    primaryKeyLength: 5,
+    // The secondary row points past the end of the file; the primary does not.
+    rows: [
+      indexId === "primary" ? ["0alpha", 0, bytes.length] : ["0alpha", bytes.length, bytes.length + 8],
+    ],
+    metaIdMap: new Map([["alpha", ["0alpha", 0, bytes.length]]]),
+    runChangelogOperation([, position]) {
+      const [row] = this.rows.splice(position, 1);
+      this.metaIdMap.delete(row[0].slice(1));
+    },
+  }));
+  const state = {
+    firstIdx: indexes[0],
+    indexStates: indexes,
+    documentFileHandle: {
+      createAccessHandle: async () => ({
+        read: async (start, end) => bytes.subarray(start, end),
+        getSize: async () => bytes.length,
+      }),
+    },
+    changelog: { addChangelogOperations: async (_, ops) => operations.push(...ops) },
+  };
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () => "[]",
+    bulkWrite: async () => ({ error: [] }),
+    query: async () => ({ documents: [] }),
+    getChangedDocumentsSince: async () => ({ documents: [] }),
+    cleanup: async () => true,
+    internals: { statePromise: Promise.resolve(state) },
+    taskQueue: {
+      runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
+    },
+    _decode: (value) => value.toString(),
+  };
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance({
+    databaseName: "store_v6_test",
+    collectionName: "orders",
+    multiInstance: false,
+  });
+  const events = [];
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+  try {
+    await assert.rejects(recovering.findDocumentsById(["alpha"], true), /range-past-eof/);
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
+  }
+  assert.equal(indexes[0].rows.length, 1, "the primary row survives");
+  assert.deepEqual(operations, [], "nothing is broadcast");
+  assert.deepEqual(
+    events.filter((event) => event.kind === "hollow-row-dropped"),
+    [],
+  );
+});
+
+// The write-path exemption drops a past-EOF row and reinserts the document it
+// carries. Two ids can share one range, and the retry carries only one of
+// them, so the drop must go by identity or the other document is lost.
+test("a write repairing a past-EOF range drops only the written id's rows", async () => {
+  const bytes = Buffer.from("        ");
+  const range = [bytes.length, bytes.length + 8]; // past EOF for both ids
+  const ids = ["aaaaa", "bbbbb"];
+  const operations = [];
+  const indexes = ["primary", "secondary"].map((indexId) => ({
+    indexId,
+    primaryKeyLength: 5,
+    rows: ids.map((rowId) => [`0${rowId}`, ...range]),
+    metaIdMap: new Map(ids.map((rowId) => [rowId, [`0${rowId}`, ...range]])),
+    runChangelogOperation([, position]) {
+      const [row] = this.rows.splice(position, 1);
+      this.metaIdMap.delete(row[0].slice(1));
+    },
+  }));
+  const state = {
+    firstIdx: indexes[0],
+    indexStates: indexes,
+    documentFileHandle: {
+      createAccessHandle: async () => ({
+        read: async (start, end) => bytes.subarray(start, end),
+        getSize: async () => bytes.length,
+      }),
+    },
+    changelog: { addChangelogOperations: async (_, ops) => operations.push(...ops) },
+  };
+  let rawWrites = 0;
+  const instance = {
+    primaryPath: "id",
+    // The preflight read is malformed, which is what sends the write into the
+    // repair; the retry then succeeds.
+    findDocumentsById: async () => {
+      throw new SyntaxError('Unexpected token \u0000, "[\u0000\u0000" is not valid JSON');
+    },
+    bulkWrite: async () => {
+      rawWrites += 1;
+      return { error: [] };
+    },
+    query: async () => ({ documents: [] }),
+    getChangedDocumentsSince: async () => ({ documents: [] }),
+    cleanup: async () => true,
+    internals: { statePromise: Promise.resolve(state) },
+    taskQueue: {
+      runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
+    },
+    _decode: (value) => value.toString(),
+  };
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance({
+    databaseName: "store_v6_test",
+    collectionName: "orders",
+    multiInstance: false,
+  });
+  const events = [];
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+  try {
+    const written = await recovering.bulkWrite(
+      [{ document: { id: "aaaaa", value: "new" } }],
+      "update",
+    );
+    assert.deepEqual(written.error, [], "the write lands after the repair");
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
+  }
+  assert.ok(rawWrites >= 1, "the raw write ran");
+  for (const index of indexes) {
+    const survivors = index.rows.map((row) => row[0].slice(1));
+    assert.deepEqual(
+      survivors,
+      ["bbbbb"],
+      `${index.indexId}: only the written id is dropped`,
+    );
+  }
+  assert.ok(
+    events.some((event) => event.kind === "hollow-row-dropped" && event.id === "aaaaa"),
+    "the drop is reported for the written id",
+  );
 });
