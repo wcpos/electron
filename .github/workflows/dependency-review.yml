@@ -29,3 +29,22 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
+          # tar@6.2.1, reached only through build-time tooling
+          # (@electron/node-gyp, @electron/rebuild@3.7.2, cacache@16.1.3).
+          #
+          # These nine advisories are pre-existing — they became visible when
+          # the lockfile was first committed (#467), not because anything was
+          # added. tar is not in the shipped binary: nothing in src/ imports
+          # it, and packageAfterPrune copies only usb, serialport,
+          # node-gyp-build, debug and ms into the packaged app.
+          #
+          # Every one of them is patched only in the tar 7.x line (minimum
+          # 7.5.21); there is no 6.x fix. All three consumers declare tar ^6,
+          # so clearing them means forcing a major on the native-rebuild path
+          # — which the `test` job cannot validate, since only a full release
+          # build exercises node-gyp. That migration is tracked separately.
+          #
+          # This list is deliberately explicit rather than a scope filter: any
+          # NEW advisory, including another build-time one, still fails.
+          # Re-check whenever @electron/rebuild or @electron/node-gyp moves.
+          allow-ghsas: GHSA-23hp-3jrh-7fpw,GHSA-8qq5-rm4j-mr97,GHSA-r6q2-hw4h-h46w,GHSA-34x7-hfp2-rc4v,GHSA-83g3-92jg-28cx,GHSA-qffp-2rhf-9h96,GHSA-9ppj-qmqm-q256,GHSA-8x88-c5mf-7j5w,GHSA-r292-9mhp-454m
