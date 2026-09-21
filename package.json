@@ -8,7 +8,10 @@
 	"packageManager": "pnpm@10.31.0",
 	"pnpm": {
 		"overrides": {
-			"elliptic": "^6.6.1"
+			"elliptic@<=6.6.0": "^6.6.1",
+			"secp256k1@<=3.8.0": "3.8.1",
+			"ws@>=8.0.0 <8.21.0": "^8.21.0",
+			"tmp@<0.2.6": "^0.2.6"
 		},
 		"onlyBuiltDependencies": [
 			"@sentry/cli",

@@ -5,7 +5,10 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  elliptic: ^6.6.1
+  elliptic@<=6.6.0: ^6.6.1
+  secp256k1@<=3.8.0: 3.8.1
+  ws@>=8.0.0 <8.21.0: ^8.21.0
+  tmp@<0.2.6: ^0.2.6
 
 importers:
 
@@ -4110,10 +4113,6 @@ packages:
     resolution: {integrity: sha512-5b6Y85tPxZZ7QytO+BQzysW31HJku27cRIlkbAXaNx+BdcVi+LlRFmVXzeF6a7JCwJpyw5c4b+YSVImQIrBpuQ==}
     engines: {node: '>=10'}
 
-  os-tmpdir@1.0.2:
-    resolution: {integrity: sha512-D2FR03Vir7FIu45XBY20mTb+/ZSWB00sjU9jdQXt83gDrI4Ztz5Fs7/yy74g2N5SVQY4xY1qDr4rNddwYRVX0g==}
-    engines: {node: '>=0.10.0'}
-
   own-keys@1.0.2:
     resolution: {integrity: sha512-19YVAg7T+WTrxggPukVq7DjTv6+PJ867TmhCvBsYwmbFCsZd344rq2Ld1p0wo8f8Qrrhgp82c6FJRqdXWtSEhg==}
     engines: {node: '>= 0.4'}
@@ -4643,8 +4642,8 @@ packages:
   scrypt-js@3.0.1:
     resolution: {integrity: sha512-cdwTTnqPu0Hyvf5in5asVdZocVDTNRmR7XEcJuIzMjJeSHybHl7vpB66AzwTaIg6CLSbtjcxc8fqcySfnTkccA==}
 
-  secp256k1@3.7.1:
-    resolution: {integrity: sha512-1cf8sbnRreXrQFdH6qsg2H71Xw91fCCS9Yp021GnUNJzWJS/py96fS4lHbnTnouLp08Xj6jBoBB6V78Tdbdu5g==}
+  secp256k1@3.8.1:
+    resolution: {integrity: sha512-tArjQw2P0RTdY7QmkNehgp6TVvQXq6ulIhxv8gaH6YubKG/wxxAoNKcbuXjDhybbc+b2Ihc7e0xxiGN744UIiQ==}
     engines: {node: '>=4.0.0'}
 
   secp256k1@5.0.1:
@@ -5018,10 +5017,6 @@ packages:
   tmp-promise@3.0.3:
     resolution: {integrity: sha512-RwM7MoPojPxsOBYnyd2hy0bxtIlVrihNs9pj5SUvY8Zz1sQcQG2tG1hSr8PDxfgEB8RNKDhqbIlroIarSNDNsQ==}
 
-  tmp@0.0.33:
-    resolution: {integrity: sha512-jRCJlojKnZ3addtTOjdIqoRuPEKBvNXcGYqzO6zWZX8KfKEpnGY5jfggJQ3EjKuu8D4bJRr0y+cYJFmYbImXGw==}
-    engines: {node: '>=0.6.0'}
-
   tmp@0.2.7:
     resolution: {integrity: sha512-e0votIpp4Uo2AJYSzVHV6xCcawuiez3DzqDAbrTc3YxBkplN6e+dM13ZeIcZnDg/QpSuU2zfZ3rzwY8ukEnaXw==}
     engines: {node: '>=14.14'}
@@ -5375,18 +5370,6 @@ packages:
     peerDependencies:
       bufferutil: ^4.0.1
       utf-8-validate: ^5.0.2
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
-  ws@8.18.0:
-    resolution: {integrity: sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
     peerDependenciesMeta:
       bufferutil:
         optional: true
@@ -6433,7 +6416,7 @@ snapshots:
       '@ethersproject/transactions': 5.8.0
       '@ethersproject/web': 5.8.0
       bech32: 1.1.4
-      ws: 8.18.0
+      ws: 8.21.3
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -8615,7 +8598,7 @@ snapshots:
       es6-promise: 4.2.8
       nan: 2.14.0
     optionalDependencies:
-      secp256k1: 3.7.1
+      secp256k1: 3.8.1
 
   ee-first@1.1.1: {}
 
@@ -9304,7 +9287,7 @@ snapshots:
     dependencies:
       chardet: 0.7.0
       iconv-lite: 0.4.24
-      tmp: 0.0.33
+      tmp: 0.2.7
 
   extract-zip@2.0.1:
     dependencies:
@@ -10645,8 +10628,6 @@ snapshots:
       strip-ansi: 6.0.1
       wcwidth: 1.0.1
 
-  os-tmpdir@1.0.2: {}
-
   own-keys@1.0.2:
     dependencies:
       call-bound: 1.0.4
@@ -11132,7 +11113,7 @@ snapshots:
 
   scrypt-js@3.0.1: {}
 
-  secp256k1@3.7.1:
+  secp256k1@3.8.1:
     dependencies:
       bindings: 1.5.0
       bip66: 1.1.5
@@ -11140,7 +11121,7 @@ snapshots:
       create-hash: 1.2.0
       drbg.js: 1.0.1
       elliptic: 6.6.1
-      nan: 2.14.0
+      nan: 2.29.0
       safe-buffer: 5.2.1
     optional: true
 
@@ -11634,12 +11615,7 @@ snapshots:
       tmp: 0.2.7
     optional: true
 
-  tmp@0.0.33:
-    dependencies:
-      os-tmpdir: 1.0.2
-
-  tmp@0.2.7:
-    optional: true
+  tmp@0.2.7: {}
 
   tn1150@0.1.0:
     dependencies:
@@ -12084,8 +12060,6 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@7.5.13: {}
-
-  ws@8.18.0: {}
 
   ws@8.21.0: {}
 
