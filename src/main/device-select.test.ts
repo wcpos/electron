@@ -183,6 +183,29 @@ try {
 	session.emit('serial-port-added', noopEvent, { portId: 's9' });
 	assert.equal(webContents.sent.length, sentCount, 'no refresh once serial chooser resolved');
 
+	// An untrusted frame's chooser is REFUSED, not merely ignored: the event is
+	// prevented and the request cancelled with '', so an unhandled-event fail-open
+	// cannot grant the very request the trust check exists to refuse.
+	{
+		let prevented = false;
+		const refusedCalls: string[] = [];
+		webContents.mainFrame = { id: 'hostile-frame', url: 'https://evil.example/' };
+		session.emit(
+			'select-serial-port',
+			{
+				preventDefault() {
+					prevented = true;
+				},
+			},
+			[{ portId: 'x1', portName: 'Scanner' }],
+			webContents,
+			(portId: string) => refusedCalls.push(portId)
+		);
+		assert.equal(prevented, true, 'untrusted serial chooser must be prevented');
+		assert.deepEqual(refusedCalls, [''], 'untrusted serial chooser must be cancelled');
+		webContents.mainFrame = { id: 'main-frame-after-navigation', url: 'wcpos://-/index.html' };
+	}
+
 	// A serial chooser from another window's webContents is ignored.
 	const before = webContents.sent.length;
 	session.emit('select-serial-port', noopEvent, [{ portId: 'x' }], new FakeWebContents(), () =>

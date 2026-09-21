@@ -115,7 +115,20 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		webContents: WebContents,
 		callback: (portId: string) => void
 	) => {
-		if (!isThisWindow(webContents) || !isTrustedFrame(window.webContents.mainFrame)) return;
+		// A chooser belonging to ANOTHER window is not ours to answer: return without
+		// preventing, so that window's own handler still gets it.
+		if (!isThisWindow(webContents)) return;
+		// Our window, but an untrusted frame. Returning here would leave the event
+		// unprevented, and Electron does not document what it does with an unhandled
+		// chooser — so a fail-open is possible and would grant exactly the request
+		// this check exists to refuse. Prevent and cancel explicitly instead; '' is
+		// the documented cancel signal for serial.
+		if (!isTrustedFrame(window.webContents.mainFrame)) {
+			event.preventDefault();
+			logger.info('[device-select] select-serial-port refused: untrusted frame');
+			callback('');
+			return;
+		}
 		event.preventDefault();
 		logger.debug(`[device-select] select-serial-port fired with ${portList.length} port(s)`);
 		pendingSerial = callback;
