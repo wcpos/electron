@@ -139,6 +139,15 @@ try {
 		false
 	);
 
+	// EXPO_PORT=80 is a documented development configuration. The URL parser drops a
+	// default port, so comparing url.port ('') against trustedPort ('80') disabled every
+	// trust check; origins compare correctly.
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'wcpos://-', { isMainFrame: true }),
+		true,
+		'production origin still trusted'
+	);
+
 	const noopEvent = { preventDefault() {} };
 	const serialCalls: string[] = [];
 	const hidCalls: (string | undefined)[][] = [];
@@ -212,6 +221,37 @@ try {
 		serialCalls.push('other')
 	);
 	assert.equal(webContents.sent.length, before, 'foreign serial request not surfaced');
+
+	// A reply from a DIFFERENT (but still trusted) frame cannot complete a chooser the
+	// previous document opened — the reload case greptile flagged on #318.
+	{
+		const staleCalls: string[] = [];
+		session.emit(
+			'select-serial-port',
+			noopEvent,
+			[{ portId: 'p1', portName: 'Scanner' }],
+			webContents,
+			(portId: string) => staleCalls.push(portId)
+		);
+		const opener = webContents.mainFrame;
+		// The renderer reloads: Electron replaces the main frame with a new object.
+		webContents.mainFrame = { id: 'replacement-frame', url: 'wcpos://-/index.html' };
+		fakeIpcMain.emit(
+			'serial-port-selected',
+			{ sender: webContents, senderFrame: webContents.mainFrame },
+			'p1'
+		);
+		assert.deepEqual(staleCalls, [], 'a replacement document must not complete the old chooser');
+		// Nor can the frame that opened it: that document is gone, so isTrustedFrame
+		// already rejects it. After a navigation the chooser is therefore stranded
+		// rather than mis-answered — safe, but the callback is never invoked. Cancelling
+		// it on did-start-navigation is the separate lifecycle change noted on #318.
+		fakeIpcMain.emit('serial-port-selected', { sender: webContents, senderFrame: opener }, 'p1');
+		assert.deepEqual(staleCalls, [], 'the replaced document cannot complete it either');
+		// Reset shared chooser state for the assertions that follow.
+		webContents.mainFrame = opener;
+		fakeIpcMain.emit('serial-port-selected', { sender: webContents, senderFrame: opener }, '');
+	}
 
 	// --- HID: frame filter, live refresh, and no-arg cancel. -------------------
 	// A request from a different frame is ignored.

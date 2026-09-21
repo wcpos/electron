@@ -54,13 +54,24 @@ interface HidDeviceDetails {
 export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	const { session } = window.webContents;
 	const isThisWindow = (webContents: WebContents | undefined) => webContents === window.webContents;
-	const trustedPort = process.env.EXPO_PORT || '8088';
+	// Compare origins rather than raw port strings: the URL parser canonicalizes a
+	// default port away, so `new URL('http://localhost:80').port` is '' while an
+	// EXPO_PORT of '80' is '80'. Comparing those directly disabled serial/HID in that
+	// documented development configuration. Production keeps the protocol/hostname
+	// check because a custom scheme has an opaque origin.
+	const trustedDevOrigin = (() => {
+		try {
+			return new URL(`http://localhost:${process.env.EXPO_PORT || '8088'}`).origin;
+		} catch {
+			return null;
+		}
+	})();
 	const isTrustedUrl = (value: string | undefined) => {
 		if (!value) return false;
 		try {
 			const url = new URL(value);
 			return isDevelopment
-				? url.protocol === 'http:' && url.hostname === 'localhost' && url.port === trustedPort
+				? trustedDevOrigin !== null && url.origin === trustedDevOrigin
 				: url.protocol === 'wcpos:' && url.hostname === '-';
 		} catch {
 			return false;
@@ -98,6 +109,10 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 
 	// --- Serial ---------------------------------------------------------------
 	let pendingSerial: ((portId: string) => void) | null = null;
+	// The frame that opened the chooser. A reply must come from that same frame, not
+	// merely from a currently-trusted one: after a reload the replacement document is
+	// also trusted, and without this it could complete the previous document's request.
+	let pendingSerialFrame: unknown = null;
 	let serialPorts: SerialPortLike[] = [];
 	const sendSerialPorts = () => {
 		window.webContents.send(
@@ -131,6 +146,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		}
 		event.preventDefault();
 		logger.debug(`[device-select] select-serial-port fired with ${portList.length} port(s)`);
+		pendingSerialFrame = window.webContents.mainFrame;
 		pendingSerial = callback;
 		serialPorts = [...portList];
 		sendSerialPorts();
@@ -151,6 +167,10 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 
 	const onSerialSelected = (event: IpcMainEvent, portId: string) => {
 		if (!isThisWindow(event.sender) || !isTrustedFrame(event.senderFrame)) return;
+		if (pendingSerialFrame !== null && event.senderFrame !== pendingSerialFrame) {
+			logger.info('[device-select] serial selection from a different frame — ignored');
+			return;
+		}
 		if (!pendingSerial) {
 			logger.info('[device-select] serial selection received with no pending chooser — ignored');
 			return;
@@ -158,6 +178,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		logger.info(`[device-select] serial port selected: ${portId || '(cancelled)'}`);
 		const callback = pendingSerial;
 		pendingSerial = null;
+		pendingSerialFrame = null;
 		serialPorts = [];
 		callback(portId); // serial: '' cancels the request
 	};
@@ -165,6 +186,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 
 	// --- HID ------------------------------------------------------------------
 	let pendingHid: ((deviceId?: string) => void) | null = null;
+	let pendingHidFrame: unknown = null;
 	let hidDevices: HidDeviceLike[] = [];
 	const sendHidDevices = () => {
 		window.webContents.send(
@@ -185,6 +207,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		logger.debug(
 			`[device-select] select-hid-device fired with ${details.deviceList.length} device(s)`
 		);
+		pendingHidFrame = details.frame;
 		pendingHid = callback;
 		hidDevices = [...details.deviceList];
 		sendHidDevices();
@@ -206,6 +229,10 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 
 	const onHidSelected = (event: IpcMainEvent, deviceId: string) => {
 		if (!isThisWindow(event.sender) || !isTrustedFrame(event.senderFrame)) return;
+		if (pendingHidFrame !== null && event.senderFrame !== pendingHidFrame) {
+			logger.info('[device-select] hid selection from a different frame — ignored');
+			return;
+		}
 		if (!pendingHid) {
 			logger.info('[device-select] hid selection received with no pending chooser — ignored');
 			return;
@@ -213,6 +240,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		logger.info(`[device-select] hid device selected: ${deviceId || '(cancelled)'}`);
 		const callback = pendingHid;
 		pendingHid = null;
+		pendingHidFrame = null;
 		hidDevices = [];
 		// HID: call with no argument to cancel (an empty string is not a valid id).
 		if (deviceId) {
@@ -234,5 +262,6 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		ipcMain.removeListener('hid-device-selected', onHidSelected);
 		pendingSerial = null;
 		pendingHid = null;
+		pendingHidFrame = null;
 	});
 }
