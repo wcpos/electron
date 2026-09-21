@@ -7,6 +7,9 @@
 	"author": "Paul Kilmurray <paul@wcpos.com>",
 	"packageManager": "pnpm@10.31.0",
 	"pnpm": {
+		"overrides": {
+			"elliptic": "^6.6.1"
+		},
 		"onlyBuiltDependencies": [
 			"@sentry/cli",
 			"@serialport/bindings-cpp",
