@@ -67,12 +67,17 @@ jobs:
           # step therefore fails on exactly the advisories allow-listed here.
           # See run 35611794698.
           #
-          # The consequence, stated rather than papered over: these thirteen
-          # ids are forgiven regardless of where the package sits. Nothing
-          # mechanical stops a future change from pulling tar, extract-zip or
-          # image-size into the shipped app and still passing this gate. What
-          # holds the invariant today is the packaging boundary itself —
-          # forge.config.ts's packageAfterPrune copies only the packages in
-          # runtimeExternalDependencies, and test/package-runtime-externals.test.ts
-          # asserts that boundary. Re-check when removing entries (#469).
+          # The consequence: these thirteen ids are forgiven regardless of
+          # where the package sits, and THIS WORKFLOW CANNOT CATCH IT if one
+          # of them later moves into the shipped app — it only runs when a
+          # manifest, lockfile or workflow file changes, so a PR that edits
+          # runtimeExternalDependencies in forge.config.ts would not even
+          # re-trigger it.
+          #
+          # The invariant is enforced in test/package-runtime-externals.test.ts
+          # instead, which asserts tar, extract-zip and image-size are absent
+          # from the packaged node_modules after packageAfterPrune runs. That
+          # suite runs on forge.config.ts and src/ changes, which is where the
+          # boundary can actually be crossed. Keep the two lists in step when
+          # removing entries here (#469).
           allow-ghsas: GHSA-23hp-3jrh-7fpw,GHSA-8qq5-rm4j-mr97,GHSA-r6q2-hw4h-h46w,GHSA-34x7-hfp2-rc4v,GHSA-83g3-92jg-28cx,GHSA-qffp-2rhf-9h96,GHSA-9ppj-qmqm-q256,GHSA-8x88-c5mf-7j5w,GHSA-r292-9mhp-454m,GHSA-jmr9-qjv8-65gv,GHSA-7pqw-9j4j-h8q3,GHSA-w3rx-r6r6-pgpr,GHSA-5p2g-fcmc-qvqq
