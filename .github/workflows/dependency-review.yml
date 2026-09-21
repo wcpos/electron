@@ -29,3 +29,55 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
+          # Thirteen pre-existing advisories in three BUILD-TIME-ONLY
+          # packages. They became visible when the lockfile was first
+          # committed (#467) — nothing here was newly added. See #469.
+          #
+          #   tar@6.2.1     (9)  @electron/node-gyp, @electron/rebuild@3.7.2,
+          #                      cacache@16.1.3
+          #   extract-zip   (2)  @electron-forge/cli > @electron/packager
+          #   image-size    (2)  @electron-forge/maker-dmg > appdmg
+          #
+          # None of the three ships. Nothing in src/ imports them, and
+          # forge.config.ts's packageAfterPrune copies only usb, serialport,
+          # node-gyp-build, debug and ms into the packaged app.
+          #
+          # None can currently be fixed:
+          #   - tar is patched only in the 7.x line (min 7.5.21); all three
+          #     consumers declare ^6, so clearing it forces a major onto the
+          #     native-rebuild path, which the `test` job cannot validate —
+          #     only a full release build exercises node-gyp.
+          #   - extract-zip and image-size have NO patched version published
+          #     at all. There is nothing to upgrade to.
+          #
+          # Runtime-scope advisories are fixed, not listed here: elliptic,
+          # secp256k1 and ws (all reached via rxdb-premium > eth-crypto) are
+          # handled by range-scoped pnpm.overrides in package.json.
+          #
+          # Deliberately an explicit id list. It forgives only these
+          # thirteen; any new advisory still fails. Entries should be deleted
+          # when upstream moves, never extended.
+          #
+          # `fail-on-scopes: runtime` is NOT a usable alternative here, and
+          # not a usable second gate either — this was tried and reverted.
+          # GitHub's dependency graph does not propagate development scope
+          # for pnpm-lock.yaml, so it reports tar@6.2.1 as RUNTIME scope even
+          # though tar is reachable only through devDependencies
+          # (@electron-forge/cli, @electron/rebuild, cacache). A runtime-scope
+          # step therefore fails on exactly the advisories allow-listed here.
+          # See run 35611794698.
+          #
+          # The consequence: these thirteen ids are forgiven regardless of
+          # where the package sits, and THIS WORKFLOW CANNOT CATCH IT if one
+          # of them later moves into the shipped app — it only runs when a
+          # manifest, lockfile or workflow file changes, so a PR that edits
+          # runtimeExternalDependencies in forge.config.ts would not even
+          # re-trigger it.
+          #
+          # The invariant is enforced in test/package-runtime-externals.test.ts
+          # instead, which asserts tar, extract-zip and image-size are absent
+          # from the packaged node_modules after packageAfterPrune runs. That
+          # suite runs on forge.config.ts and src/ changes, which is where the
+          # boundary can actually be crossed. Keep the two lists in step when
+          # removing entries here (#469).
+          allow-ghsas: GHSA-23hp-3jrh-7fpw,GHSA-8qq5-rm4j-mr97,GHSA-r6q2-hw4h-h46w,GHSA-34x7-hfp2-rc4v,GHSA-83g3-92jg-28cx,GHSA-qffp-2rhf-9h96,GHSA-9ppj-qmqm-q256,GHSA-8x88-c5mf-7j5w,GHSA-r292-9mhp-454m,GHSA-jmr9-qjv8-65gv,GHSA-7pqw-9j4j-h8q3,GHSA-w3rx-r6r6-pgpr,GHSA-5p2g-fcmc-qvqq

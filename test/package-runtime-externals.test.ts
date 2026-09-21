@@ -67,6 +67,26 @@ async function main() {
 			'function',
 			'serialport should load with SerialPort.list available'
 		);
+
+		// The allow-list in .github/workflows/dependency-review.yml forgives 13
+		// advisories in tar, extract-zip and image-size, purely because they are
+		// build-time tooling that never reaches the packaged app. Nothing in that
+		// workflow can enforce it: it runs only when a manifest or lockfile
+		// changes, so a PR that pulls one of them into the runtime via
+		// runtimeExternalDependencies would not re-trigger it, and GitHub reports
+		// these as runtime scope for pnpm-lock.yaml regardless (see #469).
+		//
+		// This assertion is where that invariant actually holds — this suite runs
+		// on forge.config.ts and src/ changes too.
+		for (const buildTimeOnly of ['tar', 'extract-zip', 'image-size']) {
+			assert.ok(
+				!fs.existsSync(path.join(buildPath, 'node_modules', buildTimeOnly)),
+				`${buildTimeOnly} carries allow-listed security advisories and must not ship in the ` +
+					'packaged app. If it is genuinely needed at runtime now, remove its advisory ids ' +
+					'from allow-ghsas in .github/workflows/dependency-review.yml and fix them instead ' +
+					'of shipping known-vulnerable code.'
+			);
+		}
 	} finally {
 		fs.rmSync(buildPath, { recursive: true, force: true });
 	}

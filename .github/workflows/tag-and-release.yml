@@ -189,7 +189,7 @@ jobs:
           npm_config_cxxflags: -std=c++17
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          pnpm install
+          pnpm install --frozen-lockfile
           pnpm run rebuild:all
 
       - name: 🔬 Smoke-test the packaged app
@@ -275,7 +275,7 @@ jobs:
           npm_config_cxxflags: -std=c++17
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          pnpm install
+          pnpm install --frozen-lockfile
           pnpm run rebuild:all
 
       - name: 🔬 Smoke-test the packaged app
@@ -348,7 +348,7 @@ jobs:
           RXDB_PREMIUM: ${{ secrets.RXDB_LICENSE_KEY }}
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          pnpm install
+          pnpm install --frozen-lockfile
           pnpm run rebuild:all
 
       # Squirrel dies in CreateZipFromDirectory -> Process.Start with
@@ -466,7 +466,7 @@ jobs:
           npm_config_cxxflags: -std=c++17
         run: |
           node -e "if (!process.env.RXDB_PREMIUM) { console.error('::error::RXDB_LICENSE_KEY secret is missing or not available to this workflow'); process.exit(1); }"
-          pnpm install
+          pnpm install --frozen-lockfile
           pnpm run rebuild:all
 
       # Flatpak is excluded from this step (forge.config.ts only enables the
