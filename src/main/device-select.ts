@@ -7,6 +7,7 @@ import {
 } from 'electron';
 
 import { logger } from './log';
+import { isDevelopment } from './util';
 
 /**
  * Wire Web Serial / WebHID device selection for a window so barcode scanners can
@@ -53,24 +54,65 @@ interface HidDeviceDetails {
 export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	const { session } = window.webContents;
 	const isThisWindow = (webContents: WebContents | undefined) => webContents === window.webContents;
+	// Compare origins rather than raw port strings: the URL parser canonicalizes a
+	// default port away, so `new URL('http://localhost:80').port` is '' while an
+	// EXPO_PORT of '80' is '80'. Comparing those directly disabled serial/HID in that
+	// documented development configuration. Production keeps the protocol/hostname
+	// check because a custom scheme has an opaque origin.
+	const trustedDevOrigin = (() => {
+		try {
+			return new URL(`http://localhost:${process.env.EXPO_PORT || '8088'}`).origin;
+		} catch {
+			return null;
+		}
+	})();
+	const isTrustedUrl = (value: string | undefined) => {
+		if (!value) return false;
+		try {
+			const url = new URL(value);
+			return isDevelopment
+				? trustedDevOrigin !== null && url.origin === trustedDevOrigin
+				: url.protocol === 'wcpos:' && url.hostname === '-';
+		} catch {
+			return false;
+		}
+	};
+	const isTrustedFrame = (frame: unknown) => {
+		const mainFrame = window.webContents.mainFrame;
+		return !!mainFrame && frame === mainFrame && isTrustedUrl(mainFrame.url);
+	};
 
-	// Grant serial + HID device access (one handler per session; the logic is
-	// identical per window, so re-registering across windows is harmless).
 	session.setDevicePermissionHandler(
-		(details) => details.deviceType === 'serial' || details.deviceType === 'hid'
+		(details) =>
+			(details.deviceType === 'serial' || details.deviceType === 'hid') &&
+			isTrustedUrl(details.origin)
 	);
 	// 'media' must stay grantable: once a check handler is registered it answers
 	// EVERY navigator.permissions.query(), and Electron's default request handler
 	// already grants getUserMedia — denying the check here made the POS camera
 	// scanner re-show its "Allow camera" gate on every open (the app could never
 	// observe the granted state), while the camera itself worked fine.
-	session.setPermissionCheckHandler(
-		(_webContents, permission) =>
-			permission === 'serial' || permission === 'hid' || permission === 'media'
-	);
+	session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+		// 'media' is answered exactly as before this hardening: unconditionally.
+		// It is not a device-selection permission, so it is out of scope here, and
+		// tightening it on origin/frame risks re-breaking the camera gate above if
+		// requestingOrigin or isMainFrame is not populated for a check. Narrowing
+		// it is a separate, separately-verified change.
+		if (permission === 'media') return true;
+		return (
+			isThisWindow(webContents || undefined) &&
+			(permission === 'serial' || permission === 'hid') &&
+			details.isMainFrame &&
+			isTrustedUrl(requestingOrigin)
+		);
+	});
 
 	// --- Serial ---------------------------------------------------------------
 	let pendingSerial: ((portId: string) => void) | null = null;
+	// The frame that opened the chooser. A reply must come from that same frame, not
+	// merely from a currently-trusted one: after a reload the replacement document is
+	// also trusted, and without this it could complete the previous document's request.
+	let pendingSerialFrame: unknown = null;
 	let serialPorts: SerialPortLike[] = [];
 	const sendSerialPorts = () => {
 		window.webContents.send(
@@ -88,9 +130,23 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		webContents: WebContents,
 		callback: (portId: string) => void
 	) => {
+		// A chooser belonging to ANOTHER window is not ours to answer: return without
+		// preventing, so that window's own handler still gets it.
 		if (!isThisWindow(webContents)) return;
+		// Our window, but an untrusted frame. Returning here would leave the event
+		// unprevented, and Electron does not document what it does with an unhandled
+		// chooser — so a fail-open is possible and would grant exactly the request
+		// this check exists to refuse. Prevent and cancel explicitly instead; '' is
+		// the documented cancel signal for serial.
+		if (!isTrustedFrame(window.webContents.mainFrame)) {
+			event.preventDefault();
+			logger.info('[device-select] select-serial-port refused: untrusted frame');
+			callback('');
+			return;
+		}
 		event.preventDefault();
 		logger.debug(`[device-select] select-serial-port fired with ${portList.length} port(s)`);
+		pendingSerialFrame = window.webContents.mainFrame;
 		pendingSerial = callback;
 		serialPorts = [...portList];
 		sendSerialPorts();
@@ -110,7 +166,11 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	session.on('serial-port-removed', onSerialRemoved);
 
 	const onSerialSelected = (event: IpcMainEvent, portId: string) => {
-		if (!isThisWindow(event.sender)) return;
+		if (!isThisWindow(event.sender) || !isTrustedFrame(event.senderFrame)) return;
+		if (pendingSerialFrame !== null && event.senderFrame !== pendingSerialFrame) {
+			logger.info('[device-select] serial selection from a different frame — ignored');
+			return;
+		}
 		if (!pendingSerial) {
 			logger.info('[device-select] serial selection received with no pending chooser — ignored');
 			return;
@@ -118,6 +178,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		logger.info(`[device-select] serial port selected: ${portId || '(cancelled)'}`);
 		const callback = pendingSerial;
 		pendingSerial = null;
+		pendingSerialFrame = null;
 		serialPorts = [];
 		callback(portId); // serial: '' cancels the request
 	};
@@ -125,6 +186,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 
 	// --- HID ------------------------------------------------------------------
 	let pendingHid: ((deviceId?: string) => void) | null = null;
+	let pendingHidFrame: unknown = null;
 	let hidDevices: HidDeviceLike[] = [];
 	const sendHidDevices = () => {
 		window.webContents.send(
@@ -135,19 +197,17 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 			}))
 		);
 	};
-	const isThisFrame = (frame: unknown) =>
-		!frame || frame === (window.webContents as unknown as { mainFrame?: unknown }).mainFrame;
-
 	const onSelectHidDevice = (
 		event: Event,
 		details: HidSelectDetails,
 		callback: (deviceId?: string) => void
 	) => {
-		if (!isThisFrame(details.frame)) return;
+		if (!isTrustedFrame(details.frame)) return;
 		event.preventDefault();
 		logger.debug(
 			`[device-select] select-hid-device fired with ${details.deviceList.length} device(s)`
 		);
+		pendingHidFrame = details.frame;
 		pendingHid = callback;
 		hidDevices = [...details.deviceList];
 		sendHidDevices();
@@ -168,7 +228,11 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	session.on('hid-device-removed', onHidRemoved);
 
 	const onHidSelected = (event: IpcMainEvent, deviceId: string) => {
-		if (!isThisWindow(event.sender)) return;
+		if (!isThisWindow(event.sender) || !isTrustedFrame(event.senderFrame)) return;
+		if (pendingHidFrame !== null && event.senderFrame !== pendingHidFrame) {
+			logger.info('[device-select] hid selection from a different frame — ignored');
+			return;
+		}
 		if (!pendingHid) {
 			logger.info('[device-select] hid selection received with no pending chooser — ignored');
 			return;
@@ -176,6 +240,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		logger.info(`[device-select] hid device selected: ${deviceId || '(cancelled)'}`);
 		const callback = pendingHid;
 		pendingHid = null;
+		pendingHidFrame = null;
 		hidDevices = [];
 		// HID: call with no argument to cancel (an empty string is not a valid id).
 		if (deviceId) {
@@ -197,5 +262,6 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		ipcMain.removeListener('hid-device-selected', onHidSelected);
 		pendingSerial = null;
 		pendingHid = null;
+		pendingHidFrame = null;
 	});
 }
