@@ -20,7 +20,11 @@ const store = new Store<Record<string, TranslationRecord>>();
 // On main, the release workflow replaces it with a CalVer tag; resolve this one-line conflict in main's favour when merging next.
 const TRANSLATION_VERSION = 'next';
 // A rolling ref must be re-fetched because its content changes under the same name.
-const ROLLING_TRANSLATION_VERSION = 'next';
+// (Named REF, not VERSION, so the release bump regex `TRANSLATION_VERSION = '…'` cannot match it.)
+const ROLLING_TRANSLATION_REF = 'next';
+// Boot awaits the translations phase before creating the window, and a rolling read
+// re-fetches even with a warm cache, so bound that request and fall back to the cache.
+const ROLLING_FETCH_TIMEOUT_MS = 5000;
 const TRANSLATION_CACHE_NAMESPACE = 'translations';
 const TRANSLATION_CACHE_KEY_PATTERN = /^translations:(?:\d{4}\.\d+\.\d+|next):[A-Za-z0-9_-]+$/;
 const LEGACY_TRANSLATION_CACHE_KEY_PATTERN = /^\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
@@ -71,7 +75,11 @@ class ElectronStoreBackend {
 		namespace: string
 	): Promise<TranslationRecord | null> {
 		const url = this.buildUrl(language, namespace);
-		return fetch(url).then((response) => {
+		const init =
+			TRANSLATION_VERSION === ROLLING_TRANSLATION_REF
+				? { signal: AbortSignal.timeout(ROLLING_FETCH_TIMEOUT_MS) }
+				: undefined;
+		return fetch(url, init).then((response) => {
 			if (!response.ok) return null;
 			return response.json();
 		});
@@ -80,7 +88,7 @@ class ElectronStoreBackend {
 	read(language: string, namespace: string, callback: (err: any, data?: any) => void) {
 		const cacheKey = buildTranslationCacheKey(language);
 		const cached = this.store.get(cacheKey) as TranslationRecord | undefined;
-		if (cached && TRANSLATION_VERSION !== ROLLING_TRANSLATION_VERSION) {
+		if (cached && TRANSLATION_VERSION !== ROLLING_TRANSLATION_REF) {
 			callback(null, cached);
 			return;
 		}
