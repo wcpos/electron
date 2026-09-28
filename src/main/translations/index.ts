@@ -16,9 +16,17 @@ type LocaleInfo = {
 };
 
 const store = new Store<Record<string, TranslationRecord>>();
-const TRANSLATION_VERSION = '2026.9.10';
+// On next, this is wcpos/translations' moving jsDelivr branch ref, refreshed by the CDN within about 12 hours.
+// On main, the release workflow replaces it with a CalVer tag; resolve this one-line conflict in main's favour when merging next.
+const TRANSLATION_VERSION = 'next';
+// A rolling ref must be re-fetched because its content changes under the same name.
+// (Named REF, not VERSION, so the release bump regex `TRANSLATION_VERSION = '…'` cannot match it.)
+const ROLLING_TRANSLATION_REF = 'next';
+// Boot awaits the translations phase before creating the window, and a rolling read
+// re-fetches even with a warm cache, so bound that request and fall back to the cache.
+const ROLLING_FETCH_TIMEOUT_MS = 5000;
 const TRANSLATION_CACHE_NAMESPACE = 'translations';
-const TRANSLATION_CACHE_KEY_PATTERN = /^translations:\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
+const TRANSLATION_CACHE_KEY_PATTERN = /^translations:(?:\d{4}\.\d+\.\d+|next):[A-Za-z0-9_-]+$/;
 const LEGACY_TRANSLATION_CACHE_KEY_PATTERN = /^\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
 const buildTranslationCacheKey = (language: string) =>
 	`${TRANSLATION_CACHE_NAMESPACE}:${TRANSLATION_VERSION}:${language}`;
@@ -67,7 +75,11 @@ class ElectronStoreBackend {
 		namespace: string
 	): Promise<TranslationRecord | null> {
 		const url = this.buildUrl(language, namespace);
-		return fetch(url).then((response) => {
+		const init =
+			TRANSLATION_VERSION === ROLLING_TRANSLATION_REF
+				? { signal: AbortSignal.timeout(ROLLING_FETCH_TIMEOUT_MS) }
+				: undefined;
+		return fetch(url, init).then((response) => {
 			if (!response.ok) return null;
 			return response.json();
 		});
@@ -76,7 +88,7 @@ class ElectronStoreBackend {
 	read(language: string, namespace: string, callback: (err: any, data?: any) => void) {
 		const cacheKey = buildTranslationCacheKey(language);
 		const cached = this.store.get(cacheKey) as TranslationRecord | undefined;
-		if (cached) {
+		if (cached && TRANSLATION_VERSION !== ROLLING_TRANSLATION_REF) {
 			callback(null, cached);
 			return;
 		}
@@ -93,7 +105,7 @@ class ElectronStoreBackend {
 				// Regional locale not found, try base language
 				const baseLang = this.getBaseLanguage(language);
 				if (!baseLang) {
-					callback(null, {});
+					callback(null, cached || {});
 					return;
 				}
 
@@ -102,13 +114,13 @@ class ElectronStoreBackend {
 						this.store.set(cacheKey, fallbackData);
 						callback(null, fallbackData);
 					} else {
-						callback(null, {});
+						callback(null, cached || {});
 					}
 				});
 			})
 			.catch((err) => {
 				log.error(`Failed to fetch translations: ${err.message}`);
-				callback(null, {});
+				callback(null, cached || {});
 			});
 	}
 }

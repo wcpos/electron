@@ -2,8 +2,7 @@ name: Push JS Strings to Translations
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, next]
     paths:
       - 'src/main/translations/locales/en/electron.json'
   workflow_dispatch:
@@ -24,6 +23,21 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve lane
+        id: lane
+        run: |
+          lane="$GITHUB_REF_NAME"
+          case "$lane" in
+            main) source_branch=translations-source ;;
+            next) source_branch=translations-source-next ;;
+            *)
+              echo "::error::Translations are sent only from main or next (got $lane)"
+              exit 1
+              ;;
+          esac
+          echo "lane=$lane" >> "$GITHUB_OUTPUT"
+          echo "source_branch=$source_branch" >> "$GITHUB_OUTPUT"
+
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,12 +53,12 @@ jobs:
           mkdir -p /tmp/translations-out
           cp src/main/translations/locales/en/electron.json /tmp/translations-out/
 
-          git checkout --orphan translations-source
+          git checkout --orphan "${{ steps.lane.outputs.source_branch }}"
           git rm -rf .
           cp /tmp/translations-out/*.json .
           git add .
           git commit -m "translation source strings from ${{ github.sha }}"
-          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" translations-source
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${{ steps.lane.outputs.source_branch }}"
 
           git checkout ${{ github.sha }} -- .github
 
@@ -62,7 +76,8 @@ jobs:
           gh api repos/wcpos/translations/dispatches \
             -f event_type=update-js-strings \
             -f "client_payload[repo_name]=electron" \
-            -f "client_payload[ref]=translations-source" \
+            -f "client_payload[ref]=${{ steps.lane.outputs.source_branch }}" \
+            -f "client_payload[lane]=${{ steps.lane.outputs.lane }}" \
             -f "client_payload[force]=${{ inputs.force || 'false' }}"
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
