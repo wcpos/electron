@@ -27,18 +27,28 @@ try {
 		require('./device-select') as typeof import('./device-select');
 
 	class FakeSession extends EventEmitter {
-		devicePermissionHandler: ((details: { deviceType: string }) => boolean) | null = null;
-		permissionCheckHandler: ((wc: unknown, permission: string) => boolean) | null = null;
-		setDevicePermissionHandler(handler: (details: { deviceType: string }) => boolean) {
+		devicePermissionHandler: ((details: { deviceType: string; origin: string }) => boolean) | null =
+			null;
+		permissionCheckHandler:
+			| ((
+					wc: unknown,
+					permission: string,
+					origin: string,
+					details: { isMainFrame: boolean }
+			  ) => boolean)
+			| null = null;
+		setDevicePermissionHandler(
+			handler: (details: { deviceType: string; origin: string }) => boolean
+		) {
 			this.devicePermissionHandler = handler;
 		}
-		setPermissionCheckHandler(handler: (wc: unknown, permission: string) => boolean) {
+		setPermissionCheckHandler(handler: typeof this.permissionCheckHandler) {
 			this.permissionCheckHandler = handler;
 		}
 	}
 	class FakeWebContents extends EventEmitter {
 		session = new FakeSession();
-		mainFrame = { id: 'main-frame' };
+		mainFrame = { id: 'initial-main-frame', url: 'about:blank' };
 		sent: { channel: string; payload: unknown }[] = [];
 		send(channel: string, payload: unknown) {
 			this.sent.push({ channel, payload });
@@ -49,21 +59,94 @@ try {
 		}
 	}
 	const webContents = new FakeWebContents();
-	const win = new EventEmitter() as EventEmitter & { webContents: FakeWebContents };
+	const win = new EventEmitter() as EventEmitter & {
+		webContents: FakeWebContents;
+	};
 	win.webContents = webContents;
 	const session = webContents.session;
 
 	registerScannerDeviceSelection(win as never);
+	// Initial navigation replaces the frame that existed when the handlers were registered.
+	webContents.mainFrame = { id: 'main-frame-after-navigation', url: 'wcpos://-/index.html' };
 
-	// Permission handlers grant serial + hid only.
-	assert.equal(session.devicePermissionHandler!({ deviceType: 'serial' }), true);
-	assert.equal(session.devicePermissionHandler!({ deviceType: 'hid' }), true);
-	assert.equal(session.devicePermissionHandler!({ deviceType: 'usb' }), false);
-	assert.equal(session.permissionCheckHandler!(null, 'hid'), true);
+	// Permission handlers grant serial + hid only, and only to the trusted
+	// main frame of this window. 'media' stays unconditionally grantable.
+	assert.equal(
+		session.devicePermissionHandler!({
+			deviceType: 'serial',
+			origin: 'wcpos://-',
+		}),
+		true
+	);
+	assert.equal(
+		session.devicePermissionHandler!({
+			deviceType: 'hid',
+			origin: 'https://evil.example',
+		}),
+		false
+	);
+	assert.equal(
+		session.devicePermissionHandler!({
+			deviceType: 'usb',
+			origin: 'wcpos://-',
+		}),
+		false
+	);
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'wcpos://-', {
+			isMainFrame: true,
+		}),
+		true
+	);
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'https://evil.example', {
+			isMainFrame: true,
+		}),
+		false
+	);
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'wcpos://-', {
+			isMainFrame: false,
+		}),
+		false
+	);
+	assert.equal(
+		session.permissionCheckHandler!(null, 'hid', 'wcpos://-', {
+			isMainFrame: true,
+		}),
+		false
+	);
 	// media checks must pass, or navigator.permissions.query({name:'camera'})
-	// reports "denied" and the POS camera scanner re-asks on every open.
-	assert.equal(session.permissionCheckHandler!(null, 'media'), true);
-	assert.equal(session.permissionCheckHandler!(null, 'geolocation'), false);
+	// reports "denied" and the POS camera scanner re-asks on every open. This
+	// holds regardless of origin/frame — see the handler's carve-out comment.
+	assert.equal(
+		session.permissionCheckHandler!(null, 'media', 'https://evil.example', {
+			isMainFrame: false,
+		}),
+		true
+	);
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'media', 'wcpos://-', {
+			isMainFrame: true,
+		}),
+		true
+	);
+	// Anything that is neither a device permission nor media stays denied.
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'geolocation', 'wcpos://-', {
+			isMainFrame: true,
+		}),
+		false
+	);
+
+	// EXPO_PORT=80 is a documented development configuration. The URL parser drops a
+	// default port, so comparing url.port ('') against trustedPort ('80') disabled every
+	// trust check; origins compare correctly.
+	assert.equal(
+		session.permissionCheckHandler!(webContents, 'hid', 'wcpos://-', { isMainFrame: true }),
+		true,
+		'production origin still trusted'
+	);
 
 	const noopEvent = { preventDefault() {} };
 	const serialCalls: string[] = [];
@@ -78,8 +161,12 @@ try {
 		(portId: string) => serialCalls.push(portId)
 	);
 	assert.equal(fakeIpcMain.listenerCount('serial-port-selected'), 1);
+	assert.deepEqual(webContents.lastPayload('serial-ports'), [{ id: 's1', name: 'Scanner COM3' }]);
 	// A port plugged in while the picker is open is appended and re-sent.
-	session.emit('serial-port-added', noopEvent, { portId: 's2', portName: 'Scanner COM4' });
+	session.emit('serial-port-added', noopEvent, {
+		portId: 's2',
+		portName: 'Scanner COM4',
+	});
 	assert.deepEqual(webContents.lastPayload('serial-ports'), [
 		{ id: 's1', name: 'Scanner COM3' },
 		{ id: 's2', name: 'Scanner COM4' },
@@ -88,11 +175,45 @@ try {
 	session.emit('serial-port-removed', noopEvent, { portId: 's1' });
 	assert.deepEqual(webContents.lastPayload('serial-ports'), [{ id: 's2', name: 'Scanner COM4' }]);
 	// Selection invokes the callback once; after that hot-plug is inert.
-	fakeIpcMain.emit('serial-port-selected', { sender: webContents }, 's2');
+	// A reply from an untrusted/sub frame cannot complete the chooser.
+	fakeIpcMain.emit(
+		'serial-port-selected',
+		{ sender: webContents, senderFrame: { url: 'https://evil.example' } },
+		's1'
+	);
+	assert.deepEqual(serialCalls, []);
+	fakeIpcMain.emit(
+		'serial-port-selected',
+		{ sender: webContents, senderFrame: webContents.mainFrame },
+		's2'
+	);
 	assert.deepEqual(serialCalls, ['s2']);
 	const sentCount = webContents.sent.length;
 	session.emit('serial-port-added', noopEvent, { portId: 's9' });
 	assert.equal(webContents.sent.length, sentCount, 'no refresh once serial chooser resolved');
+
+	// An untrusted frame's chooser is REFUSED, not merely ignored: the event is
+	// prevented and the request cancelled with '', so an unhandled-event fail-open
+	// cannot grant the very request the trust check exists to refuse.
+	{
+		let prevented = false;
+		const refusedCalls: string[] = [];
+		webContents.mainFrame = { id: 'hostile-frame', url: 'https://evil.example/' };
+		session.emit(
+			'select-serial-port',
+			{
+				preventDefault() {
+					prevented = true;
+				},
+			},
+			[{ portId: 'x1', portName: 'Scanner' }],
+			webContents,
+			(portId: string) => refusedCalls.push(portId)
+		);
+		assert.equal(prevented, true, 'untrusted serial chooser must be prevented');
+		assert.deepEqual(refusedCalls, [''], 'untrusted serial chooser must be cancelled');
+		webContents.mainFrame = { id: 'main-frame-after-navigation', url: 'wcpos://-/index.html' };
+	}
 
 	// A serial chooser from another window's webContents is ignored.
 	const before = webContents.sent.length;
@@ -100,6 +221,37 @@ try {
 		serialCalls.push('other')
 	);
 	assert.equal(webContents.sent.length, before, 'foreign serial request not surfaced');
+
+	// A reply from a DIFFERENT (but still trusted) frame cannot complete a chooser the
+	// previous document opened — the reload case greptile flagged on #318.
+	{
+		const staleCalls: string[] = [];
+		session.emit(
+			'select-serial-port',
+			noopEvent,
+			[{ portId: 'p1', portName: 'Scanner' }],
+			webContents,
+			(portId: string) => staleCalls.push(portId)
+		);
+		const opener = webContents.mainFrame;
+		// The renderer reloads: Electron replaces the main frame with a new object.
+		webContents.mainFrame = { id: 'replacement-frame', url: 'wcpos://-/index.html' };
+		fakeIpcMain.emit(
+			'serial-port-selected',
+			{ sender: webContents, senderFrame: webContents.mainFrame },
+			'p1'
+		);
+		assert.deepEqual(staleCalls, [], 'a replacement document must not complete the old chooser');
+		// Nor can the frame that opened it: that document is gone, so isTrustedFrame
+		// already rejects it. After a navigation the chooser is therefore stranded
+		// rather than mis-answered — safe, but the callback is never invoked. Cancelling
+		// it on did-start-navigation is the separate lifecycle change noted on #318.
+		fakeIpcMain.emit('serial-port-selected', { sender: webContents, senderFrame: opener }, 'p1');
+		assert.deepEqual(staleCalls, [], 'the replaced document cannot complete it either');
+		// Reset shared chooser state for the assertions that follow.
+		webContents.mainFrame = opener;
+		fakeIpcMain.emit('serial-port-selected', { sender: webContents, senderFrame: opener }, '');
+	}
 
 	// --- HID: frame filter, live refresh, and no-arg cancel. -------------------
 	// A request from a different frame is ignored.
@@ -115,18 +267,27 @@ try {
 	session.emit(
 		'select-hid-device',
 		noopEvent,
-		{ deviceList: [{ deviceId: 'h1', productName: 'Barcode HID' }], frame: webContents.mainFrame },
+		{
+			deviceList: [{ deviceId: 'h1', productName: 'Barcode HID' }],
+			frame: webContents.mainFrame,
+		},
 		(deviceId?: string) => hidCalls.push([deviceId])
 	);
 	assert.deepEqual(webContents.lastPayload('hid-devices'), [{ id: 'h1', name: 'Barcode HID' }]);
 	// Hot-plug add refreshes.
-	session.emit('hid-device-added', noopEvent, { device: { deviceId: 'h2', name: 'Second HID' } });
+	session.emit('hid-device-added', noopEvent, {
+		device: { deviceId: 'h2', name: 'Second HID' },
+	});
 	assert.deepEqual(webContents.lastPayload('hid-devices'), [
 		{ id: 'h1', name: 'Barcode HID' },
 		{ id: 'h2', name: 'Second HID' },
 	]);
 	// Cancelling (empty id) calls the callback with NO argument, not ''.
-	fakeIpcMain.emit('hid-device-selected', { sender: webContents }, '');
+	fakeIpcMain.emit(
+		'hid-device-selected',
+		{ sender: webContents, senderFrame: webContents.mainFrame },
+		''
+	);
 	assert.deepEqual(hidCalls, [[undefined]]);
 
 	// A real selection passes the id through.
@@ -136,7 +297,11 @@ try {
 		{ deviceList: [{ deviceId: 'h3' }], frame: webContents.mainFrame },
 		(deviceId?: string) => hidCalls.push([deviceId])
 	);
-	fakeIpcMain.emit('hid-device-selected', { sender: webContents }, 'h3');
+	fakeIpcMain.emit(
+		'hid-device-selected',
+		{ sender: webContents, senderFrame: webContents.mainFrame },
+		'h3'
+	);
 	assert.deepEqual(hidCalls[1], ['h3']);
 
 	// --- Window close removes every listener.
