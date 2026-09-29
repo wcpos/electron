@@ -4,7 +4,11 @@ import path from 'path';
 import { app, ipcMain } from 'electron';
 import { IPC_RENDERER_KEY_PREFIX } from 'rxdb/plugins/electron';
 import { exposeRxStorageRemote } from 'rxdb/plugins/storage-remote';
-import { getRxStorageFilesystemNode } from 'rxdb-premium/plugins/storage-filesystem-node';
+import { getRxStorageAbstractFilesystem } from 'rxdb-premium/plugins/storage-abstract-filesystem';
+import {
+	NodeFilesystem,
+	RX_STORAGE_NAME_FILESYSTEM_NODE,
+} from 'rxdb-premium/plugins/storage-filesystem-node';
 import { disableVersionCheck } from 'rxdb-premium/plugins/shared';
 import { Subject } from 'rxjs';
 
@@ -17,6 +21,7 @@ import {
 import { logger } from './log';
 import { withTargetedOpfsRecovery } from './opfs-targeted-recovery.mjs';
 import { installRxdbStorageTelemetry } from './rxdb-storage-telemetry';
+import { createStorageLock } from './storage-lock';
 
 // rxdb-premium 17.0.0 is installed but rxdb is 17.1.0. storage-abstract-filesystem
 // (used by filesystem-node) calls checkVersion() on every createStorageInstance, which
@@ -25,11 +30,26 @@ disableVersionCheck();
 
 const MAIN_STORAGE_KEY = 'main-storage';
 let bridgeInitializationPromise: Promise<void> | undefined;
-let storagePromise: Promise<ReturnType<typeof getRxStorageFilesystemNode>> | undefined;
+let storagePromise: Promise<ReturnType<typeof getFilesystemNodeStorage>> | undefined;
+
+/**
+ * rxdb-premium's own `getRxStorageFilesystemNode` with one substitution: the
+ * task-queue lock. The plugin's `web-locks` lock drops a run's rejection on
+ * the floor (see storage-lock.ts), which is how a failing write run reached
+ * Sentry only as an unhandled rejection and never as a storage event.
+ */
+function getFilesystemNodeStorage(basePath: string) {
+	return getRxStorageAbstractFilesystem({
+		name: RX_STORAGE_NAME_FILESYSTEM_NODE,
+		abstractFilesystem: new NodeFilesystem(basePath),
+		abstractLock: createStorageLock(),
+		inWorker: false,
+	});
+}
 
 function exposeIpcMainRxStorageWithAttachmentCodec(args: {
 	key: string;
-	storage: ReturnType<typeof getRxStorageFilesystemNode>;
+	storage: ReturnType<typeof getFilesystemNodeStorage>;
 	ipcMain: typeof ipcMain;
 }) {
 	const channelId = [IPC_RENDERER_KEY_PREFIX, args.key].join('|');
@@ -126,7 +146,7 @@ export async function getMainRxdbStorage() {
 				// web OPFS worker, so the same in-place corruption recovery wrapper
 				// applies. The module is a byte-identical copy of the monorepo's
 				// scripts/opfs-targeted-recovery.mjs, enforced by a sync test there.
-				return withTargetedOpfsRecovery(getRxStorageFilesystemNode({ basePath }));
+				return withTargetedOpfsRecovery(getFilesystemNodeStorage(basePath));
 			} catch (error) {
 				storagePromise = undefined;
 				throw error;
