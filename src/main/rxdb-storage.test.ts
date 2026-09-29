@@ -6,6 +6,7 @@ import Module from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 
 import { fillWithDefaultSettings } from 'rxdb/plugins/core';
+import { getRxStorageSQLite, getSQLiteBasicsNodeNative } from 'rxdb-premium/plugins/storage-sqlite';
 
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'rxdb-storage-test-'));
 const mutableModule = Module as typeof Module & { _load: (...args: any[]) => any };
@@ -25,6 +26,12 @@ async function main() {
 		mutableModule._load = originalLoad;
 	}
 	const storage = await getMainRxdbStorage();
+	assert.equal(
+		storage.name,
+		getRxStorageSQLite({ sqliteBasics: getSQLiteBasicsNodeNative(DatabaseSync) }).name
+	);
+	assert.equal(storage.settings.storeAttachmentsAsBase64String, true);
+	assert.equal(storage.base64AttachmentToStoredAttachmentsData('aGVsbG8='), 'aGVsbG8=');
 	const instance = await storage.createStorageInstance({
 		databaseInstanceToken: 'storage-test',
 		databaseName: 'sales',

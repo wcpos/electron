@@ -4,7 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
+import webpack from 'webpack';
+
 import forgeConfig from '../forge.config';
+import pkg from '../package.json';
+import { mainConfig } from '../webpack.main.config';
 
 async function main() {
 	const buildPath = fs.realpathSync(
@@ -16,6 +20,37 @@ async function main() {
 	fs.writeFileSync(path.join(webpackMainPath, 'index.js'), '// packaged main entry');
 
 	try {
+		assert.equal(
+			'node:sqlite' in pkg.dependencies,
+			false,
+			'SQLite is a Node built-in, not a dependency'
+		);
+		const probe = path.join(buildPath, 'sqlite-probe.js');
+		fs.writeFileSync(probe, "module.exports = require('node:sqlite');");
+		const stats = await new Promise<webpack.Stats>((resolve, reject) => {
+			const compiler = webpack({
+				mode: 'development',
+				target: mainConfig.target,
+				externals: mainConfig.externals,
+				entry: probe,
+				output: { path: path.join(buildPath, 'probe-output'), filename: 'main.js' },
+			});
+			compiler.run((error, result) =>
+				compiler.close((closeError) => {
+					if (error || closeError) reject(error || closeError);
+					else resolve(result);
+				})
+			);
+		});
+		assert.equal(stats.hasErrors(), false, stats.toString());
+		assert.ok(
+			stats
+				.toJson({ modules: true })
+				.modules.some((module) => module.name === 'external "node:sqlite"'),
+			'electron-main leaves node:sqlite external'
+		);
+		assert.ok('DatabaseSync' in createRequire(probe)('node:sqlite'));
+
 		assert.ok(
 			forgeConfig.hooks?.packageAfterPrune,
 			'forge config should define a packageAfterPrune hook'
