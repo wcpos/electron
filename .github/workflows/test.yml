@@ -39,6 +39,9 @@ jobs:
       - name: 🏗 Setup Electron
         uses: ./.github/actions/setup-electron
 
+      - name: 🔒 CI cache guard
+        run: node --test scripts/ci-cache-guard.test.mjs
+
       - name: 🏗 Add RXDB_LICENSE_KEY to package.json
         env:
           RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
