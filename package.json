@@ -43,7 +43,7 @@
 		"publish-app": "pnpm run patch:premium && electron-forge publish",
 		"lint": "eslint src --ext .js,.jsx,.ts,.tsx",
 		"lint:fix": "eslint src --ext .js,.jsx,.ts,.tsx --fix",
-		"test": "pnpm run test:resurrection-patch && pnpm run test:containment-patch && pnpm run test:replay-safety-patch && pnpm run test:changes-file-salvage-patch && pnpm run test:changelog-identity-patch && pnpm run test:import-renderer && pnpm run test:smoke-packaged-unit && pnpm run test:http-bridge && pnpm run test:cloudflare-challenge && pnpm run test:preload && pnpm run test:usb-model-reply && pnpm run test:novu && pnpm run test:printer-discovery && pnpm run test:winspool-printer && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache && pnpm run test:external-window-isolation && pnpm run test:frame-headers && pnpm run test:package-runtime-externals && pnpm run test:bluetooth-select && pnpm run test:device-select && pnpm run test:serial-printer && pnpm run test:raw-print && pnpm run test:print-raw-tcp && pnpm run test:print-epos-http && pnpm run test:boot && pnpm run test:update && pnpm run test:storage-measure && pnpm run test:sentry-hygiene && pnpm run test:renderer-log && pnpm run test:sqlite-basics-node && pnpm run test:rxdb-storage",
+		"test": "pnpm run test:resurrection-patch && pnpm run test:containment-patch && pnpm run test:replay-safety-patch && pnpm run test:changes-file-salvage-patch && pnpm run test:changelog-identity-patch && pnpm run test:import-renderer && pnpm run test:smoke-packaged-unit && pnpm run test:http-bridge && pnpm run test:cloudflare-challenge && pnpm run test:preload && pnpm run test:usb-model-reply && pnpm run test:novu && pnpm run test:printer-discovery && pnpm run test:winspool-printer && pnpm run test:rxdb-ipc-attachments && pnpm run test:image-cache && pnpm run test:external-window-isolation && pnpm run test:frame-headers && pnpm run test:package-runtime-externals && pnpm run test:bluetooth-select && pnpm run test:device-select && pnpm run test:serial-printer && pnpm run test:raw-print && pnpm run test:print-raw-tcp && pnpm run test:print-epos-http && pnpm run test:boot && pnpm run test:update && pnpm run test:storage-measure && pnpm run test:sentry-hygiene && pnpm run test:renderer-log && pnpm run test:sqlite-basics-node && pnpm run test:rxdb-storage && pnpm run test:purge-legacy-databases",
 		"ts:check": "tsc --noEmit",
 		"test:http-bridge": "ts-node src/main/http-bridge.test.ts",
 		"test:cloudflare-challenge": "ts-node src/main/cloudflare-challenge.test.ts",
@@ -70,7 +70,8 @@
 		"test:renderer-log": "ts-node src/main/log.test.ts",
 		"test:smoke-packaged": "node scripts/smoke-packaged-app.mjs",
 		"test:sqlite-basics-node": "ts-node src/main/sqlite-basics-node.test.ts",
-		"test:rxdb-storage": "ts-node src/main/rxdb-storage.test.ts"
+		"test:rxdb-storage": "ts-node src/main/rxdb-storage.test.ts",
+		"test:purge-legacy-databases": "ts-node src/main/purge-legacy-databases.test.ts"
 	},
 	"dependencies": {
 		"@novu/js": "3.19.2",

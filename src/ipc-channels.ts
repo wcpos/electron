@@ -107,10 +107,15 @@ export interface IpcInvokeChannels {
 	'http-request': { req: unknown; res: unknown };
 	novu: { req: NovuBridgeRequest; res: NovuBridgeResponse };
 	'auth:prompt': { req: AuthPromptParams; res: AuthResult };
+	purgeLegacyDatabases: { req: undefined; res: { removed: string[] } };
 	'storage:measure': {
 		req: undefined;
 		res: {
-			entries: { name: string; bytes: number; root: 'fsdbs' | 'legacy-sqlite' | 'image-cache' }[];
+			entries: {
+				name: string;
+				bytes: number;
+				root: 'sqlite' | 'fsdbs' | 'legacy-sqlite' | 'image-cache';
+			}[];
 		};
 	};
 }
@@ -150,6 +155,7 @@ export const INVOKE_CHANNELS = [
 	'novu',
 	'auth:prompt',
 	'storage:measure',
+	'purgeLegacyDatabases',
 ] as const satisfies readonly (keyof IpcInvokeChannels)[];
 
 export const SEND_CHANNELS = [
