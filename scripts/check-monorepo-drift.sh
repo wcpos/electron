@@ -4,17 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ref=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' .monorepo-ref)
 readonly pairs=(
-  "src/main/opfs-targeted-recovery.mjs:scripts/opfs-targeted-recovery.mjs"
-  "src/main/opfs-targeted-recovery.test.mjs:scripts/opfs-targeted-recovery.test.mjs"
-  "scripts/patch-rxdb-premium-changes-file-salvage.mjs:scripts/patch-rxdb-premium-changes-file-salvage.mjs"
-  "scripts/rxdb-premium-changes-file-salvage.test.mjs:scripts/rxdb-premium-changes-file-salvage.test.mjs"
-  "scripts/patch-rxdb-premium-task-queue-containment.mjs:scripts/patch-rxdb-premium-task-queue-containment.mjs"
-  "scripts/rxdb-premium-task-queue-containment.test.mjs:scripts/rxdb-premium-task-queue-containment.test.mjs"
-  "scripts/patch-rxdb-premium-changelog-replay-safety.mjs:scripts/patch-rxdb-premium-changelog-replay-safety.mjs"
-  "scripts/patch-rxdb-premium-changelog-identity.mjs:scripts/patch-rxdb-premium-changelog-identity.mjs"
-  "scripts/rxdb-premium-changelog-identity.test.mjs:scripts/rxdb-premium-changelog-identity.test.mjs"
+  "scripts/patch-rxdb-premium-sqlite-query-translation.mjs:scripts/patch-rxdb-premium-sqlite-query-translation.mjs"
+  "scripts/rxdb-premium-sqlite-query-translation.test.mjs:scripts/rxdb-premium-sqlite-query-translation.test.mjs"
 )
-# scripts/patch-rxdb-premium-resurrection-leak.mjs differs intentionally; excluded.
 readonly fix="copy the monorepo file over the local one, or bump .monorepo-ref"
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
