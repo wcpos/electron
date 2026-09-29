@@ -40,6 +40,7 @@ export const mainConfig: WebpackConfiguration = {
 	resolve: {
 		extensions: ['.js', '.ts', '.jsx', '.tsx', '.css', '.json'],
 	},
+	// This target externalises Node built-ins, including node:sqlite; no npm dependency is needed.
 	target: 'electron-main',
 	// `usb` loads its native binding via `node-gyp-build(join(__dirname, '..', '..'))`.
 	// When webpack bundles it, `__dirname` becomes `.webpack/main`, so node-gyp-build

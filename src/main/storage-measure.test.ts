@@ -20,6 +20,7 @@ mutableModule._load = function patchedLoad(
 	if (request === './rxdb-storage') {
 		return {
 			getFilesystemNodeBasePath() {},
+			getSqliteBasePath() {},
 			getLegacySqliteBasePath() {},
 		};
 	}
@@ -37,11 +38,26 @@ async function main() {
 	}
 
 	const fixture = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'storage-measure-test-'));
+	const sqlitePath = path.join(fixture, 'sqlite');
 	const filesystemPath = path.join(fixture, 'fsdbs');
 	const legacyPath = path.join(fixture, 'legacy-sqlite');
 	const imageCachePath = path.join(fixture, 'image-cache');
 
 	try {
+		await fs.promises.mkdir(sqlitePath);
+		for (const [name, contents] of [
+			['sales.sqlite', '1234'],
+			['sales.sqlite-wal', '123456'],
+			['sales.sqlite-shm', '12'],
+			['logs.sqlite', '123'],
+			['ignore.txt', 'ignored'],
+		])
+			await fs.promises.writeFile(path.join(sqlitePath, name), contents);
+		await fs.promises.symlink(
+			path.join(sqlitePath, 'sales.sqlite'),
+			path.join(sqlitePath, 'link.sqlite')
+		);
+		await fs.promises.mkdir(path.join(sqlitePath, 'directory.sqlite'));
 		await fs.promises.mkdir(path.join(filesystemPath, 'orders', 'nested'), { recursive: true });
 		await fs.promises.mkdir(path.join(legacyPath, 'ignored-directory'), { recursive: true });
 		await fs.promises.mkdir(path.join(imageCachePath, 'nested'), { recursive: true });
@@ -60,13 +76,15 @@ async function main() {
 			path.join(legacyPath, 'store-link.sqlite3')
 		);
 
-		const result = await measureStorage(filesystemPath, legacyPath, imageCachePath);
+		const result = await measureStorage(filesystemPath, legacyPath, imageCachePath, sqlitePath);
 		assert.deepEqual(
 			result.entries.sort((a, b) => a.name.localeCompare(b.name)),
 			[
 				{ name: 'image-cache', bytes: 10, root: 'image-cache' },
+				{ name: 'logs', bytes: 3, root: 'sqlite' },
 				{ name: 'orders', bytes: 10, root: 'fsdbs' },
 				{ name: 'plain.bin', bytes: 3, root: 'fsdbs' },
+				{ name: 'sales', bytes: 12, root: 'sqlite' },
 				{ name: 'store_v3.sqlite3', bytes: 5, root: 'legacy-sqlite' },
 			]
 		);
@@ -75,7 +93,8 @@ async function main() {
 			await measureStorage(
 				path.join(fixture, 'missing-fsdbs'),
 				path.join(fixture, 'missing-legacy'),
-				path.join(fixture, 'missing-image-cache')
+				path.join(fixture, 'missing-image-cache'),
+				path.join(fixture, 'missing-sqlite')
 			),
 			{ entries: [] }
 		);

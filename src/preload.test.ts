@@ -37,7 +37,13 @@ const electronMock = {
 		send() {},
 		invoke(channel: string, args: unknown) {
 			invokeCalls.push({ channel, args });
-			return Promise.resolve(channel === 'storage:measure' ? { entries: [] } : undefined);
+			return Promise.resolve(
+				channel === 'storage:measure'
+					? { entries: [] }
+					: channel === 'purgeLegacyDatabases'
+						? { removed: ['legacy-path'] }
+						: undefined
+			);
 		},
 		on(channel: string, listener: (...args: unknown[]) => void) {
 			onCalls.push({ channel, listener });
@@ -144,6 +150,12 @@ async function main() {
 		{ entries: [] },
 		'preload should return storage measurement results'
 	);
+	const purged = await typedIpcRenderer.invoke('purgeLegacyDatabases');
+	assert.deepEqual(invokeCalls[invokeCalls.length - 1], {
+		channel: 'purgeLegacyDatabases',
+		args: undefined,
+	});
+	assert.deepEqual(purged, { removed: ['legacy-path'] });
 	assert.equal(typeof exposedIpcRenderer.on, 'function', 'preload should expose ipcRenderer.on');
 	assert.equal(
 		typeof exposedIpcRenderer.removeListener,

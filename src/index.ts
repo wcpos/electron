@@ -18,6 +18,7 @@ import { createWindow, getMainWindow } from './main/window';
 import './main/http-bridge';
 import './main/image-cache';
 import './main/storage-measure';
+import './main/purge-legacy-databases';
 import './main/print-external-url';
 import './main/print-raw-tcp';
 import './main/print-epos-http';

@@ -5,12 +5,16 @@ import { ipcMain } from 'electron';
 
 import { getImageCachePath } from './image-cache-path';
 import { logger } from './log';
-import { getFilesystemNodeBasePath, getLegacySqliteBasePath } from './rxdb-storage';
+import {
+	getFilesystemNodeBasePath,
+	getLegacySqliteBasePath,
+	getSqliteBasePath,
+} from './rxdb-storage';
 
 type StorageEntry = {
 	name: string;
 	bytes: number;
-	root: 'fsdbs' | 'legacy-sqlite' | 'image-cache';
+	root: 'sqlite' | 'fsdbs' | 'legacy-sqlite' | 'image-cache';
 };
 
 async function measurePath(entryPath: string): Promise<number | undefined> {
@@ -52,9 +56,19 @@ async function readBasePath(basePath: string) {
 export async function measureStorage(
 	filesystemPath: string,
 	legacyPath: string,
-	imageCachePath: string
+	imageCachePath: string,
+	sqlitePath: string
 ) {
 	const entries: StorageEntry[] = [];
+	const databases = new Map<string, number>();
+	for (const entry of await readBasePath(sqlitePath)) {
+		if (!entry.isFile()) continue;
+		const match = /^(.*)\.sqlite(?:-(?:wal|shm))?$/.exec(entry.name);
+		if (!match) continue;
+		const bytes = await measurePath(path.join(sqlitePath, entry.name));
+		if (bytes !== undefined) databases.set(match[1], (databases.get(match[1]) ?? 0) + bytes);
+	}
+	for (const [name, bytes] of databases) entries.push({ name, bytes, root: 'sqlite' });
 
 	for (const entry of await readBasePath(filesystemPath)) {
 		if (entry.isSymbolicLink()) continue;
@@ -83,7 +97,8 @@ ipcMain.handle('storage:measure', async () => {
 		return await measureStorage(
 			getFilesystemNodeBasePath(),
 			getLegacySqliteBasePath(),
-			getImageCachePath()
+			getImageCachePath(),
+			getSqliteBasePath()
 		);
 	} catch (error) {
 		logger.error('Failed to measure storage', error);
