@@ -29,6 +29,7 @@ test("a non-numeric next suffix is a problem", () => {
 
 test("every publish job checks the lane version after applying it", () => {
   const text = readFileSync(new URL(".github/workflows/tag-and-release.yml", root), "utf8");
+  assert.ok(text.includes('case "$GITHUB_REF_NAME" in main|next) ;;'), "Publish does not refuse refs other than main and next");
   const lines = text.split("\n");
   const jobs = [];
   let current = null;
@@ -39,6 +40,13 @@ test("every publish job checks the lane version after applying it", () => {
   const publishJobs = jobs.filter((job) => job.body.includes("pnpm run publish-app"));
   assert.ok(publishJobs.length >= 4, `expected at least 4 publish jobs, found ${publishJobs.length}`);
   for (const { name, body } of publishJobs) {
+    const start = body.indexOf("- name: Apply lane version");
+    assert.ok(start >= 0, `${name} has no Apply lane version step`);
+    const next = body.indexOf("\n      - name:", start);
+    const step = body.slice(start, next < 0 ? undefined : next);
+    assert.ok(step.includes("if: needs.build-expo.outputs.lane == 'next'"), `${name} Apply lane version is not gated on the next lane`);
+    assert.ok(step.includes('npm version --no-git-tag-version "$LANE_VERSION"'), `${name} Apply lane version step does not apply the lane version`);
+    assert.ok(step.includes('node scripts/check-lane-version.mjs "$LANE_VERSION"'), `${name} Apply lane version step does not check the lane version`);
     const apply = body.indexOf('npm version --no-git-tag-version "$LANE_VERSION"');
     const check = body.indexOf('node scripts/check-lane-version.mjs "$LANE_VERSION"');
     const publish = body.indexOf("pnpm run publish-app");
