@@ -49,6 +49,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node --test scripts/check-next-version.test.mjs
+          node --test scripts/check-lane-version.test.mjs
           stable=$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=main" -H "Accept: application/vnd.github.raw" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
           node scripts/check-next-version.mjs "$(node -p "require('./package.json').version")" "$stable"
 
