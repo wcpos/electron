@@ -5,7 +5,8 @@ name: Publish
 #   next  → next lane: version `<package.json>-next.<run>`, a published PRERELEASE built from
 #           wcpos/monorepo `next` (unless monorepo_ref says otherwise). Testers install it from
 #           the releases page; GitHub's "latest" (what updates.wcpos.com serves) never points at
-#           a prerelease, and a prerelease build skips scheduled update checks.
+#           a prerelease, and a next-lane build is only ever offered a newer build of its own lane
+#           (update.ts isOfferedUpdate).
 # A push builds Linux only; dispatch with platform=all for signed macOS and Windows installers.
 on:
   push:
@@ -609,7 +610,7 @@ jobs:
             echo "::warning title=App notes skipped::wcpos/monorepo ref $app_ref is not a release tag; using the desktop footer only."
           fi
           if [ "$LANE" = "next" ]; then
-            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update; a prerelease build does not check for updates on its own." >> "$notes_file"
+            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update: the app's update check only offers newer next-lane builds, and updates.wcpos.com serves releases only, so install newer next builds from this page." >> "$notes_file"
           else
             echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
           fi

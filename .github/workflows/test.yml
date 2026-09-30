@@ -42,6 +42,16 @@ jobs:
       - name: 🔒 CI cache guard
         run: node --test scripts/ci-cache-guard.test.mjs
 
+      # Keeps next's base version in package.json ahead of main's (#483).
+      - name: 🔒 Next-lane version guard
+        if: github.base_ref == 'next' || github.ref_name == 'next'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --test scripts/check-next-version.test.mjs
+          stable=$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=main" -H "Accept: application/vnd.github.raw" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          node scripts/check-next-version.mjs "$(node -p "require('./package.json').version")" "$stable"
+
       - name: 🏗 Add RXDB_LICENSE_KEY to package.json
         env:
           RXDB_LICENSE_KEY: ${{ secrets.RXDB_LICENSE_KEY }}
