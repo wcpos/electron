@@ -78,6 +78,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          case "$GITHUB_REF_NAME" in main|next) ;; *) echo "::error::Publish runs only from main or next, not $GITHUB_REF_NAME"; exit 1 ;; esac
           base=$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
           if [ "$GITHUB_REF_NAME" = "next" ]; then
             lane=next
@@ -130,6 +131,18 @@ jobs:
           rxdb-license-key: ${{ secrets.RXDB_LICENSE_KEY }}
           uniwind-auth-token: ${{ secrets.UNIWIND_AUTH_TOKEN }}
 
+      - name: 🔒 Renderer rxdb matches the main process
+        # storage-remote needs the renderer's rxdb to be exactly the main process's, whatever
+        # monorepo ref this run builds from; drift only checks .monorepo-ref (#485).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/contents/scripts/check-renderer-rxdb.mjs?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/check-renderer-rxdb.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/electron-package.json"
+          pnpm list -r --depth 0 --json rxdb rxdb-premium > "$RUNNER_TEMP/renderer-rxdb.json"
+          node "$RUNNER_TEMP/check-renderer-rxdb.mjs" "$RUNNER_TEMP/renderer-rxdb.json" "$RUNNER_TEMP/electron-package.json"
+
       - name: 🔨 Build Expo for Electron
         run: pnpm --filter @wcpos/main build:electron
 
@@ -158,7 +171,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -247,7 +262,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -332,7 +349,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -430,7 +449,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -610,7 +631,7 @@ jobs:
             echo "::warning title=App notes skipped::wcpos/monorepo ref $app_ref is not a release tag; using the desktop footer only."
           fi
           if [ "$LANE" = "next" ]; then
-            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update: the app's update check only offers newer next-lane builds, and updates.wcpos.com serves releases only, so install newer next builds from this page." >> "$notes_file"
+            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update: the app's update check only offers newer next-lane builds, and updates.wcpos.com serves releases only, so install newer next builds from this page. If you are on 1.10.19-next.668 or older, install this build from this page and do not accept the offered update to a stable 1.10.x release; those builds predate the next-lane update check. Local data does not carry across between stable and next-lane builds, in either direction. Installing a next-lane build over a stable release deletes the stable app's local data on first start, so changes stable has not synced yet are lost. Going back to a stable 1.10.x release starts empty, and changes the next-lane build has not synced stay behind; sync before switching either way." >> "$notes_file"
           else
             echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
           fi

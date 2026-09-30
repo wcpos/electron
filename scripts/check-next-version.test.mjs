@@ -25,6 +25,10 @@ test("1.10.19 below stable is a problem (the bug #483 fixes)", () => {
   assert.equal(typeof nextVersionProblem("1.10.19", "1.10.27"), "string");
 });
 
+test("the below-stable message says how to fix it", () => {
+  assert.ok(nextVersionProblem("1.10.19", "1.10.27").includes("bump next's version in package.json above main's"));
+});
+
 test("1.9.99 is below 1.10.27 (numeric, not string, comparison)", () => {
   assert.equal(typeof nextVersionProblem("1.9.99", "1.10.27"), "string");
 });

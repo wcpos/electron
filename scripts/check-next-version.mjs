@@ -12,7 +12,7 @@ export function nextVersionProblem(nextVersion, stableVersion) {
   if (!PLAIN.test(stableVersion)) return `stable version "${stableVersion}" is not a plain x.y.z`;
   const [a, b] = [nextVersion, stableVersion].map((v) => v.split(".").map(Number));
   const order = a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-  return order > 0 ? null : `next version ${nextVersion} must be above stable ${stableVersion}`;
+  return order > 0 ? null : `next version ${nextVersion} must be above stable ${stableVersion}: bump next's version in package.json above main's (a main→next sync must keep next's version)`;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
