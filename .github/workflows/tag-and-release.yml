@@ -158,7 +158,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -247,7 +249,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -332,7 +336,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -430,7 +436,9 @@ jobs:
         shell: bash
         env:
           LANE_VERSION: ${{ needs.build-expo.outputs.version }}
-        run: npm version --no-git-tag-version "$LANE_VERSION"
+        run: |
+          npm version --no-git-tag-version "$LANE_VERSION"
+          node scripts/check-lane-version.mjs "$LANE_VERSION"
 
 
       - name: 📦 Download expo-dist artifact
@@ -610,7 +618,7 @@ jobs:
             echo "::warning title=App notes skipped::wcpos/monorepo ref $app_ref is not a release tag; using the desktop footer only."
           fi
           if [ "$LANE" = "next" ]; then
-            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update: the app's update check only offers newer next-lane builds, and updates.wcpos.com serves releases only, so install newer next builds from this page." >> "$notes_file"
+            echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update: the app's update check only offers newer next-lane builds, and updates.wcpos.com serves releases only, so install newer next builds from this page. If you are on 1.10.19-next.668 or older, install this build from this page and do not accept the offered update to a stable 1.10.x release; those builds predate the next-lane update check." >> "$notes_file"
           else
             echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
           fi
