@@ -123,6 +123,12 @@ export interface IpcInvokeChannels {
 /** The merchant's tracking consent, as stored by the plugin's general settings. */
 export type TelemetryConsent = 'undecided' | 'allowed' | 'denied';
 
+/**
+ * Whether the app theme's top strip is light or dark — every theme but `light`
+ * has a dark rail. Colours the Windows/Linux window-control glyphs (src/main/title-bar.ts).
+ */
+export type WindowColorScheme = 'light' | 'dark';
+
 export interface IpcSendChannels {
 	clearData: unknown;
 	'print-external-url': { externalURL: string; printJobId: string };
@@ -133,6 +139,7 @@ export interface IpcSendChannels {
 	// The renderer forwards the store's consent so main gates its own Sentry
 	// client on the same switch (src/main/telemetry-consent.ts).
 	'telemetry-consent': TelemetryConsent;
+	'window-color-scheme': WindowColorScheme;
 }
 
 export interface IpcOnChannels {
@@ -166,6 +173,7 @@ export const SEND_CHANNELS = [
 	'serial-port-selected',
 	'hid-device-selected',
 	'telemetry-consent',
+	'window-color-scheme',
 ] as const satisfies readonly (keyof IpcSendChannels)[];
 
 export const ON_CHANNELS = [
