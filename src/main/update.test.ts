@@ -45,6 +45,10 @@ const STREAMING_ASSET_URL = 'https://updates.test/app-streaming.zip';
 const FAILING_ASSET_URL = 'https://updates.test/app-failing.zip';
 let assetUrl = STALLED_ASSET_URL;
 let assetNames = ['app.zip'];
+// The running app's version and the manifest's offered version. The channel cases at the end
+// change them; every earlier case runs on these defaults.
+let appVersion = '1.0.0';
+let manifestVersion = '9.9.9';
 const pendingDownloads: ((response: unknown) => void)[] = [];
 const foundUpdatePayload = async (url: string): Promise<unknown> => {
 	if (url === STALLED_ASSET_URL) {
@@ -61,7 +65,7 @@ const foundUpdatePayload = async (url: string): Promise<unknown> => {
 	return {
 		ok: true,
 		json: async () => ({
-			version: '9.9.9',
+			version: manifestVersion,
 			name: 'Next',
 			releaseDate: '2026-09-15',
 			notes: '',
@@ -80,7 +84,7 @@ const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'wcpos-update-test-'));
 
 const electronStub = {
 	app: {
-		getVersion: () => '1.0.0',
+		getVersion: () => appVersion,
 		getPath: () => tempRoot,
 	},
 	autoUpdater: {
@@ -229,9 +233,20 @@ const downloadedInstallers = () =>
 const realPlatform = process.platform;
 Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
 
+// A check blocked on an unanswered dialog leaves no timers, so without this the process exits 0.
+let finished = false;
+process.on('beforeExit', () => {
+	if (!finished) {
+		console.error(
+			'update.test.ts did not finish: a check is still waiting, most likely on an unexpected dialog'
+		);
+		process.exitCode = 1;
+	}
+});
+
 (async () => {
 	try {
-		const { AutoUpdater } = await import('./update');
+		const { AutoUpdater, isOfferedUpdate } = await import('./update');
 		const updater = new AutoUpdater({ isDestroyed: () => false } as never);
 
 		// Three hourly ticks land while the first dialog is still open.
@@ -681,6 +696,115 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		await waitFor(() => feeds() > beforeFeedFail);
 		assert.equal(feeds(), beforeFeedFail + 1, 'a throwing hand-off does not wedge the session');
 
+		// The update server offers its latest stable release to every build, next builds
+		// included. Only a newer version on the build's own channel may be offered, and the
+		// prerelease must stay in the comparison.
+		const offers: [unknown, string, boolean][] = [
+			['1.11.0-next.4', '1.11.0-next.3', true],
+			['1.10.27', '1.11.0-next.3', false],
+			['1.11.0-next.2', '1.11.0-next.3', false],
+			['1.11.0-next.3', '1.11.0-next.3', false],
+			['1.10.27', '1.10.19-next.700', false],
+			['1.11.0-beta.1', '1.11.0-next.3', false],
+			['1.10.27', '1.10.19', true],
+			['1.10.19', '1.10.19', false],
+			['1.10.18', '1.10.19', false],
+			['1.11.0-next.4', '1.10.19', false],
+			['', '1.10.19', false],
+			['not-a-version', '1.10.19', false],
+			[undefined, '1.10.19', false],
+		];
+		for (const [offered, current, expected] of offers) {
+			assert.equal(
+				isOfferedUpdate(offered, current),
+				expected,
+				`'${String(offered)}' offered to ${current} should be ${expected}`
+			);
+		}
+
+		// Both check paths on a next build: the stable release the server offers is not an
+		// update, and a newer next build is.
+		backing.delete('remindLaterTimestamp');
+		appVersion = '1.11.0-next.3';
+		manifestVersion = '1.10.27';
+		const nextUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		const channelMenu = { enabled: true };
+		const dialogsBeforeStable = openDialogs.length;
+		assert.equal(await nextUpdater.checkForUpdates(), false, 'scheduled: stable is not offered');
+		assert.equal(openDialogs.length, dialogsBeforeStable, 'scheduled: no Found Updates dialog');
+		const upToDateBefore = noUpdateDialogs.length;
+		await nextUpdater.manualCheckForUpdates(channelMenu as never);
+		assert.equal(openDialogs.length, dialogsBeforeStable, 'manual: no Found Updates dialog');
+		assert.equal(noUpdateDialogs.length, upToDateBefore + 1, 'manual: "up to date" box shown');
+
+		// Today's real case: a plain version comparison would offer 1.10.27 to this build.
+		appVersion = '1.10.19-next.700';
+		const realCaseUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		assert.equal(
+			await realCaseUpdater.checkForUpdates(),
+			false,
+			'scheduled: stable 1.10.27 is not offered to 1.10.19-next.700'
+		);
+		assert.equal(
+			openDialogs.length,
+			dialogsBeforeStable,
+			'scheduled: no Found Updates dialog for 1.10.27 on 1.10.19-next.700'
+		);
+		const realCaseUpToDateBefore = noUpdateDialogs.length;
+		await realCaseUpdater.manualCheckForUpdates(channelMenu as never);
+		assert.equal(
+			openDialogs.length,
+			dialogsBeforeStable,
+			'manual: stable 1.10.27 is not offered to 1.10.19-next.700'
+		);
+		assert.equal(
+			noUpdateDialogs.length,
+			realCaseUpToDateBefore + 1,
+			'manual: "up to date" box shown on 1.10.19-next.700'
+		);
+		appVersion = '1.11.0-next.3';
+
+		manifestVersion = '1.11.0-next.4';
+		const scheduledNext = nextUpdater.checkForUpdates();
+		await flush();
+		assert.equal(openDialogs.length, dialogsBeforeStable + 1, 'scheduled: next.4 is offered');
+		openDialogs[openDialogs.length - 1].resolve({ response: 2 });
+		assert.equal(await scheduledNext, true);
+		const manualNext = nextUpdater.manualCheckForUpdates(channelMenu as never);
+		await flush();
+		assert.equal(openDialogs.length, dialogsBeforeStable + 2, 'manual: next.4 is offered');
+		openDialogs[openDialogs.length - 1].resolve({ response: 2 });
+		await manualNext;
+
+		// init() on a next build runs the start-up check and registers the hourly one; it
+		// used to return early on any prerelease version.
+		manifestVersion = '1.10.27';
+		const realSetInterval = globalThis.setInterval;
+		const intervals: (() => void)[] = [];
+		let manifestFetches = 0;
+		electronStub.net.fetch = async (url: string) => {
+			if (url.includes('/electron/')) manifestFetches++;
+			return foundUpdatePayload(url);
+		};
+		globalThis.setInterval = ((callback: () => void) => {
+			intervals.push(callback);
+			return 0;
+		}) as unknown as typeof setInterval;
+		try {
+			const dialogsBeforeInit = openDialogs.length;
+			new AutoUpdater({ isDestroyed: () => false } as never).init();
+			await flush();
+			assert.equal(manifestFetches, 1, 'init() checks once at start-up');
+			assert.equal(openDialogs.length, dialogsBeforeInit, 'init(): stable is not offered');
+			assert.equal(intervals.length, 1, 'init() registers the hourly check');
+		} finally {
+			globalThis.setInterval = realSetInterval;
+			electronStub.net.fetch = foundUpdatePayload;
+		}
+		appVersion = '1.0.0';
+		manifestVersion = '9.9.9';
+
+		finished = true;
 		console.log('update.test.ts passed');
 	} catch (error) {
 		console.error(error);
