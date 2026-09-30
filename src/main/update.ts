@@ -49,6 +49,18 @@ const ORPHAN_DIR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
+// The update server offers its latest stable release to every build, whatever its version.
+// Only a newer version on the build's own channel (stable, or the same prerelease tag such as
+// `next`) is offered, so a next build is never moved to stable. The prerelease stays in the
+// comparison: coercing it away made 1.10.19-next.N look older than 1.10.27.
+export function isOfferedUpdate(offered: unknown, current: string): boolean {
+	if (typeof offered !== 'string' || !semver.valid(offered) || !semver.valid(current)) {
+		return false;
+	}
+	const channel = (version: string) => String(semver.prerelease(version)?.[0] ?? '');
+	return channel(offered) === channel(current) && semver.gt(offered, current);
+}
+
 export interface UpdaterHandle {
 	init: () => void;
 	manualCheckForUpdates: (menuItem: MenuItem) => Promise<void>;
@@ -148,15 +160,6 @@ export class AutoUpdater implements UpdaterHandle {
 	public init() {
 		if (isDevelopment) {
 			logger.info('Skipping auto-update in development mode');
-			return;
-		}
-		// A next-lane build (1.11.0-next.57) is a tester's install: the update server only ever
-		// serves the latest stable release, which would "upgrade" it back to the release lane
-		// every hour. Manual checks still work for whoever wants that.
-		// semver prerelease identifiers follow the first hyphen (1.11.0-next.57); the local
-		// semver typings expose no parse(), and a hyphen is the whole test.
-		if (app.getVersion().includes('-')) {
-			logger.info('Skipping scheduled update checks on a prerelease build', app.getVersion());
 			return;
 		}
 
@@ -409,7 +412,7 @@ export class AutoUpdater implements UpdaterHandle {
 			const payload = await response.json();
 			const data = payload?.data || payload;
 			const { version, name, assets, releaseDate, notes } = data;
-			const hasUpdate = semver.gt(semver.coerce(version), semver.coerce(app.getVersion()));
+			const hasUpdate = isOfferedUpdate(version, app.getVersion());
 
 			if (!hasUpdate) {
 				return false;
