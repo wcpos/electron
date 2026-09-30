@@ -131,6 +131,18 @@ jobs:
           rxdb-license-key: ${{ secrets.RXDB_LICENSE_KEY }}
           uniwind-auth-token: ${{ secrets.UNIWIND_AUTH_TOKEN }}
 
+      - name: 🔒 Renderer rxdb matches the main process
+        # storage-remote needs the renderer's rxdb to be exactly the main process's, whatever
+        # monorepo ref this run builds from; drift only checks .monorepo-ref (#485).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/contents/scripts/check-renderer-rxdb.mjs?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/check-renderer-rxdb.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/electron-package.json"
+          pnpm list -r --depth 0 --json rxdb rxdb-premium > "$RUNNER_TEMP/renderer-rxdb.json"
+          node "$RUNNER_TEMP/check-renderer-rxdb.mjs" "$RUNNER_TEMP/renderer-rxdb.json" "$RUNNER_TEMP/electron-package.json"
+
       - name: 🔨 Build Expo for Electron
         run: pnpm --filter @wcpos/main build:electron
 
