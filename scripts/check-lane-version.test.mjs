@@ -55,3 +55,17 @@ test("every publish job checks the lane version after applying it", () => {
     assert.ok(publish > check, `${name} publishes before applying and checking the lane version`);
   }
 });
+
+test("next-lane pushes publish Windows; main pushes do not", () => {
+  const text = readFileSync(new URL(".github/workflows/tag-and-release.yml", root), "utf8");
+  const lines = text.split("\n");
+  const start = lines.indexOf("  publish-windows:");
+  assert.ok(start >= 0, "publish-windows job is missing");
+  const end = lines.findIndex((line, index) => index > start && /^  [a-z0-9-]+:$/.test(line));
+  const block = lines.slice(start, end < 0 ? undefined : end);
+  const condition = block.find((line) => line.startsWith("    if:"));
+  assert.ok(condition, "publish-windows job has no condition");
+  assert.ok(condition.includes("github.event_name == 'push' && github.ref_name == 'next'"));
+  assert.ok(!condition.includes("github.ref_name == 'main'"));
+  assert.ok(condition.includes("github.event.inputs.platform == 'windows'"));
+});

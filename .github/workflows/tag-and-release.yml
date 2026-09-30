@@ -7,7 +7,8 @@ name: Publish
 #           the releases page; GitHub's "latest" (what updates.wcpos.com serves) never points at
 #           a prerelease, and a next-lane build is only ever offered a newer build of its own lane
 #           (update.ts isOfferedUpdate).
-# A push builds Linux only; dispatch with platform=all for signed macOS and Windows installers.
+# A push to main builds Linux only; a push to next builds Linux and Windows x64. Dispatch with
+# platform=all for signed macOS installers. Windows installers are unsigned on every lane.
 on:
   push:
     branches:
@@ -335,7 +336,7 @@ jobs:
     runs-on: windows-2022
     env:
       WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
-    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'next') || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
 
     steps:
       - name: Check out Git repository
