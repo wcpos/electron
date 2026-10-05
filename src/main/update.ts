@@ -7,6 +7,7 @@ import { app, autoUpdater, BrowserWindow, dialog, MenuItem, net, shell } from 'e
 import Store from 'electron-store';
 import semver from 'semver';
 
+import { detectLinuxPackageFormat } from './linux-package-format';
 import { logger } from './log';
 import { ProgressBar } from './progress-bar';
 import { t } from './translations';
@@ -58,7 +59,7 @@ export interface UpdaterHandle {
 export class AutoUpdater implements UpdaterHandle {
 	private mainWindow: BrowserWindow;
 	private tempDirPath: string;
-	private readonly updateUrl = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
+	private updateUrlPromise: Promise<string> | null = null;
 	// The check in progress, if any. A check blocks on the "Found Updates" dialog until the
 	// user answers it, and the hourly timer keeps firing meanwhile: an app left open overnight
 	// used to queue one dialog per hour behind the first, each revealed as the previous one
@@ -74,6 +75,16 @@ export class AutoUpdater implements UpdaterHandle {
 		createDir(tempDirPath);
 		this.tempDirPath = tempDirPath;
 		this.sweepStaleDownloads();
+	}
+
+	private updateUrl(): Promise<string> {
+		if (!this.updateUrlPromise) {
+			this.updateUrlPromise = detectLinuxPackageFormat().then((format) => {
+				const url = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
+				return format ? `${url}?format=${format}` : url;
+			});
+		}
+		return this.updateUrlPromise;
 	}
 
 	// Each accepted update downloads into its own directory (see downloadAndInstallUpdates),
@@ -402,7 +413,7 @@ export class AutoUpdater implements UpdaterHandle {
 			// The signal covers the body read as well, so a stall inside response.json() also
 			// aborts. The user dialog that follows is deliberately not on a deadline.
 			const signal = AbortSignal.timeout(UPDATE_CHECK_TIMEOUT);
-			const response = await net.fetch(this.updateUrl, { signal });
+			const response = await net.fetch(await this.updateUrl(), { signal });
 			if (!response.ok) {
 				throw new Error(`Update check failed: HTTP ${response.status}`);
 			}
