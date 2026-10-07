@@ -16,7 +16,10 @@
 			"macos-alias",
 			"rxdb-premium",
 			"usb"
-		]
+		],
+		"overrides": {
+			"@electron/rebuild": "4.2.0"
+		}
 	},
 	"main": ".webpack/main",
 	"scripts": {
@@ -95,7 +98,7 @@
 		"@electron-forge/plugin-webpack": "^7.11.2",
 		"@electron-forge/publisher-github": "^7.11.2",
 		"@electron-forge/shared-types": "^7.11.2",
-		"@electron/rebuild": "^4.2.0",
+		"@electron/rebuild": "4.2.0",
 		"@sentry/webpack-plugin": "5.4.0",
 		"@types/fs-extra": "^11.0.4",
 		"@types/webpack-node-externals": "^3.0.4",
