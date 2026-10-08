@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron';
 
 import { logger as log } from './log';
+import { urlForLog } from './url-for-log';
 import { getMainWindow } from './window';
 
 import type { AuthPromptParams, AuthResult } from '../ipc-channels';
@@ -61,7 +62,7 @@ export function initAuthHandler(): void {
 	ipcMain.handle('auth:prompt', async (_event, params: AuthPromptParams): Promise<AuthResult> => {
 		const { authUrl, redirectUri } = params;
 
-		log.info(`Auth prompt requested: ${authUrl}`);
+		log.info(`Auth prompt requested: ${urlForLog(authUrl)}`);
 		log.info(`Redirect URI: ${redirectUri}`);
 
 		const mainWindow = getMainWindow();
@@ -129,12 +130,12 @@ export function initAuthHandler(): void {
 
 			// Listen for navigation to our redirect URI or wcpos:// scheme
 			authWindow.webContents.on('will-navigate', (event, navigationUrl) => {
-				log.info(`Auth window navigating to: ${navigationUrl}`);
+				log.info(`Auth window navigating to: ${urlForLog(navigationUrl)}`);
 
 				// Check if this is our redirect
 				if (navigationUrl.startsWith(redirectUri) || navigationUrl.startsWith('wcpos://')) {
 					event.preventDefault();
-					log.info(`Auth redirect detected: ${navigationUrl}`);
+					log.info(`Auth redirect detected: ${urlForLog(navigationUrl)}`);
 					const result = parseAuthUrl(navigationUrl);
 					resolveOnce(result);
 				}
@@ -142,11 +143,11 @@ export function initAuthHandler(): void {
 
 			// Also handle redirects that happen via location change
 			authWindow.webContents.on('will-redirect', (event, navigationUrl) => {
-				log.info(`Auth window redirecting to: ${navigationUrl}`);
+				log.info(`Auth window redirecting to: ${urlForLog(navigationUrl)}`);
 
 				if (navigationUrl.startsWith(redirectUri) || navigationUrl.startsWith('wcpos://')) {
 					event.preventDefault();
-					log.info(`Auth redirect detected: ${navigationUrl}`);
+					log.info(`Auth redirect detected: ${urlForLog(navigationUrl)}`);
 					const result = parseAuthUrl(navigationUrl);
 					resolveOnce(result);
 				}
