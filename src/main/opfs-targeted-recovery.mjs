@@ -42,6 +42,28 @@ function report(kind, details) {
   console.error(`[${kind}] ${target ?? ""}`.trimEnd(), error ?? rest);
 }
 
+// Collections whose rows are local diagnostics or locally derivable metadata. A damaged row in
+// one of these is dropped in the cleanup run that found it, instead of refusing the read.
+// Replicated collections (orders, products, customers, …) and the existence manifests, which
+// feed the reconcile audit, are never in this set.
+const DISPOSABLE_COLLECTIONS = new Set([
+  "logs",
+  "rx-state-host_metrics_v1",
+  "rx-state-sync_status_v1",
+  "coverageRecords",
+  "coverageLanes",
+  "schedulerTaskStates",
+  "queryTotalRequestStates",
+  "queryTotalCacheEntries",
+]);
+
+// logs keeps its original event kind so existing dashboards and filters still match.
+function discardedRowKind(collectionName) {
+  return collectionName === "logs"
+    ? "log-row-discarded"
+    : "disposable-row-discarded";
+}
+
 function documentsAccessHandle(state, runState) {
   let accessHandlePromise = runState.accessHandlers.get(
     state.documentFileHandle,
@@ -108,7 +130,7 @@ function extractDocument(text, primaryPath, expectedId) {
   }
 }
 
-// With `discardInvalid` (disposable collections only — `logs`) a range that
+// With `discardInvalid` (disposable collections only — DISPOSABLE_COLLECTIONS) a range that
 // holds no recoverable document is dropped in the SAME cleanup run that read
 // it, outcome "discarded-no-valid-document" — see dropHollowRows for why the
 // two steps must not straddle a queue release.
@@ -358,7 +380,7 @@ async function dropWhitespaceRows(instance, target, ownsRepairs = () => true) {
 // and is refused rather than guessed.
 // A range of NUL bytes is also hollow: on Windows, extension past EOF or a
 // write lost in a power cut can leave zero-filled bytes (which fail JSON parsing).
-// With `discardForeign` (disposable collections only — `logs`) a foreign-bytes
+// With `discardForeign` (disposable collections only — DISPOSABLE_COLLECTIONS) a foreign-bytes
 // range is dropped in the SAME cleanup run that detected it, outcome
 // "discarded-foreign-bytes": detection and deletion must not straddle a queue
 // release, or a healthy write for the same id landing in between would be
@@ -806,13 +828,13 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
           return refused;
         }
         const outcomes = await dropHollowRows(instance, hollow, {
-          discardForeign: params.collectionName === "logs",
+          discardForeign: DISPOSABLE_COLLECTIONS.has(params.collectionName),
           ownsRepairs: soleRepairOwner,
           dropPastEof,
         });
         for (const [id, outcome] of outcomes) {
           if (outcome === "discarded-foreign-bytes") {
-            report("log-row-discarded", {
+            report(discardedRowKind(params.collectionName), {
               target,
               id,
               reason: "range-holds-foreign-bytes",
@@ -884,7 +906,9 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
             }
             if (batch.length === 1) {
               const failure = await repairDocument(instance, batch[0], {
-                discardInvalid: params.collectionName === "logs",
+                discardInvalid: DISPOSABLE_COLLECTIONS.has(
+                  params.collectionName,
+                ),
                 ownsRepairs: soleRepairOwner,
                 dropPastEof,
               });
@@ -893,7 +917,7 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
                 return true;
               }
               if (failure === "discarded-no-valid-document") {
-                report("log-row-discarded", {
+                report(discardedRowKind(params.collectionName), {
                   target,
                   id: batch[0],
                   reason: "no-valid-document",
