@@ -67,8 +67,14 @@ mutableModule._load = function patchedLoad(
 		};
 
 		// eslint-disable-next-line @typescript-eslint/no-require-imports -- test installs Module._load fakes before loading boot.ts
-		const { bootPlan, boot, recreateMainWindow } = require('./boot') as {
+		const { bootPlan, boot, claimLaunch, recreateMainWindow } = require('./boot') as {
 			bootPlan: (deps: typeof fakeDeps) => { name: string }[];
+			claimLaunch: (deps: {
+				handledSquirrelEvent: boolean;
+				requestSingleInstanceLock: () => boolean;
+				quit: () => void;
+				logger: { info: () => void };
+			}) => boolean;
 			boot: (deps: typeof fakeDeps) => Promise<{
 				mainWindow: typeof fakeWindow;
 				updater: typeof fakeUpdater;
@@ -160,6 +166,32 @@ mutableModule._load = function patchedLoad(
 			'window consumers are wired on recreate'
 		);
 		assert.equal(recreateMainWindow(windowlessDeps, {}), null, 'no window, nothing to wire');
+
+		// Launch gate: only the process holding the single-instance lock boots.
+		const launchLog: string[] = [];
+		const launchDeps = (handledSquirrelEvent: boolean, lockGranted: boolean) => ({
+			handledSquirrelEvent,
+			requestSingleInstanceLock: () => {
+				launchLog.push('lock');
+				return lockGranted;
+			},
+			quit: () => {
+				launchLog.push('quit');
+			},
+			logger: { info() {} },
+		});
+		assert.equal(claimLaunch(launchDeps(false, true)), true);
+		assert.deepEqual(launchLog, ['lock'], 'the lock holder boots without quitting');
+		launchLog.length = 0;
+		assert.equal(claimLaunch(launchDeps(false, false)), false);
+		assert.deepEqual(launchLog, ['lock', 'quit'], 'a second process quits instead of booting');
+		launchLog.length = 0;
+		assert.equal(claimLaunch(launchDeps(true, true)), false);
+		assert.deepEqual(
+			launchLog,
+			['quit'],
+			'a Squirrel event process quits without contending for the lock'
+		);
 		console.log('boot tests passed');
 	} finally {
 		mutableModule._load = originalLoad;
