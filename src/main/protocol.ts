@@ -3,6 +3,7 @@ import * as path from 'path';
 import { app } from 'electron';
 
 import { logger as log } from './log';
+import { urlForLog } from './url-for-log';
 import { getMainWindow } from './window';
 
 /**
@@ -19,12 +20,12 @@ export function initProtocolHandling() {
 	}
 
 	app.on('open-url', (event, url) => {
-		log.info(`Protocol handler received URL: ${url}`);
+		log.info(`Protocol handler received URL: ${urlForLog(url)}`);
 
 		// Simulate browser navigation to the protocol URL so expo-auth-session can handle it
 		const mainWindow = getMainWindow();
 		if (mainWindow && !mainWindow.isDestroyed()) {
-			log.info(`Simulating navigation to protocol URL: ${url}`);
+			log.info(`Simulating navigation to protocol URL: ${urlForLog(url)}`);
 
 			mainWindow.focus();
 		} else {
