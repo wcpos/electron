@@ -329,9 +329,15 @@ test("propagates the retry error and reports the initial cleanup error", async (
   assert.equal(recoveryEvent.initialError, "Error: initial cleanup failure");
 });
 
-for (const collectionName of ["logs", "orders"]) {
+for (const collectionName of [
+  "logs",
+  "rx-state-host_metrics_v1",
+  "coverageRecords",
+  "orders",
+]) {
+  const disposable = collectionName !== "orders";
   for (const reason of ["no-valid-document", "range-holds-foreign-bytes"]) {
-    test(`${collectionName}: ${reason} ${collectionName === "logs" ? "discards" : "preserves"} the row`, async () => {
+    test(`${collectionName}: ${reason} ${disposable ? "discards" : "preserves"} the row`, async () => {
       const id = "damaged";
       const bytes = Buffer.from(
         reason === "no-valid-document" ? "{junk" : '{"id":"foreign"}',
@@ -409,24 +415,24 @@ for (const collectionName of ["logs", "orders"]) {
         }
         const sibling = ids.length - 1;
         for (const index of indexes) {
-          assert.equal(
-            index.rows.length,
-            collectionName === "logs" ? sibling : sibling + 1,
-          );
-          assert.equal(index.metaIdMap.has(id), collectionName !== "logs");
+          assert.equal(index.rows.length, disposable ? sibling : sibling + 1);
+          assert.equal(index.metaIdMap.has(id), !disposable);
           assert.equal(
             index.metaIdMap.has("foreign"),
             sibling === 1,
             "the healthy sibling sharing the range is never touched",
           );
         }
-        assert.equal(operations.length, collectionName === "logs" ? 2 : 0);
-        if (collectionName === "logs") {
+        assert.equal(operations.length, disposable ? 2 : 0);
+        if (disposable) {
           assert.ok(operations.every((operation) => operation[2] === "D"));
           assert.deepEqual(events, [
             {
-              kind: "log-row-discarded",
-              target: "store_v6_test/logs",
+              kind:
+                collectionName === "logs"
+                  ? "log-row-discarded"
+                  : "disposable-row-discarded",
+              target: `store_v6_test/${collectionName}`,
               id,
               reason,
             },
@@ -445,6 +451,64 @@ for (const collectionName of ["logs", "orders"]) {
     });
   }
 }
+
+test("existenceManifest: no-valid-document preserves the row", async () => {
+  const id = "damaged";
+  const bytes = Buffer.from("{junk");
+  const indexes = ["primary", "secondary"].map((indexId) => ({
+    indexId,
+    primaryKeyLength: id.length,
+    rows: [[`0${id}`, 0, bytes.length]],
+    metaIdMap: new Map([[id, [`0${id}`, 0, bytes.length]]]),
+    runChangelogOperation([, position]) {
+      const [row] = this.rows.splice(position, 1);
+      this.metaIdMap.delete(row[0].slice(1));
+    },
+  }));
+  const state = {
+    firstIdx: indexes[0],
+    indexStates: indexes,
+    documentFileHandle: {
+      createAccessHandle: async () => ({
+        read: async () => bytes,
+        getSize: async () => bytes.length,
+      }),
+    },
+    changelog: { addChangelogOperations: async () => {} },
+  };
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () =>
+      indexes[0].rows.length ? `[${bytes}]` : "[]",
+    bulkWrite: async () => ({ error: [] }),
+    query: async () => ({ documents: [] }),
+    getChangedDocumentsSince: async () => ({ documents: [] }),
+    cleanup: async () => {
+      if (indexes[0].rows.length) JSON.parse(bytes.toString());
+      return true;
+    },
+    internals: { statePromise: Promise.resolve(state) },
+    taskQueue: {
+      runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
+    },
+    _decode: (value) => value.toString(),
+  };
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance({
+    databaseName: "store_v6_test",
+    collectionName: "existenceManifest",
+    multiInstance: false,
+  });
+  await assert.rejects(
+    recovering.cleanup(0),
+    /targeted recovery failed for damaged: no-valid-document/,
+  );
+  for (const index of indexes) {
+    assert.deepEqual(index.rows, [[`0${id}`, 0, bytes.length]]);
+    assert.ok(index.metaIdMap.has(id));
+  }
+});
 
 test("drops every index row sharing one whitespace range, not just the first", async () => {
   // Damage can leave two ids pointing at the same hollow range; recovering

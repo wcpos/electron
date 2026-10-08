@@ -59,6 +59,7 @@ async function main() {
 		'changes-file-salvage',
 		'cleanup-recovery',
 		'count-recovery',
+		'disposable-row-discarded',
 		'document-repair-refused',
 		'hollow-row-dropped',
 		'hollow-row-refused',

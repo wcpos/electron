@@ -45,6 +45,7 @@ export const KIND_LEVELS: Readonly<Record<string, 'warning' | 'error'>> = {
 	'changes-file-salvage': 'warning',
 	'hollow-row-dropped': 'warning',
 	'log-row-discarded': 'warning',
+	'disposable-row-discarded': 'warning',
 	'stale-secondary-dropped': 'warning',
 	'count-recovery': 'warning',
 	'changes-file-discarded': 'error',
