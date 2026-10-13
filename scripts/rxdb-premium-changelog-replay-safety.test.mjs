@@ -822,6 +822,89 @@ for (const runtime of runtimes) {
 		}
 	});
 
+	// monorepo#2280: boot replay used to run all primary-index history before any
+	// secondary op, so the linked range gate compared a historical secondary A/R
+	// with the primary's FINAL bytes, skipped it, and the next op on that row
+	// rebuilt every index on every reopen.
+	const histories = {
+		'insert → replace': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await (await collection.findOne('k').exec()).incrementalPatch({ note: 'v2' });
+		},
+		'insert → replace that moves the secondary string': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await (await collection.findOne('k').exec()).incrementalPatch({ status: 'b' });
+		},
+		'insert → delete': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await collection.insert({ id: 'gone', status: 'a', note: 'v1' });
+			await (await collection.findOne('gone').exec()).remove();
+		},
+		'replace → replace': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await fullCleanup(collection);
+			const doc = await collection.findOne('k').exec();
+			const patched = await doc.incrementalPatch({ note: 'v2' });
+			await patched.incrementalPatch({ status: 'b', note: 'v3' });
+		},
+	};
+	for (const [name, write] of Object.entries(histories)) {
+		test(`${runtime.dist}: ${name} replays through linked indexes without rebuilding`, async () => {
+			const basePath = makeDirectory(`${runtime.dist}-history`);
+			let db;
+			try {
+				const initial = await openDatabase(runtime, basePath);
+				db = initial.db;
+				await write(initial.collection);
+				const expected = await findAll(initial.collection);
+				await db.close();
+				for (let reopen = 0; reopen < 2; reopen++) {
+					const opened = await openWithRebuildEvents(runtime, basePath);
+					db = opened.db;
+					assert.deepEqual(await findAll(opened.collection), expected);
+					assert.deepEqual(opened.events, [], `reopen ${reopen} replays without a rebuild`);
+					opened.stopCapture();
+					await db.close();
+				}
+				db = undefined;
+			} finally {
+				delete globalThis.__wcposOnIndexRebuild;
+				await db?.close();
+				rmSync(basePath, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test(`${runtime.dist}: a secondary A whose bytes never matched the primary still rebuilds`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-forged-secondary`);
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath);
+			db = initial.db;
+			const expected = [
+				{ id: 'one', status: 'a', note: 'first' },
+				{ id: 'two', status: 'b', note: 'second' },
+			];
+			for (const document of expected) await initial.collection.insert(document);
+			await db.close();
+			const path = join(collectionDirectory(basePath), 'changelog.txt');
+			const operations = JSON.parse(`[${readFileSync(path, 'utf8')}]`);
+			const forged = operations.find((op) => Array.isArray(op) && op[0] !== 0 && op[2] === 'A');
+			assert.ok(forged, 'fixture holds a secondary A');
+			forged[3] = [forged[3][0], forged[3][1] + 1, forged[3][2] + 1];
+			writeFileSync(path, operations.map((op) => JSON.stringify(op)).join(','));
+			const opened = await openWithRebuildEvents(runtime, basePath);
+			db = opened.db;
+			assert.deepEqual(await findAll(opened.collection), expected);
+			assert.equal(opened.events.length, 1, 'the range gate still runs during boot replay');
+			opened.stopCapture();
+		} finally {
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
 	test(`${runtime.dist}: rebuild preserves multibyte document byte offsets`, async () => {
 		const basePath = makeDirectory(`${runtime.dist}-multibyte`);
 		const expected = [

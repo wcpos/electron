@@ -17,7 +17,7 @@ export const MARKER = 'WCPOS_CHANGELOG_REPLAY_SAFETY_PATCH';
 // Bumped whenever the prelude or a rewrite changes: a dist patched by an older
 // script cannot be upgraded in place (the prelude text is unknown), so it must
 // be restored from the licensed package and re-patched.
-export const PATCH_VERSION = 5;
+export const PATCH_VERSION = 6;
 
 const MARKER_PRELUDE = `globalThis.${MARKER}=${PATCH_VERSION};\n`;
 // Multi-instance (web) retains its existing replay/recovery contract.
@@ -60,20 +60,28 @@ ids.add(id)
 }
 return null
 }
+// Replay in changelog order, not grouped per index: the linked range gate checks a secondary
+// A/R against the primary's bytes, which must be the primary AS OF that write. Grouped replay
+// ran all primary history first and rebuilt on every reopen after an update (monorepo#2280).
 function __wcposReplayChangelog(indexStates,operationsByIndex,changelog){
+var starts=new Map,seen=new Map,ordered=operationsByIndex.__wcposOrdered;
 for(var entry of operationsByIndex.entries()){
-var indexState=indexStates[entry[0]],rows=indexState.rows,operations=entry[1];
+var indexState=indexStates[entry[0]],operations=entry[1];
 var start=0;
 if(indexState.persistedChangelogEpoch&&indexState.persistedChangelogEpoch===changelog.epoch){
 var count=indexState.persistedChangelogOperations;
 if(typeof count!=="number"||count%1!==0||count<0||count>operations.length)return "invalid-persisted-count:index-"+entry[0];
 start=count}
-for(var i=start;i<operations.length;i++){
-var operation=operations[i],at=operation[1],kind=operation[2],row=operation[3];
-if(!Array.isArray(row)||typeof row[0]!=="string")return "stale-changelog-op:malformed:index-"+entry[0];
-if(kind==="A"){if(!(at>=0&&at<=rows.length)||at>0&&rows[at-1][0]>row[0]||at<rows.length&&rows[at][0]<row[0])return "stale-changelog-op:A:index-"+entry[0]}
-else if(!(at>=0&&at<rows.length)||!Array.isArray(rows[at])||rows[at][0]!==row[0])return "stale-changelog-op:"+kind+":index-"+entry[0];
-indexState.runChangelogOperation(operation)}}
+starts.set(entry[0],start);seen.set(entry[0],0)}
+if(!Array.isArray(ordered)){ordered=[];for(var group of operationsByIndex.values())for(var grouped of group)ordered.push(grouped)}
+for(var i=0;i<ordered.length;i++){
+var operation=ordered[i],id=operation[0],nth=seen.get(id);
+seen.set(id,nth+1);if(nth<starts.get(id))continue;
+var rows=indexStates[id].rows,at=operation[1],kind=operation[2],row=operation[3];
+if(!Array.isArray(row)||typeof row[0]!=="string")return "stale-changelog-op:malformed:index-"+id;
+if(kind==="A"){if(!(at>=0&&at<=rows.length)||at>0&&rows[at-1][0]>row[0]||at<rows.length&&rows[at][0]<row[0])return "stale-changelog-op:A:index-"+id}
+else if(!(at>=0&&at<rows.length)||!Array.isArray(rows[at])||rows[at][0]!==row[0])return "stale-changelog-op:"+kind+":index-"+id;
+indexStates[id].runChangelogOperation(operation)}
 return null
 }
 // V8 refuses buffers in the GB range; one damaged documents file reached 42 GB (Sentry WOOCOMMERCE-POS-2MS).
@@ -151,6 +159,13 @@ const DISTS = [
 						after:
 							'n=await __wcposReadChangelog(i,this.__wcposSingleInstance),r=a.storageInstance._decode(n),s=new Map',
 					},
+					{
+						// Keep the file's op order for boot replay; the per-index groups lose it.
+						name: 'keepOperationOrder',
+						before: 'for(var l=h;l<o.length;l++){var d=o[l],c=d[0];s.get(c).push(d)}return s}',
+						after:
+							'for(var l=h;l<o.length;l++){var d=o[l],c=d[0];s.get(c).push(d)}return s.__wcposOrdered=o.slice(h),s}',
+					},
 				],
 			},
 			{
@@ -214,6 +229,13 @@ const DISTS = [
 						before: 'n=await i.read(0),r=t.storageInstance._decode(n),s=new Map',
 						after:
 							'n=await __wcposReadChangelog(i,this.__wcposSingleInstance),r=t.storageInstance._decode(n),s=new Map',
+					},
+					{
+						// Keep the file's op order for boot replay; the per-index groups lose it.
+						name: 'keepOperationOrder',
+						before: 'for(var h=g;h<o.length;h++){var c=o[h],d=c[0];s.get(d).push(c)}return s}',
+						after:
+							'for(var h=g;h<o.length;h++){var c=o[h],d=c[0];s.get(d).push(c)}return s.__wcposOrdered=o.slice(g),s}',
 					},
 				],
 			},
