@@ -478,6 +478,11 @@ async function dropHollowRows(
         outcomes.set(documentId, "range-changed");
         continue;
       }
+      // The same own-document check, on the bytes the drop would act on.
+      if (!pastEof && holdsDocument(instance, bytes, documentId)) {
+        outcomes.set(documentId, false);
+        continue;
+      }
       if (foreign || staleNow) {
         // By identity: the range is either another document's bytes, or gone
         // from the file and possibly shared with a second id. On a stale

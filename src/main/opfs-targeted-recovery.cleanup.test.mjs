@@ -348,6 +348,7 @@ async function damagedRowFixture(
       "own-document": `{"id":"${id}"}`,
     }[reason],
   );
+  const { read = async () => bytes, ...instanceOverrides } = overrides;
   const operations = [];
   const ids = reason === "range-holds-foreign-bytes" ? ["foreign", id] : [id];
   const indexes = ["primary", "secondary"].map((indexId) => ({
@@ -367,7 +368,7 @@ async function damagedRowFixture(
     indexStates: indexes,
     documentFileHandle: {
       createAccessHandle: async () => ({
-        read: async () => bytes,
+        read,
         getSize: async () => bytes.length,
       }),
     },
@@ -391,7 +392,7 @@ async function damagedRowFixture(
       runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
     },
     _decode: (value) => value.toString(),
-    ...overrides,
+    ...instanceOverrides,
   };
   const recovering = await withTargetedOpfsRecovery({
     createStorageInstance: async () => instance,
@@ -499,6 +500,32 @@ test("existenceManifestOrders: a row holding its own document is never discarded
     for (const index of indexes) assert.ok(index.metaIdMap.has(id));
     assert.equal(operations.length, 0);
     assert.deepEqual(events, []);
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
+  }
+});
+
+// Another process can write the id's own document over the range between the
+// classification read and the re-read immediately before the drop.
+test("existenceManifestOrders: a range that becomes the id's own document before the drop keeps its row", async () => {
+  const own = Buffer.from('{"id":"damaged"}');
+  const foreign = Buffer.from('{"id":"foreign"}');
+  let reads = 0;
+  const { id, indexes, operations, recovering } = await damagedRowFixture(
+    "existenceManifestOrders",
+    "range-holds-foreign-bytes",
+    {},
+    { read: async () => (reads++ === 0 ? foreign : own) },
+  );
+  const events = [];
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+  try {
+    await recovering.findDocumentsById([id], true);
+    assert.ok(reads >= 2, "the range was re-read before the drop");
+    for (const index of indexes) assert.ok(index.metaIdMap.has(id));
+    assert.equal(operations.length, 0);
+    assert.ok(!events.some((event) => event.kind.endsWith("-discarded")));
   } finally {
     globalThis.__wcposOnStorageRecovery = previousHook;
   }
