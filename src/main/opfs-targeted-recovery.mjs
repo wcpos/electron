@@ -44,8 +44,7 @@ function report(kind, details) {
 
 // Collections whose rows are local diagnostics or locally derivable metadata. A damaged row in
 // one of these is dropped in the cleanup run that found it, instead of refusing the read.
-// Replicated collections (orders, products, customers, …) and the existence manifests, which
-// feed the reconcile audit, are never in this set.
+// Replicated collections (orders, products, customers, …) are never in this set.
 const DISPOSABLE_COLLECTIONS = new Set([
   "logs",
   "rx-state-host_metrics_v1",
@@ -57,11 +56,32 @@ const DISPOSABLE_COLLECTIONS = new Set([
   "queryTotalCacheEntries",
 ]);
 
+// The existence manifests hold {wooId, digest} rows the server can rebuild, so a damaged row is
+// dropped the same way (owner ruling 2026-10-13). A missing row is never read as "gone from the
+// server": the reconcile prunes only ids a manifest HOLDS, a bucket that still has other rows no
+// longer matches the server's and is drilled, and the existence prime (count-gated, periodically
+// forced) re-fetches the id's digest. Names must match the engine's collections; drift fails
+// closed (the row is refused again). A range past EOF stays refused on the read and cleanup
+// paths: it is a stale instance, not a damaged row.
+const SERVER_REBUILT_COLLECTIONS = new Set([
+  "existenceManifest",
+  "existenceManifestCustomers",
+  "existenceManifestOrders",
+]);
+
+function discardsDamagedRows(collectionName) {
+  return (
+    DISPOSABLE_COLLECTIONS.has(collectionName) ||
+    SERVER_REBUILT_COLLECTIONS.has(collectionName)
+  );
+}
+
 // logs keeps its original event kind so existing dashboards and filters still match.
 function discardedRowKind(collectionName) {
-  return collectionName === "logs"
-    ? "log-row-discarded"
-    : "disposable-row-discarded";
+  if (collectionName === "logs") return "log-row-discarded";
+  if (SERVER_REBUILT_COLLECTIONS.has(collectionName))
+    return "manifest-row-discarded";
+  return "disposable-row-discarded";
 }
 
 function documentsAccessHandle(state, runState) {
@@ -130,7 +150,7 @@ function extractDocument(text, primaryPath, expectedId) {
   }
 }
 
-// With `discardInvalid` (disposable collections only — DISPOSABLE_COLLECTIONS) a range that
+// With `discardInvalid` (only where discardsDamagedRows) a range that
 // holds no recoverable document is dropped in the SAME cleanup run that read
 // it, outcome "discarded-no-valid-document" — see dropHollowRows for why the
 // two steps must not straddle a queue release.
@@ -380,7 +400,7 @@ async function dropWhitespaceRows(instance, target, ownsRepairs = () => true) {
 // and is refused rather than guessed.
 // A range of NUL bytes is also hollow: on Windows, extension past EOF or a
 // write lost in a power cut can leave zero-filled bytes (which fail JSON parsing).
-// With `discardForeign` (disposable collections only — DISPOSABLE_COLLECTIONS) a foreign-bytes
+// With `discardForeign` (only where discardsDamagedRows) a foreign-bytes
 // range is dropped in the SAME cleanup run that detected it, outcome
 // "discarded-foreign-bytes": detection and deletion must not straddle a queue
 // release, or a healthy write for the same id landing in between would be
@@ -427,6 +447,12 @@ async function dropHollowRows(
       const [, start, end] = primaryRow;
       const { bytes, pastEof } = await readRange(accessHandle, start, end);
       const foreign = !pastEof && !isBlankBytes(bytes);
+      // A range holding the id's OWN document is healthy: a write filed the
+      // row after the read that missed it. Neither hollow nor foreign.
+      if (foreign && holdsDocument(instance, bytes, documentId)) {
+        outcomes.set(documentId, false);
+        continue;
+      }
       if (foreign && !discardForeign) {
         outcomes.set(documentId, "range-holds-foreign-bytes");
         continue;
@@ -452,6 +478,11 @@ async function dropHollowRows(
         outcomes.set(documentId, "range-changed");
         continue;
       }
+      // The same own-document check, on the bytes the drop would act on.
+      if (!pastEof && holdsDocument(instance, bytes, documentId)) {
+        outcomes.set(documentId, false);
+        continue;
+      }
       if (foreign || staleNow) {
         // By identity: the range is either another document's bytes, or gone
         // from the file and possibly shared with a second id. On a stale
@@ -467,6 +498,15 @@ async function dropHollowRows(
     }
     return outcomes;
   });
+}
+
+function holdsDocument(instance, bytes, documentId) {
+  try {
+    const document = JSON.parse(instance._decode(bytes));
+    return document?.[instance.primaryPath] === documentId;
+  } catch {
+    return false;
+  }
 }
 
 // Drops every index row (primary and secondary) pointing at one byte range,
@@ -828,7 +868,7 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
           return refused;
         }
         const outcomes = await dropHollowRows(instance, hollow, {
-          discardForeign: DISPOSABLE_COLLECTIONS.has(params.collectionName),
+          discardForeign: discardsDamagedRows(params.collectionName),
           ownsRepairs: soleRepairOwner,
           dropPastEof,
         });
@@ -906,9 +946,7 @@ export function withTargetedOpfsRecovery(storage, options = {}) {
             }
             if (batch.length === 1) {
               const failure = await repairDocument(instance, batch[0], {
-                discardInvalid: DISPOSABLE_COLLECTIONS.has(
-                  params.collectionName,
-                ),
+                discardInvalid: discardsDamagedRows(params.collectionName),
                 ownsRepairs: soleRepairOwner,
                 dropPastEof,
               });
