@@ -905,6 +905,50 @@ for (const runtime of runtimes) {
 		}
 	});
 
+	test(`${runtime.dist}: a changelog torn after an update's index-0 ops rebuilds and compaction keeps the update`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-torn-update`);
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath);
+			db = initial.db;
+			await initial.collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await (await initial.collection.findOne('k').exec()).incrementalPatch({ note: 'v2' });
+			const expected = await findAll(initial.collection);
+			await db.close();
+			// Keep the update's primary-index ops; lose its secondary ops, as a torn append would.
+			const path = join(collectionDirectory(basePath), 'changelog.txt');
+			const operations = JSON.parse(`[${readFileSync(path, 'utf8')}]`);
+			let lastPrimary = operations.length - 1;
+			while (!Array.isArray(operations[lastPrimary]) || operations[lastPrimary][0] !== 0) {
+				lastPrimary--;
+			}
+			assert.ok(lastPrimary < operations.length - 1, 'fixture has secondary ops to drop');
+			writeFileSync(
+				path,
+				operations
+					.slice(0, lastPrimary + 1)
+					.map((op) => JSON.stringify(op))
+					.join(',')
+			);
+			let opened = await openWithRebuildEvents(runtime, basePath);
+			db = opened.db;
+			assert.deepEqual(await findAll(opened.collection), expected);
+			assert.equal(opened.events.length, 1, 'the torn changelog rebuilds');
+			opened.stopCapture();
+			await fullCleanup(opened.collection);
+			await db.close();
+			opened = await openWithRebuildEvents(runtime, basePath);
+			db = opened.db;
+			assert.deepEqual(await findAll(opened.collection), expected, 'compaction kept v2');
+			assert.deepEqual(opened.events, []);
+			opened.stopCapture();
+		} finally {
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
 	test(`${runtime.dist}: rebuild preserves multibyte document byte offsets`, async () => {
 		const basePath = makeDirectory(`${runtime.dist}-multibyte`);
 		const expected = [
