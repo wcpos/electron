@@ -21,6 +21,7 @@ mutableModule._load = function patchedLoad(
 			logger: {
 				error: (...args: unknown[]) => logged.push({ level: 'error', args }),
 				warn: (...args: unknown[]) => logged.push({ level: 'warn', args }),
+				info: (...args: unknown[]) => logged.push({ level: 'info', args }),
 			},
 			Sentry: {
 				captureException: () => {
@@ -66,6 +67,7 @@ async function main() {
 		'index-rebuilt',
 		'index-reconcile-refused',
 		'log-row-discarded',
+		'manifest-row-discarded',
 		'stale-secondary-dropped',
 		'stale-secondary-refused',
 		'task-queue-run-failed',
@@ -227,6 +229,24 @@ async function main() {
 	reporting = true;
 	seams.__wcposOnStorageRecovery!({ ...discarded, target: 'store_v6_consent/logs', id: 'third' });
 	assert.equal(captured.length, 11, 'the first report after consent is captured');
+
+	// A dropped existence-manifest row is routine, not damage: the server rebuilds it (owner
+	// ruling 2026-10-13). Info level, so Sentry shows the rate without alerting on it.
+	const beforeManifest = captured.length;
+	const loggedBeforeManifest = logged.length;
+	seams.__wcposOnStorageRecovery!({
+		kind: 'manifest-row-discarded',
+		target: 'pos_v4_abc/existenceManifestOrders',
+		id: '18947',
+		reason: 'no-valid-document',
+	});
+	assert.equal(captured.length, beforeManifest + 1);
+	assert.equal(captured[beforeManifest].context.level, 'info');
+	assert.equal(
+		captured[beforeManifest].context.tags['rxdb-fs.collection'],
+		'existenceManifestOrders'
+	);
+	assert.equal(logged[loggedBeforeManifest].level, 'info');
 
 	const hollow = { kind: 'hollow-row-dropped', target: 'dedupe/orders', id: 'first' };
 	const beforeHollow = captured.length;

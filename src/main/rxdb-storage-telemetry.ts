@@ -34,11 +34,13 @@ const capturedEvents = new Set<string>();
  * a minified string), so this is the registry: a kind missing here reports at
  * `error`, which is the safe default for anything unrecognised.
  *
+ *   - a dropped existence-manifest row is info: the server rebuilds it (owner ruling 2026-10-13)
  *   - healed outcomes and disposable log-row discards are warnings
  *   - refusals, other discards and terminal failures are errors: data or a write was
  *     lost, or a run died
  */
-export const KIND_LEVELS: Readonly<Record<string, 'warning' | 'error'>> = {
+export const KIND_LEVELS: Readonly<Record<string, 'info' | 'warning' | 'error'>> = {
+	'manifest-row-discarded': 'info',
 	'index-rebuilt': 'warning',
 	'changelog-oversized-rebuilt': 'warning',
 	'changelog-oversized-compacted': 'warning',
@@ -151,7 +153,7 @@ function report(
 	const level = KIND_LEVELS[code] ?? 'error';
 	const collection = target.split('/')[1] ?? 'unknown';
 	const extra = { target, ...redactDetails(details), cause: describe(error) };
-	logger[level === 'error' ? 'error' : 'warn'](`[${SUBSYSTEM}] ${code}`, extra);
+	logger[level === 'warning' ? 'warn' : level](`[${SUBSYSTEM}] ${code}`, extra);
 	// Reporting is consent-gated (log.ts): while it is off the transport drops
 	// every envelope, so the key must not be recorded either or the first event
 	// after consent would be swallowed as a duplicate.

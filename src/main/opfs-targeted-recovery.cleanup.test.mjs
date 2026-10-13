@@ -42,7 +42,7 @@ const SCHEMA = {
  * That is why `indexStates[0]` is `_deleted`-first, and why the production
  * stack throws reading `_deleted` rather than `_meta`.
  *
- * `cleanup` reproduces `cleanupDocumentJsonFile` (rxdb-premium 17.4.0,
+ * `cleanup` reproduces `cleanupDocumentJsonFile` (rxdb-premium 17.4.0 through 17.6.0, unchanged,
  * plugins/storage-abstract-filesystem/cleanup.js): it walks the two-element
  * `_meta.lwt` index in row order, skips any row already flush against the write
  * cursor (`w === g`), and for a row preceded by a gap reads the bytes, parses
@@ -329,83 +329,111 @@ test("propagates the retry error and reports the initial cleanup error", async (
   assert.equal(recoveryEvent.initialError, "Error: initial cleanup failure");
 });
 
+// A row in `collectionName` whose range holds no valid document, or a healthy
+// sibling's bytes. In the foreign-bytes case the range belongs to "foreign",
+// whose own rows share the damaged row's offsets and sort first: a discard must
+// remove "damaged" by identity and leave the sibling standing (an offset lookup
+// would take the sibling instead).
+async function damagedRowFixture(
+  collectionName,
+  reason,
+  params = {},
+  overrides = {},
+) {
+  const id = "damaged";
+  const bytes = Buffer.from(
+    {
+      "no-valid-document": "{junk",
+      "range-holds-foreign-bytes": '{"id":"foreign"}',
+      "own-document": `{"id":"${id}"}`,
+    }[reason],
+  );
+  const operations = [];
+  const ids = reason === "range-holds-foreign-bytes" ? ["foreign", id] : [id];
+  const indexes = ["primary", "secondary"].map((indexId) => ({
+    indexId,
+    primaryKeyLength: id.length,
+    rows: ids.map((rowId) => [`0${rowId}`, 0, bytes.length]),
+    metaIdMap: new Map(
+      ids.map((rowId) => [rowId, [`0${rowId}`, 0, bytes.length]]),
+    ),
+    runChangelogOperation([, position]) {
+      const [row] = this.rows.splice(position, 1);
+      this.metaIdMap.delete(row[0].slice(1));
+    },
+  }));
+  const state = {
+    firstIdx: indexes[0],
+    indexStates: indexes,
+    documentFileHandle: {
+      createAccessHandle: async () => ({
+        read: async () => bytes,
+        getSize: async () => bytes.length,
+      }),
+    },
+    changelog: {
+      addChangelogOperations: async (_, ops) => operations.push(...ops),
+    },
+  };
+  const instance = {
+    primaryPath: "id",
+    findDocumentsById: async () =>
+      indexes[0].rows.length ? `[${bytes}]` : "[]",
+    bulkWrite: async () => ({ error: [] }),
+    query: async () => ({ documents: [] }),
+    getChangedDocumentsSince: async () => ({ documents: [] }),
+    cleanup: async () => {
+      if (indexes[0].rows.length) JSON.parse(bytes.toString());
+      return true;
+    },
+    internals: { statePromise: Promise.resolve(state) },
+    taskQueue: {
+      runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
+    },
+    _decode: (value) => value.toString(),
+    ...overrides,
+  };
+  const recovering = await withTargetedOpfsRecovery({
+    createStorageInstance: async () => instance,
+  }).createStorageInstance({
+    databaseName: "store_v6_test",
+    collectionName,
+    multiInstance: false,
+    ...params,
+  });
+  return { id, ids, indexes, operations, recovering };
+}
+
+// Disposable collections are rebuilt locally; the three existence manifests
+// are rebuilt from the server (owner ruling 2026-10-13: a missing manifest row
+// is re-verified by the next existence prime, and the reconcile only prunes ids
+// a manifest holds). Business collections keep the refusal.
+const DISCARD_KINDS = {
+  logs: "log-row-discarded",
+  "rx-state-host_metrics_v1": "disposable-row-discarded",
+  coverageRecords: "disposable-row-discarded",
+  existenceManifest: "manifest-row-discarded",
+  existenceManifestCustomers: "manifest-row-discarded",
+  existenceManifestOrders: "manifest-row-discarded",
+};
 for (const collectionName of [
-  "logs",
-  "rx-state-host_metrics_v1",
-  "coverageRecords",
+  ...Object.keys(DISCARD_KINDS),
   "orders",
+  "products",
+  "customers",
 ]) {
-  const disposable = collectionName !== "orders";
+  const disposable = collectionName in DISCARD_KINDS;
   for (const reason of ["no-valid-document", "range-holds-foreign-bytes"]) {
     test(`${collectionName}: ${reason} ${disposable ? "discards" : "preserves"} the row`, async () => {
-      const id = "damaged";
-      const bytes = Buffer.from(
-        reason === "no-valid-document" ? "{junk" : '{"id":"foreign"}',
-      );
-      const operations = [];
+      const { id, ids, indexes, operations, recovering } =
+        await damagedRowFixture(collectionName, reason);
       const events = [];
-      // In the foreign-bytes case the range belongs to a healthy sibling
-      // ("foreign") whose own rows share the damaged row's offsets and sort
-      // first: a discard must remove "damaged" by identity and leave the
-      // sibling standing (an offset lookup would take the sibling instead).
-      const ids =
-        reason === "range-holds-foreign-bytes" ? ["foreign", id] : [id];
-      const indexes = ["primary", "secondary"].map((indexId) => ({
-        indexId,
-        primaryKeyLength: id.length,
-        rows: ids.map((rowId) => [`0${rowId}`, 0, bytes.length]),
-        metaIdMap: new Map(
-          ids.map((rowId) => [rowId, [`0${rowId}`, 0, bytes.length]]),
-        ),
-        runChangelogOperation([, position]) {
-          const [row] = this.rows.splice(position, 1);
-          this.metaIdMap.delete(row[0].slice(1));
-        },
-      }));
-      const state = {
-        firstIdx: indexes[0],
-        indexStates: indexes,
-        documentFileHandle: {
-          createAccessHandle: async () => ({
-            read: async () => bytes,
-            getSize: async () => bytes.length,
-          }),
-        },
-        changelog: {
-          addChangelogOperations: async (_, ops) => operations.push(...ops),
-        },
-      };
-      const instance = {
-        primaryPath: "id",
-        findDocumentsById: async () =>
-          indexes[0].rows.length ? `[${bytes}]` : "[]",
-        bulkWrite: async () => ({ error: [] }),
-        query: async () => ({ documents: [] }),
-        getChangedDocumentsSince: async () => ({ documents: [] }),
-        cleanup: async () => {
-          if (indexes[0].rows.length) JSON.parse(bytes.toString());
-          return true;
-        },
-        internals: { statePromise: Promise.resolve(state) },
-        taskQueue: {
-          runCleanup: async (operation) =>
-            operation({ accessHandlers: new Map() }),
-        },
-        _decode: (value) => value.toString(),
-      };
-      const recovering = await withTargetedOpfsRecovery({
-        createStorageInstance: async () => instance,
-      }).createStorageInstance({
-        databaseName: "store_v6_test",
-        collectionName,
-        multiInstance: false,
-      });
       const previousHook = globalThis.__wcposOnStorageRecovery;
       globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
       try {
         if (reason === "range-holds-foreign-bytes") {
           await recovering.findDocumentsById([id], true);
-        } else if (collectionName === "orders") {
+        } else if (!disposable) {
           await assert.rejects(
             recovering.cleanup(0),
             /targeted recovery failed for damaged: no-valid-document/,
@@ -428,21 +456,22 @@ for (const collectionName of [
           assert.ok(operations.every((operation) => operation[2] === "D"));
           assert.deepEqual(events, [
             {
-              kind:
-                collectionName === "logs"
-                  ? "log-row-discarded"
-                  : "disposable-row-discarded",
+              kind: DISCARD_KINDS[collectionName],
               target: `store_v6_test/${collectionName}`,
               id,
               reason,
             },
           ]);
-        } else if (reason === "range-holds-foreign-bytes") {
+        } else {
+          const refusedKind =
+            reason === "no-valid-document"
+              ? "document-repair-refused"
+              : "hollow-row-refused";
           assert.ok(
             events.some(
-              (event) =>
-                event.kind === "hollow-row-refused" && event.reason === reason,
+              (event) => event.kind === refusedKind && event.reason === reason,
             ),
+            JSON.stringify(events),
           );
         }
       } finally {
@@ -452,63 +481,64 @@ for (const collectionName of [
   }
 }
 
-test("existenceManifest: no-valid-document preserves the row", async () => {
-  const id = "damaged";
-  const bytes = Buffer.from("{junk");
-  const indexes = ["primary", "secondary"].map((indexId) => ({
-    indexId,
-    primaryKeyLength: id.length,
-    rows: [[`0${id}`, 0, bytes.length]],
-    metaIdMap: new Map([[id, [`0${id}`, 0, bytes.length]]]),
-    runChangelogOperation([, position]) {
-      const [row] = this.rows.splice(position, 1);
-      this.metaIdMap.delete(row[0].slice(1));
-    },
-  }));
-  const state = {
-    firstIdx: indexes[0],
-    indexStates: indexes,
-    documentFileHandle: {
-      createAccessHandle: async () => ({
-        read: async () => bytes,
-        getSize: async () => bytes.length,
-      }),
-    },
-    changelog: { addChangelogOperations: async () => {} },
-  };
-  const instance = {
-    primaryPath: "id",
-    findDocumentsById: async () =>
-      indexes[0].rows.length ? `[${bytes}]` : "[]",
-    bulkWrite: async () => ({ error: [] }),
-    query: async () => ({ documents: [] }),
-    getChangedDocumentsSince: async () => ({ documents: [] }),
-    cleanup: async () => {
-      if (indexes[0].rows.length) JSON.parse(bytes.toString());
-      return true;
-    },
-    internals: { statePromise: Promise.resolve(state) },
-    taskQueue: {
-      runCleanup: async (operation) => operation({ accessHandlers: new Map() }),
-    },
-    _decode: (value) => value.toString(),
-  };
-  const recovering = await withTargetedOpfsRecovery({
-    createStorageInstance: async () => instance,
-  }).createStorageInstance({
-    databaseName: "store_v6_test",
-    collectionName: "existenceManifest",
-    multiInstance: false,
-  });
-  await assert.rejects(
-    recovering.cleanup(0),
-    /targeted recovery failed for damaged: no-valid-document/,
+// A read can miss an id whose row a write files before the cleanup run starts;
+// the range then holds the id's OWN document. That row is healthy, not foreign,
+// and a discarding collection must not drop it.
+test("existenceManifestOrders: a row holding its own document is never discarded", async () => {
+  const { id, indexes, operations, recovering } = await damagedRowFixture(
+    "existenceManifestOrders",
+    "own-document",
+    {},
+    { findDocumentsById: async () => "[]" },
   );
-  for (const index of indexes) {
-    assert.deepEqual(index.rows, [[`0${id}`, 0, bytes.length]]);
-    assert.ok(index.metaIdMap.has(id));
+  const events = [];
+  const previousHook = globalThis.__wcposOnStorageRecovery;
+  globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+  try {
+    await recovering.findDocumentsById([id], true);
+    for (const index of indexes) assert.ok(index.metaIdMap.has(id));
+    assert.equal(operations.length, 0);
+    assert.deepEqual(events, []);
+  } finally {
+    globalThis.__wcposOnStorageRecovery = previousHook;
   }
 });
+
+// The discard is a positional "D" op, so a manifest row is dropped only by the
+// sole repair owner (#1057, #1049), like every other repair.
+for (const reason of ["no-valid-document", "range-holds-foreign-bytes"]) {
+  test(`existenceManifestOrders: ${reason} is refused without sole repair ownership`, async () => {
+    const { id, ids, indexes, operations, recovering } =
+      await damagedRowFixture("existenceManifestOrders", reason, {
+        multiInstance: true,
+      });
+    const events = [];
+    const previousHook = globalThis.__wcposOnStorageRecovery;
+    globalThis.__wcposOnStorageRecovery = (event) => events.push(event);
+    try {
+      if (reason === "range-holds-foreign-bytes") {
+        await recovering.findDocumentsById([id], true);
+      } else {
+        await assert.rejects(
+          recovering.cleanup(0),
+          /targeted recovery refused: multi-instance/,
+        );
+      }
+      for (const index of indexes) {
+        assert.equal(index.rows.length, ids.length);
+        assert.ok(index.metaIdMap.has(id));
+      }
+      assert.equal(operations.length, 0);
+      assert.ok(
+        events.some((event) => event.reason === "multi-instance"),
+        JSON.stringify(events),
+      );
+      assert.ok(!events.some((event) => event.kind.endsWith("-discarded")));
+    } finally {
+      globalThis.__wcposOnStorageRecovery = previousHook;
+    }
+  });
+}
 
 test("drops every index row sharing one whitespace range, not just the first", async () => {
   // Damage can leave two ids pointing at the same hollow range; recovering
