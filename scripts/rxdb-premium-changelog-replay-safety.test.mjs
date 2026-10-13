@@ -154,6 +154,18 @@ async function findAll(collection) {
 		.sort((left, right) => left.id.localeCompare(right.id));
 }
 
+/** Query through the `status` index, so a stale secondary row cannot hide behind a full scan. */
+async function assertStatusQueries(collection, expected) {
+	for (const status of ['a', 'b']) {
+		const found = await collection.find({ selector: { status } }).exec();
+		assert.deepEqual(
+			found.map((doc) => doc.id).sort(),
+			expected.filter((doc) => doc.status === status).map((doc) => doc.id),
+			`status ${status} query`
+		);
+	}
+}
+
 /**
  * Cleanup bakes epoch-tagged index files, then dies before changelog.empty.
  * Also cover death before the first persist and between index persists: each
@@ -863,6 +875,7 @@ for (const runtime of runtimes) {
 					db = opened.db;
 					assert.deepEqual(await findAll(opened.collection), expected);
 					assert.deepEqual(opened.events, [], `reopen ${reopen} replays without a rebuild`);
+					await assertStatusQueries(opened.collection, expected);
 					opened.stopCapture();
 					await db.close();
 				}
@@ -897,6 +910,7 @@ for (const runtime of runtimes) {
 			db = opened.db;
 			assert.deepEqual(await findAll(opened.collection), expected);
 			assert.equal(opened.events.length, 1, 'the range gate still runs during boot replay');
+			await assertStatusQueries(opened.collection, expected);
 			opened.stopCapture();
 		} finally {
 			delete globalThis.__wcposOnIndexRebuild;
@@ -940,6 +954,7 @@ for (const runtime of runtimes) {
 			opened = await openWithRebuildEvents(runtime, basePath);
 			db = opened.db;
 			assert.deepEqual(await findAll(opened.collection), expected, 'compaction kept v2');
+			await assertStatusQueries(opened.collection, expected);
 			assert.deepEqual(opened.events, []);
 			opened.stopCapture();
 		} finally {
