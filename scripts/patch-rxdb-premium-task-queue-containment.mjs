@@ -50,11 +50,15 @@
  * which guarded only writes). The INIT run needs no anchor: upstream chains
  * `cleanupAfterRun` after its own `.catch`, so it always runs — pinned by test.
  *
- * A pre-run-hook rejection still leaves that one run's own callers pending
- * (their tasks never execute and nothing rejects them) — that is upstream's
- * pre-existing semantic, bounded to the failing run and surfaced by the
- * app-layer stall diagnostic; only the permanent damage (leak, poisoning) is
- * removed here.
+ * A pre-run-hook rejection on a READ or WRITE run leaves that run's callers
+ * pending — their tasks are still queued, so the next trigger serves them once
+ * the healed queue moves on; that is upstream's pre-existing semantic, bounded
+ * to the failing run and surfaced by the app-layer stall diagnostic. A CLEANUP
+ * run has no queued task to retry: its callback is a closure handed to this one
+ * run, so the same rejection would leave `runCleanup()` pending forever and the
+ * cleanup plugin's loop stalled for the session (found by review of the 17.6.0
+ * re-derivation). The CLEANUP rewrite therefore adds an outer `catch` that
+ * reports the failure under the owning collection and rejects the caller.
  *
  * Why not `pnpm patch`: rxdb-premium's dist/ is materialized by its own
  * license-gated postinstall, so it does not exist in the tarball pnpm patches —
@@ -144,7 +148,7 @@ const DISTS = [
 		cleanupRunBefore:
 			'(async()=>{var r={type:"CLEANUP",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
 		cleanupRunAfter:
-			'(async()=>{try{var r={type:"CLEANUP",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}catch(e){__wcposReportRunFailure(this,e),a(e)}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 	{
 		dist: 'cjs',
@@ -166,7 +170,7 @@ const DISTS = [
 		cleanupRunBefore:
 			'(async()=>{var r={type:"CLEANUP",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
 		cleanupRunAfter:
-			'(async()=>{try{var r={type:"CLEANUP",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}catch(e){__wcposReportRunFailure(this,e),a(e)}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 ];
 
