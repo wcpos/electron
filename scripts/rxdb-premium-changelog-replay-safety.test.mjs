@@ -60,7 +60,6 @@ const schema = {
 	indexes: [['status']],
 };
 
-const STAMP_FILE = 'wcpos-changelog-baked.txt';
 const HUNG = Symbol('hung');
 
 function makeDirectory(prefix) {
@@ -80,11 +79,21 @@ function indexFiles(basePath) {
 		.map((entry) => join(collectionDirectory(basePath), entry));
 }
 
+function readIndexRows(path) {
+	const stored = JSON.parse(readFileSync(path, 'utf8'));
+	return Array.isArray(stored) ? stored : stored.rows;
+}
+
+function writeIndexRows(path, rows) {
+	const stored = JSON.parse(readFileSync(path, 'utf8'));
+	writeFileSync(path, JSON.stringify(Array.isArray(stored) ? rows : { ...stored, rows }));
+}
+
 function replaceRowWithNull(path, rowIndex = 0) {
-	const rows = JSON.parse(readFileSync(path, 'utf8').trim());
+	const rows = readIndexRows(path);
 	assert.ok(rows.length > rowIndex, `${path} has a row to corrupt`);
 	rows[rowIndex] = null;
-	writeFileSync(path, JSON.stringify(rows));
+	writeIndexRows(path, rows);
 }
 
 function assertNoNullRows(basePath) {
@@ -146,13 +155,11 @@ async function findAll(collection) {
 }
 
 /**
- * Reproduces #1605's crash window for real: a compaction that has stamped and
- * (optionally) baked the index base files, then dies before `changelog.empty`.
- * `dieAt: 'empty'` kills it after every index persisted; `dieAt: 'persist'`
- * kills it on the first persist. Either way the stale changelog and the stamp
- * the PATCHED cleanup wrote are what the next boot finds on disk.
+ * Cleanup bakes epoch-tagged index files, then dies before changelog.empty.
+ * Also cover death before the first persist and between index persists: each
+ * index must skip only its own baked prefix on the next open (upstream #30).
  */
-async function seedCrashWindow(runtime, basePath, { dieAt = 'empty', keepStamp = true } = {}) {
+async function seedCrashWindow(runtime, basePath, { dieAt = 'empty' } = {}) {
 	const { db, collection } = await openDatabase(runtime, basePath);
 	for (let index = 0; index < 10; index++) {
 		const suffix = String(index).padStart(2, '0');
@@ -179,7 +186,7 @@ async function seedCrashWindow(runtime, basePath, { dieAt = 'empty', keepStamp =
 			throw death;
 		};
 	} else {
-		state.indexStates[0].persistInMemoryRows = async () => {
+		state.indexStates[dieAt === 'partial' ? 1 : 0].persistInMemoryRows = async () => {
 			throw death;
 		};
 	}
@@ -198,11 +205,13 @@ async function seedCrashWindow(runtime, basePath, { dieAt = 'empty', keepStamp =
 	const directory = collectionDirectory(basePath);
 	const raw = readFileSync(join(directory, 'changelog.txt'), 'utf8');
 	assert.ok(raw.length > 0, 'the stale changelog survived the simulated death');
-	assert.ok(
-		readFileSync(join(directory, STAMP_FILE), 'utf8').length > 0,
-		'compaction stamped before baking'
-	);
-	if (!keepStamp) writeFileSync(join(directory, STAMP_FILE), '');
+	const operations = JSON.parse(`[${raw}]`);
+	assert.equal(typeof operations[0].e, 'string', 'upstream wrote a changelog epoch');
+	if (dieAt !== 'persist') {
+		const stored = JSON.parse(readFileSync(indexFiles(basePath)[0], 'utf8'));
+		assert.equal(stored.changelogEpoch, operations[0].e, 'cleanup persisted the epoch');
+		assert.equal(stored.changelogOperations, operations.filter((op) => op[0] === 0).length);
+	}
 	return Array.from({ length: 6 }, (_, offset) => {
 		const index = offset + 4;
 		const suffix = String(index).padStart(2, '0');
@@ -216,7 +225,7 @@ async function seedCrashWindow(runtime, basePath, { dieAt = 'empty', keepStamp =
 
 /**
  * The pre-patch corruption that leaves NO structural trace: a store compacted
- * a deletion, died before emptying the changelog, and carries no stamp. The
+ * a deletion and died before emptying a legacy, epoch-less changelog. The
  * stale `D` op is in range on the baked rows, so replaying it removes a
  * different, valid document from every index while lengths, order and
  * uniqueness all still hold.
@@ -236,12 +245,28 @@ async function seedLegacyStaleDeletion(runtime, basePath) {
 	const directory = collectionDirectory(basePath);
 	const staleChangelog = readFileSync(join(directory, 'changelog.txt'), 'utf8');
 	assert.match(staleChangelog, /"D"/, 'fixture captured a deletion op');
-	// Bake it, then restore the pre-compaction changelog with no stamp.
+	// Bake it, then model legacy array indexes and an epoch-less stale changelog.
 	await fullCleanup(collection);
 	await db.close();
 	writeFileSync(join(directory, 'changelog.txt'), staleChangelog);
-	writeFileSync(join(directory, STAMP_FILE), '');
+	makeLegacyStore(basePath);
 	return documents.filter((document) => document.id !== 'k-c');
+}
+
+function makeLegacyStore(basePath) {
+	for (const path of indexFiles(basePath)) {
+		writeFileSync(path, JSON.stringify(readIndexRows(path)));
+	}
+	const path = join(collectionDirectory(basePath), 'changelog.txt');
+	const operations = JSON.parse(`[${readFileSync(path, 'utf8')}]`);
+	assert.equal(typeof operations[0].e, 'string');
+	writeFileSync(
+		path,
+		operations
+			.slice(1)
+			.map((op) => JSON.stringify(op))
+			.join(',')
+	);
 }
 
 async function seedHealthy(runtime, basePath, documents) {
@@ -473,7 +498,7 @@ for (const runtime of runtimes) {
 			await db.close();
 			const bytes = readFileSync(join(collectionDirectory(basePath), 'documents.json'));
 			assert.ok(bytes.length > windowBytes);
-			const rows = JSON.parse(readFileSync(indexFiles(basePath)[0], 'utf8'));
+			const rows = readIndexRows(indexFiles(basePath)[0]);
 			const crossing = rows.find((row) => row[1] < windowBytes && row[2] > windowBytes);
 			assert.ok(crossing, 'fixture has a document straddling the window boundary');
 			const crossingDoc = JSON.parse(bytes.subarray(crossing[1], crossing[2]).toString());
@@ -611,21 +636,27 @@ for (const runtime of runtimes) {
 			rmSync(basePath, { recursive: true, force: true });
 		}
 	});
-	for (const dieAt of ['empty', 'persist']) {
-		test(`${runtime.dist}: compaction dying at ${dieAt} rebuilds instead of replaying baked operations`, async () => {
+	for (const dieAt of ['empty', 'persist', 'partial']) {
+		test(`${runtime.dist}: compaction dying at ${dieAt} preserves documents without double-applying baked operations`, async () => {
 			const basePath = makeDirectory(`${runtime.dist}-crash-${dieAt}`);
 			try {
 				const expected = await seedCrashWindow(runtime, basePath, { dieAt });
 				let opened = await openWithRebuildEvents(runtime, basePath);
 				assert.deepEqual(await findAll(opened.collection), expected);
 				opened.stopCapture();
-				assert.deepEqual(
-					opened.events.map((event) => event.reason),
-					['stale-changelog-after-compaction']
-				);
-				const directory = collectionDirectory(basePath);
-				assert.equal(readFileSync(join(directory, 'changelog.txt'), 'utf8'), '');
-				assert.equal(readFileSync(join(directory, STAMP_FILE), 'utf8'), '');
+				if (dieAt === 'empty') {
+					// Every index was persisted under the changelog's epoch, so the first reopen
+					// skips all of it; a rebuild here would mean the epoch skip was ignored.
+					assert.deepEqual(opened.events, [], 'no rebuild on the first reopen');
+				} else {
+					// An index that never persisted replays the whole changelog over its older
+					// rows. Only the op-by-op verifier may send that to a rebuild (never a
+					// double-apply, which the document assertion above would catch).
+					for (const event of opened.events) {
+						assert.match(event.reason, /^stale-changelog-op:/, 'rebuild reason');
+					}
+				}
+
 				await opened.db.close();
 
 				opened = await openWithRebuildEvents(runtime, basePath);
@@ -634,6 +665,39 @@ for (const runtime of runtimes) {
 				assert.deepEqual(opened.events, []);
 				await opened.db.close();
 			} finally {
+				rmSync(basePath, { recursive: true, force: true });
+			}
+		});
+	}
+
+	for (const count of ['x', undefined]) {
+		test(`${runtime.dist}: invalid persisted count ${String(count)} rebuilds once`, async () => {
+			const basePath = makeDirectory(`${runtime.dist}-invalid-persisted-count`);
+			let db;
+			try {
+				const expected = await seedCrashWindow(runtime, basePath, { dieAt: 'empty' });
+				const path = indexFiles(basePath)[0];
+				const stored = JSON.parse(readFileSync(path, 'utf8'));
+				if (count === undefined) delete stored.changelogOperations;
+				else stored.changelogOperations = count;
+				writeFileSync(path, JSON.stringify(stored));
+
+				let opened = await openWithRebuildEvents(runtime, basePath);
+				db = opened.db;
+				assert.deepEqual(await findAll(opened.collection), expected);
+				assert.equal(opened.events.length, 1);
+				assert.equal(opened.events[0].reason, 'invalid-persisted-count:index-0');
+				opened.stopCapture();
+				await db.close();
+
+				opened = await openWithRebuildEvents(runtime, basePath);
+				db = opened.db;
+				assert.deepEqual(await findAll(opened.collection), expected);
+				assert.deepEqual(opened.events, []);
+				opened.stopCapture();
+			} finally {
+				delete globalThis.__wcposOnIndexRebuild;
+				await db?.close();
 				rmSync(basePath, { recursive: true, force: true });
 			}
 		});
@@ -668,12 +732,11 @@ for (const runtime of runtimes) {
 		}
 	});
 
-	test(`${runtime.dist}: a stale changelog without a stamp is refused before it can punch holes`, async () => {
-		const basePath = makeDirectory(`${runtime.dist}-unstamped`);
+	test(`${runtime.dist}: a legacy stale changelog is refused before it can punch holes`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-legacy-stale`);
 		try {
-			const expected = await seedCrashWindow(runtime, basePath, {
-				keepStamp: false,
-			});
+			const expected = await seedCrashWindow(runtime, basePath);
+			makeLegacyStore(basePath);
 			const opened = await openWithRebuildEvents(runtime, basePath);
 			assert.deepEqual(await findAll(opened.collection), expected);
 			opened.stopCapture();
@@ -701,6 +764,40 @@ for (const runtime of runtimes) {
 			assert.match(opened.events[0].reason, /^stale-changelog-op:D:/);
 			await opened.db.close();
 		} finally {
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	test(`${runtime.dist}: epoch replay skips each baked prefix but still verifies and applies the tail`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-epoch-tail`);
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath);
+			db = initial.db;
+			const expected = ['base', 'prefix', 'tail'].map((id) => ({ id, status: id, note: id }));
+			await initial.collection.insert(expected[0]);
+			await fullCleanup(initial.collection);
+			await initial.collection.insert(expected[1]);
+			const state = await storageInternals(initial.collection).statePromise;
+			await state.taskQueue.runCleanup(async (run) => {
+				const operations = await state.changelog.getChangelogOperations(run);
+				// Only one index has the current epoch; siblings still carry the old one.
+				await state.indexStates[0].persistInMemoryRows(
+					run,
+					state.changelog.epoch,
+					operations.get(0).length
+				);
+			});
+			await initial.collection.insert(expected[2]);
+			await db.close();
+			const opened = await openWithRebuildEvents(runtime, basePath);
+			db = opened.db;
+			assert.deepEqual(await findAll(opened.collection), expected);
+			assert.deepEqual(opened.events, [], 'valid mixed-epoch indexes replay without a rebuild');
+			opened.stopCapture();
+		} finally {
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
 			rmSync(basePath, { recursive: true, force: true });
 		}
 	});
@@ -756,6 +853,7 @@ test('both dists carry the audit marker in every patched file', () => {
 				'utf8'
 			);
 			assert.ok(source.includes(`${MARKER}=${PATCH_VERSION};`), `${dist}/${file}`);
+			assert.doesNotMatch(source, /wcpos-changelog-baked|__wcposHash|__wcposLastRaw/);
 		}
 	}
 });
@@ -781,7 +879,7 @@ test('patch preparation rejects a moved anchor', () => {
 test('patch preparation refuses a dist patched by an older script version', () => {
 	const directory = makeDirectory('patch-version');
 	const path = join(directory, 'fixture.js');
-	writeFileSync(path, `globalThis.${MARKER}=1;\n__patched__`);
+	writeFileSync(path, `globalThis.${MARKER}=${PATCH_VERSION - 1};\n__patched__`);
 	try {
 		assert.throws(
 			() =>
@@ -789,9 +887,43 @@ test('patch preparation refuses a dist patched by an older script version', () =
 					prelude: `globalThis.${MARKER}=${PATCH_VERSION};\n`,
 					rewrites: [{ name: 'fixture', before: '__anchor__', after: '__patched__' }],
 				}),
-			/carries patch v1 but this script is v\d+: restore the pristine dist/
+			/carries patch v\d+ but this script is v\d+: restore the pristine dist/
 		);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+for (const fixture of [
+	{
+		name: 'a duplicate anchor',
+		source: '__anchor__ __anchor__',
+		error: /anchor fixture matched 2 times/,
+	},
+	{
+		name: 'a missing rewrite',
+		source: `globalThis.${MARKER}=${PATCH_VERSION};\n__anchor__`,
+		error: /rewrite fixture is missing/,
+	},
+	{
+		name: 'an already patched file',
+		source: `globalThis.${MARKER}=${PATCH_VERSION};\n__patched__`,
+	},
+]) {
+	test(`patch preparation handles ${fixture.name}`, () => {
+		const directory = makeDirectory('patch-contract');
+		const path = join(directory, 'fixture.js');
+		writeFileSync(path, fixture.source);
+		try {
+			const prepare = () =>
+				preparePatch(path, {
+					prelude: `globalThis.${MARKER}=${PATCH_VERSION};\n`,
+					rewrites: [{ name: 'fixture', before: '__anchor__', after: '__patched__' }],
+				});
+			if (fixture.error) assert.throws(prepare, fixture.error);
+			else assert.deepEqual(prepare(), { path, status: 'already patched' });
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+}

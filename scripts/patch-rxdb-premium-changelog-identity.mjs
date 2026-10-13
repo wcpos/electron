@@ -122,22 +122,22 @@ export const DISTS = [
 		dist: 'esm',
 		file: 'index-state.js',
 		applyBefore:
-			'runChangelogOperation=function(t){var e=t[1],i=t[3];if("A"===t[2])this.rows.splice(e,0,i),this.metaIdMap&&this.metaIdMap.set(s(i[0],this.primaryKeyLength),i);else if("D"===t[2])this.rows.splice(e,1),this.metaIdMap&&this.metaIdMap.delete(s(i[0],this.primaryKeyLength));else{if("R"!==t[2])throw new Error("unknown operation key "+t[2]);this.rows[e]=i,this.metaIdMap&&this.metaIdMap.set(s(i[0],this.primaryKeyLength),i)}}',
-		applyAfter: `runChangelogOperation=function(t){return ${MARKER}(this,t,s)}`,
-		emitBefore: 'this.rows.splice(I,1),r.push([this.indexId,I,"D",[t(l),p[0],p[1]]])',
+			'runChangelogOperation(e){var t=e[1],s=e[3];if("A"===e[2])this.rows.splice(t,0,s),this.metaIdMap&&this.metaIdMap.set(r(s[0],this.primaryKeyLength),s);else if("D"===e[2])this.rows.splice(t,1),this.metaIdMap&&this.metaIdMap.delete(r(s[0],this.primaryKeyLength));else{if("R"!==e[2])throw new Error("unknown operation key "+e[2]);this.rows[t]=s,this.metaIdMap&&this.metaIdMap.set(r(s[0],this.primaryKeyLength),s)}}',
+		applyAfter: `runChangelogOperation(e){return ${MARKER}(this,e,r)}`,
+		emitBefore: 'this.rows.splice(I,1),i.push([this.indexId,I,"D",[e(c),p[0],p[1]]])',
 		emitAfter:
-			'function(){var removed=this.rows[I];this.rows.splice(I,1),r.push([this.indexId,I,"D",removed,"wcpos-exact"])}.call(this)',
+			'function(){var removed=this.rows[I];this.rows.splice(I,1),i.push([this.indexId,I,"D",removed,"wcpos-exact"])}.call(this)',
 	},
 	{
 		dist: 'cjs',
 		file: 'index-state.js',
 		applyBefore:
-			'runChangelogOperation=function(t){var r=t[1],i=t[3];if("A"===t[2])this.rows.splice(r,0,i),this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i);else if("D"===t[2])this.rows.splice(r,1),this.metaIdMap&&this.metaIdMap.delete((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength));else{if("R"!==t[2])throw new Error("unknown operation key "+t[2]);this.rows[r]=i,this.metaIdMap&&this.metaIdMap.set((0,e.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i)}}',
-		applyAfter: `runChangelogOperation=function(t){return ${MARKER}(this,t,function(a,b){return (0,e.getPrimaryKeyFromIndexableString)(a,b)})}`,
+			'runChangelogOperation=function(e){var t=e[1],i=e[3];if("A"===e[2])this.rows.splice(t,0,i),this.metaIdMap&&this.metaIdMap.set((0,r.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i);else if("D"===e[2])this.rows.splice(t,1),this.metaIdMap&&this.metaIdMap.delete((0,r.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength));else{if("R"!==e[2])throw new Error("unknown operation key "+e[2]);this.rows[t]=i,this.metaIdMap&&this.metaIdMap.set((0,r.getPrimaryKeyFromIndexableString)(i[0],this.primaryKeyLength),i)}}',
+		applyAfter: `runChangelogOperation=function(e){return ${MARKER}(this,e,function(a,b){return (0,r.getPrimaryKeyFromIndexableString)(a,b)})}`,
 		emitBefore:
-			'this.rows.splice(x,1),o.push([this.indexId,x,"D",[(0,e.ensureNotFalsy)(I),g[0],g[1]]])',
+			'this.rows.splice(I,1),s.push([this.indexId,I,"D",[(0,r.ensureNotFalsy)(c),l[0],l[1]]])',
 		emitAfter:
-			'function(){var removed=this.rows[x];this.rows.splice(x,1),o.push([this.indexId,x,"D",removed,"wcpos-exact"])}.call(this)',
+			'function(){var removed=this.rows[I];this.rows.splice(I,1),s.push([this.indexId,I,"D",removed,"wcpos-exact"])}.call(this)',
 	},
 	...[
 		['esm', 'k=[H.indexId,W,"D",H.rows[W]]', 'k=[H.indexId,W,"D",H.rows[W],"wcpos-exact"]'],
@@ -159,8 +159,8 @@ export const DISTS = [
 		file: 'helpers.js',
 		marker: LINK_MARKER,
 		prelude: LINK_PRELUDE,
-		linkBefore: 'y=s(d.schema).map(((e,a)=>new i(a,e,u,d.schema)))',
-		linkAfter: `y=${LINK_MARKER}(s(d.schema).map(((e,a)=>new i(a,e,u,d.schema))))`,
+		linkBefore: 'y=s(d.schema).map(((e,a)=>new i(a,e,f,d.schema)))',
+		linkAfter: `y=${LINK_MARKER}(s(d.schema).map(((e,a)=>new i(a,e,f,d.schema))))`,
 	},
 	{
 		dist: 'cjs',
@@ -168,8 +168,8 @@ export const DISTS = [
 		marker: LINK_MARKER,
 		prelude: LINK_PRELUDE,
 		linkBefore:
-			'h=(0,n.getIndexesFromSchema)(i.schema).map(((e,a)=>new n.IndexState(a,e,m,i.schema)))',
-		linkAfter: `h=${LINK_MARKER}((0,n.getIndexesFromSchema)(i.schema).map(((e,a)=>new n.IndexState(a,e,m,i.schema))))`,
+			'p=(0,n.getIndexesFromSchema)(i.schema).map(((e,a)=>new n.IndexState(a,e,m,i.schema)))',
+		linkAfter: `p=${LINK_MARKER}((0,n.getIndexesFromSchema)(i.schema).map(((e,a)=>new n.IndexState(a,e,m,i.schema))))`,
 	},
 ];
 

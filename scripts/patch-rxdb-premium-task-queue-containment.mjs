@@ -50,11 +50,15 @@
  * which guarded only writes). The INIT run needs no anchor: upstream chains
  * `cleanupAfterRun` after its own `.catch`, so it always runs — pinned by test.
  *
- * A pre-run-hook rejection still leaves that one run's own callers pending
- * (their tasks never execute and nothing rejects them) — that is upstream's
- * pre-existing semantic, bounded to the failing run and surfaced by the
- * app-layer stall diagnostic; only the permanent damage (leak, poisoning) is
- * removed here.
+ * A pre-run-hook rejection on a READ or WRITE run leaves that run's callers
+ * pending — their tasks are still queued, so the next trigger serves them once
+ * the healed queue moves on; that is upstream's pre-existing semantic, bounded
+ * to the failing run and surfaced by the app-layer stall diagnostic. A CLEANUP
+ * run has no queued task to retry: its callback is a closure handed to this one
+ * run, so the same rejection would leave `runCleanup()` pending forever and the
+ * cleanup plugin's loop stalled for the session (found by review of the 17.6.0
+ * re-derivation). The CLEANUP rewrite therefore adds an outer `catch` that
+ * reports the failure under the owning collection and rejects the caller.
  *
  * Why not `pnpm patch`: rxdb-premium's dist/ is materialized by its own
  * license-gated postinstall, so it does not exist in the tarball pnpm patches —
@@ -127,45 +131,46 @@ current=next&&typeof next.catch==="function"?next.catch(function(error){__wcposR
 const DISTS = [
 	{
 		dist: 'esm',
-		constructorBefore: 'this.queue=e,this.readTasks=[]',
-		constructorAfter: `this.queue=e,${MARKER}(this,e),this.readTasks=[]`,
-		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var s={type:"WRITE"',
-		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var s={type:"WRITE"',
-		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(s),await this.cleanupAfterRun(s)}}))',
+		constructorBefore: 'constructor(e,s,t){this.lockId=e',
+		constructorAfter: `constructor(e,s,t){${MARKER}(this,this.queue);this.lockId=e`,
+		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var t={type:"WRITE"',
+		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var t={type:"WRITE"',
+		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(t),await this.cleanupAfterRun(t)}}))',
 		writeCleanupAfter:
-			'await this.beforeTaskReadOrWrite(s)}finally{if(s)await this.cleanupAfterRun(s)}}}))',
+			'await this.beforeTaskReadOrWrite(t)}finally{if(t)await this.cleanupAfterRun(t)}}}))',
 		readRunBefore:
-			'(async()=>{var e={type:"READ",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+			'(async()=>{var e={type:"READ",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
 		readRunAfter:
-			'(async()=>{try{var e={type:"READ",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
-		readCleanupBefore: '0===this.readTasks.length&&(s=!0)}return this.cleanupAfterRun(e)}))',
+			'(async()=>{try{var e={type:"READ",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+		readCleanupBefore: '0===this.readTasks.length&&(t=!0)}return this.cleanupAfterRun(e)}))',
 		readCleanupAfter:
-			'0===this.readTasks.length&&(s=!0)}}finally{if(e)await this.cleanupAfterRun(e)}}))',
+			'0===this.readTasks.length&&(t=!0)}}finally{if(e)await this.cleanupAfterRun(e)}}))',
 		cleanupRunBefore:
-			'(async()=>{var r={type:"CLEANUP",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>s(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
+			'(async()=>{var r={type:"CLEANUP",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
 		cleanupRunAfter:
-			'(async()=>{try{var r={type:"CLEANUP",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>s(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}catch(e){__wcposReportRunFailure(this,e),a(e)}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 	{
 		dist: 'cjs',
-		constructorBefore: 'this.queue=e.PROMISE_RESOLVE_VOID,this.readTasks=[]',
-		constructorAfter: `this.queue=e.PROMISE_RESOLVE_VOID,${MARKER}(this,e.PROMISE_RESOLVE_VOID),this.readTasks=[]`,
-		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var a={type:"WRITE"',
-		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var a={type:"WRITE"',
-		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(a),await this.cleanupAfterRun(a)}}))',
+		constructorBefore:
+			'(0,t.default)(this,"queue",s.PROMISE_RESOLVE_VOID),(0,t.default)(this,"readTasks",[])',
+		constructorAfter: `(0,t.default)(this,"queue",s.PROMISE_RESOLVE_VOID),${MARKER}(this,this.queue),(0,t.default)(this,"readTasks",[])`,
+		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var t={type:"WRITE"',
+		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var t={type:"WRITE"',
+		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(t),await this.cleanupAfterRun(t)}}))',
 		writeCleanupAfter:
-			'await this.beforeTaskReadOrWrite(a)}finally{if(a)await this.cleanupAfterRun(a)}}}))',
+			'await this.beforeTaskReadOrWrite(t)}finally{if(t)await this.cleanupAfterRun(t)}}}))',
 		readRunBefore:
-			'(async()=>{var s={type:"READ",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(s);',
+			'(async()=>{var e={type:"READ",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
 		readRunAfter:
-			'(async()=>{try{var s={type:"READ",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(s);',
-		readCleanupBefore: '0===this.readTasks.length&&(a=!0)}return this.cleanupAfterRun(s)}))',
+			'(async()=>{try{var e={type:"READ",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+		readCleanupBefore: '0===this.readTasks.length&&(t=!0)}return this.cleanupAfterRun(e)}))',
 		readCleanupAfter:
-			'0===this.readTasks.length&&(a=!0)}}finally{if(s)await this.cleanupAfterRun(s)}}))',
+			'0===this.readTasks.length&&(t=!0)}}finally{if(e)await this.cleanupAfterRun(e)}}))',
 		cleanupRunBefore:
-			'(async()=>{var r={type:"CLEANUP",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await t(r).then((e=>s(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
+			'(async()=>{var r={type:"CLEANUP",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
 		cleanupRunAfter:
-			'(async()=>{try{var r={type:"CLEANUP",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await t(r).then((e=>s(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}catch(e){__wcposReportRunFailure(this,e),a(e)}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 ];
 
@@ -187,6 +192,9 @@ export function preparePatch(path, anchors) {
 						'the patched file is incomplete; reinstall rxdb-premium to restore a pristine dist'
 				);
 			}
+		}
+		if (!source.includes(PRELUDE)) {
+			throw new Error(`${path} carries an outdated prelude — reinstall rxdb-premium`);
 		}
 		return { path, status: 'already patched' };
 	}

@@ -155,14 +155,28 @@ test('a marked file missing a rewrite is corrupt, not "already patched"', () => 
 });
 
 test('a marked file carrying every rewrite reports "already patched"', () => {
-	const anchors = syntheticAnchors;
-	const everyAfter = Object.entries(anchors)
-		.filter(([key]) => key.endsWith('After'))
+	const anchors = { ...syntheticAnchors, constructorBefore: '__before_constructor__' };
+	const before = Object.entries(anchors)
+		.filter(([key]) => key.endsWith('Before'))
 		.map(([, value]) => value)
 		.join('');
-
-	withFixture(MARKER + everyAfter, (path) => {
+	withFixture(before, (path) => {
+		const { next } = preparePatch(path, anchors);
+		writeFileSync(path, next);
 		assert.deepEqual(preparePatch(path, anchors), { path, status: 'already patched' });
+	});
+});
+
+test('a marked file with every rewrite but an outdated prelude is refused', () => {
+	const anchors = { ...syntheticAnchors, constructorBefore: '__before_constructor__' };
+	const before = Object.entries(anchors)
+		.filter(([key]) => key.endsWith('Before'))
+		.map(([, value]) => value)
+		.join('');
+	withFixture(before, (path) => {
+		const { next } = preparePatch(path, anchors);
+		writeFileSync(path, next.replace('var current=initial;', 'var current=undefined;'));
+		assert.throws(() => preparePatch(path, anchors), /outdated prelude/);
 	});
 });
 
@@ -446,12 +460,26 @@ function defineSuite(dist, { TaskQueue, getAccessHandle }) {
 		);
 	});
 
-	test(`[${dist}] a failing replay hook on a CLEANUP run closes the handles it opened`, async () => {
+	test(`[${dist}] a failing replay hook on a CLEANUP run closes the handles it opened and rejects its caller`, async () => {
+		// Unlike a READ or WRITE run, a cleanup run has no queued task for a later
+		// trigger to pick up: upstream leaves `runCleanup()` pending forever when the
+		// hook rejects, stalling the cleanup plugin's loop for the session.
+		const reports = [];
+		globalThis.__wcposOnStorageRunFailure = (report) => reports.push(report);
 		const harness = createHarness({ beforeTaskReadOrWrite: failingReplayHook() });
 
-		await settle(harness.cleanup(async () => 'never-runs'));
-		await harness.settleRun();
+		let failed;
+		try {
+			failed = await settle(harness.cleanup(async () => 'never-runs'));
+			await harness.settleRun();
+		} finally {
+			delete globalThis.__wcposOnStorageRunFailure;
+		}
 
+		assert.equal(failed.state, 'rejected', 'the failed cleanup run must reject its caller');
+		assert.equal(failed.error.message, 'deliberate replay failure');
+		assert.equal(reports.length, 1, 'the hook failure is reported once, under its collection');
+		assert.equal(reports[0].error.message, 'deliberate replay failure');
 		assert.equal(harness.opened.length, 1, 'the hook should have opened exactly one handle');
 		assert.deepEqual(harness.leakedHandles(), [], 'the cleanup run must not leak its handles');
 		assert.deepEqual(
