@@ -17,7 +17,7 @@ export const MARKER = 'WCPOS_CHANGELOG_REPLAY_SAFETY_PATCH';
 // Bumped whenever the prelude or a rewrite changes: a dist patched by an older
 // script cannot be upgraded in place (the prelude text is unknown), so it must
 // be restored from the licensed package and re-patched.
-export const PATCH_VERSION = 4;
+export const PATCH_VERSION = 5;
 
 const MARKER_PRELUDE = `globalThis.${MARKER}=${PATCH_VERSION};\n`;
 // Multi-instance (web) retains its existing replay/recovery contract.
@@ -63,7 +63,11 @@ return null
 function __wcposReplayChangelog(indexStates,operationsByIndex,changelog){
 for(var entry of operationsByIndex.entries()){
 var indexState=indexStates[entry[0]],rows=indexState.rows,operations=entry[1];
-var start=indexState.persistedChangelogEpoch&&indexState.persistedChangelogEpoch===changelog.epoch?Math.min(indexState.persistedChangelogOperations,operations.length):0;
+var start=0;
+if(indexState.persistedChangelogEpoch&&indexState.persistedChangelogEpoch===changelog.epoch){
+var count=indexState.persistedChangelogOperations;
+if(typeof count!=="number"||count%1!==0||count<0||count>operations.length)return "invalid-persisted-count:index-"+entry[0];
+start=count}
 for(var i=start;i<operations.length;i++){
 var operation=operations[i],at=operation[1],kind=operation[2],row=operation[3];
 if(!Array.isArray(row)||typeof row[0]!=="string")return "stale-changelog-op:malformed:index-"+entry[0];

@@ -644,6 +644,18 @@ for (const runtime of runtimes) {
 				let opened = await openWithRebuildEvents(runtime, basePath);
 				assert.deepEqual(await findAll(opened.collection), expected);
 				opened.stopCapture();
+				if (dieAt === 'empty') {
+					// Every index was persisted under the changelog's epoch, so the first reopen
+					// skips all of it; a rebuild here would mean the epoch skip was ignored.
+					assert.deepEqual(opened.events, [], 'no rebuild on the first reopen');
+				} else {
+					// An index that never persisted replays the whole changelog over its older
+					// rows. Only the op-by-op verifier may send that to a rebuild (never a
+					// double-apply, which the document assertion above would catch).
+					for (const event of opened.events) {
+						assert.match(event.reason, /^stale-changelog-op:/, 'rebuild reason');
+					}
+				}
 
 				await opened.db.close();
 
@@ -653,6 +665,39 @@ for (const runtime of runtimes) {
 				assert.deepEqual(opened.events, []);
 				await opened.db.close();
 			} finally {
+				rmSync(basePath, { recursive: true, force: true });
+			}
+		});
+	}
+
+	for (const count of ['x', undefined]) {
+		test(`${runtime.dist}: invalid persisted count ${String(count)} rebuilds once`, async () => {
+			const basePath = makeDirectory(`${runtime.dist}-invalid-persisted-count`);
+			let db;
+			try {
+				const expected = await seedCrashWindow(runtime, basePath, { dieAt: 'empty' });
+				const path = indexFiles(basePath)[0];
+				const stored = JSON.parse(readFileSync(path, 'utf8'));
+				if (count === undefined) delete stored.changelogOperations;
+				else stored.changelogOperations = count;
+				writeFileSync(path, JSON.stringify(stored));
+
+				let opened = await openWithRebuildEvents(runtime, basePath);
+				db = opened.db;
+				assert.deepEqual(await findAll(opened.collection), expected);
+				assert.equal(opened.events.length, 1);
+				assert.equal(opened.events[0].reason, 'invalid-persisted-count:index-0');
+				opened.stopCapture();
+				await db.close();
+
+				opened = await openWithRebuildEvents(runtime, basePath);
+				db = opened.db;
+				assert.deepEqual(await findAll(opened.collection), expected);
+				assert.deepEqual(opened.events, []);
+				opened.stopCapture();
+			} finally {
+				delete globalThis.__wcposOnIndexRebuild;
+				await db?.close();
 				rmSync(basePath, { recursive: true, force: true });
 			}
 		});
