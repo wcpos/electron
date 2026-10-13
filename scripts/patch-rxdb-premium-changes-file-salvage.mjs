@@ -1,6 +1,6 @@
 /**
  * Makes rxdb-premium's abstract-filesystem changes file (`changes.json`, the
- * per-run write-ahead log) crash-safe in both directions.
+ * per-run write-ahead log) reader crash-safe.
  *
  * `bulkWrite` appends every non-direct event bulk (anything with a `previous`,
  * more than DIRECT_WRITE_LIMIT rows, or attachments) to `changes.json` before
@@ -9,11 +9,9 @@
  * and truncates the file. On a clean run the file is only ever read back after
  * a crash. Two upstream defects meet there:
  *
- *   1. The writer reads `runState.knownChangesFileSize` to decide the offset
- *      and separator of each append, but nothing ever assigns it. Every bulk
- *      in a run is written at offset 0 with no separator, so the second bulk
- *      of a run overwrites the head of a longer first one. A crash mid-run
- *      then leaves `{bulk N}` followed by the tail of bulk N-1.
+ *   1. FIXED UPSTREAM IN 17.6.0: the writer now advances knownChangesFileSize,
+ *      separates appended bulks, emits the bare bulk on changes$, and resets
+ *      the offset after replay. Older versions overwrote each preceding bulk.
  *   2. The reader is a bare `JSON.parse("[" + file + "]")`. On that residue
  *      it throws `Expected ',' or ']' after array element in JSON at position
  *      <len(bulk N)+1>` — Sentry WOOCOMMERCE-POS-2GA, one install per file
@@ -21,16 +19,8 @@
  *      is never cleared, and because it fails inside the run's lock callback
  *      the run's callers never settle either.
  *
- * Three anchored rewrites per dist:
+ * Two anchored rewrites per dist (the reader defect remains in 17.6.0):
  *
- *   - `trackAppend`: advance `knownChangesFileSize` after each append, so bulks
- *     accumulate as `{...},{...}` — the shape the reader already expects — and
- *     a crash replays every acknowledged bulk instead of only the last one.
- *     Upstream also pushes the very string it writes onto `changes$`, comma
- *     included once the offset is non-zero — dead code while the offset was
- *     never set, a change-stream parse failure the moment it is — so the
- *     rewrite emits the bare bulk and writes the separated one.
- *   - `resetAfterReplay`: zero it after the reader truncates the file.
  *   - `readChanges`: parse through `__wcposReadChangesFile`, which validates
  *     every bulk against what the replay dereferences (`documentData` keyed
  *     by the event's id, `_deleted`, `_meta.lwt`; the same shape on
@@ -172,50 +162,25 @@ export const DISTS = [
 				after: 'import{getAccessHandle as n}from"./task-queue.js"',
 			},
 			{
-				name: 'trackAppend',
-				before:
-					'var C=JSON.stringify(f.eventBulk);t.knownChangesFileSize&&(C=","+C);var P=r._encode(C),_=(await g).write(P,{at:t.knownChangesFileSize?t.knownChangesFileSize:0});r.changes$.next(C),await _}',
-				after:
-					'var C=JSON.stringify(f.eventBulk),__wcposBulk=C;t.knownChangesFileSize&&(C=","+C);var P=r._encode(C),_=(await g).write(P,{at:t.knownChangesFileSize?t.knownChangesFileSize:0});r.changes$.next(__wcposBulk),await _,t.knownChangesFileSize=(t.knownChangesFileSize||0)+P.byteLength}',
-			},
-			{
 				name: 'readChanges',
 				before: 'o=JSON.parse("["+a._decode(g)+"]")}',
-				after: 'o=await __wcposReadChangesFile(a,e,l,m,g);if(!o)return}',
-			},
-			{
-				name: 'resetAfterReplay',
-				before: 'm.truncate(0)]),await t(a,l,p,o)}',
-				after: 'm.truncate(0)]),e.knownChangesFileSize=0,await t(a,l,p,o)}',
+				after: 'o=await __wcposReadChangesFile(a,e,l,h,g);if(!o)return}',
 			},
 		],
 	},
 	{
 		dist: 'cjs',
-		prelude: prelude('(0,a.getAccessHandle)(quarantineHandle,runState)'),
+		prelude: prelude('(0,n.getAccessHandle)(quarantineHandle,runState)'),
 		rewrites: [
 			{
 				name: 'getAccessHandleBinding',
-				before: 'a=require("./task-queue.js")',
-				after: 'a=require("./task-queue.js")',
-			},
-			{
-				name: 'trackAppend',
-				before:
-					'var _=JSON.stringify(f.eventBulk);n.knownChangesFileSize&&(_=","+_);var x=o._encode(_),y=(await w).write(x,{at:n.knownChangesFileSize?n.knownChangesFileSize:0});o.changes$.next(_),await y}',
-				after:
-					'var _=JSON.stringify(f.eventBulk),__wcposBulk=_;n.knownChangesFileSize&&(_=","+_);var x=o._encode(_),y=(await w).write(x,{at:n.knownChangesFileSize?n.knownChangesFileSize:0});o.changes$.next(__wcposBulk),await y,n.knownChangesFileSize=(n.knownChangesFileSize||0)+x.byteLength}',
+				before: 'n=require("./task-queue.js")',
+				after: 'n=require("./task-queue.js")',
 			},
 			{
 				name: 'readChanges',
-				before: 'o=JSON.parse("["+r._decode(m)+"]")}',
-				after: 'o=await __wcposReadChangesFile(r,e,c,d,m);if(!o)return}',
-			},
-			{
-				name: 'resetAfterReplay',
-				before: 'd.truncate(0)]),await(0,t.broadcastChangelogOperations)(r,c,f,o)}',
-				after:
-					'd.truncate(0)]),e.knownChangesFileSize=0,await(0,t.broadcastChangelogOperations)(r,c,f,o)}',
+				before: 'o=JSON.parse("["+i._decode(m)+"]")}',
+				after: 'o=await __wcposReadChangesFile(i,e,c,d,m);if(!o)return}',
 			},
 		],
 	},

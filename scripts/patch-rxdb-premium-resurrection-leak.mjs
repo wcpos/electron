@@ -28,7 +28,7 @@
  * so the patch gets re-evaluated (or dropped, if upstream fixed the event —
  * check the resurrection repro before deleting this).
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -66,16 +66,29 @@ function shim({ state, ctx, docHandle, events, getDocumentsJson }) {
  * dist must not leave the other half-patched (a retry would then start from
  * an inconsistent tree).
  */
-function preparePatch(path, { importBefore, importAfter, loopBefore, loopAfter }) {
+function preparePatch(
+  path,
+  { importBefore, importAfter, loopBefore, loopAfter },
+) {
   const source = readFileSync(path, "utf8");
-  if (source.includes(MARKER)) return { path, status: "already patched" };
-  if (importBefore) {
-    if (!source.includes(importBefore)) {
-      throw new Error(`anchor missing in ${path}: import site`);
+  if (source.includes(MARKER)) {
+    if (!source.includes(importAfter) || !source.includes(loopAfter)) {
+      throw new Error(
+        `${path} carries an incomplete or outdated resurrection patch — reinstall rxdb-premium`,
+      );
     }
+    return { path, status: "already patched" };
   }
-  if (!source.includes(loopBefore)) {
-    throw new Error(`anchor missing in ${path}: index-maintenance loop`);
+  for (const [site, anchor] of [
+    ["import site", importBefore],
+    ["index-maintenance loop", loopBefore],
+  ]) {
+    const occurrences = source.split(anchor).length - 1;
+    if (occurrences !== 1) {
+      throw new Error(
+        `anchor missing or ambiguous in ${path}: ${site} matched ${occurrences} times (expected exactly 1)`,
+      );
+    }
   }
   let next = importBefore ? source.replace(importBefore, importAfter) : source;
   next = next.replace(loopBefore, loopAfter);
@@ -109,14 +122,14 @@ if (!existsSync(esm) || !existsSync(cjs)) {
 const esmShim = shim({
   state: "l",
   ctx: "e",
-  docHandle: "h",
+  docHandle: "m",
   events: "u",
   getDocumentsJson: "__wcposGDJ",
 });
 const esmPrepared = preparePatch(esm, {
-  importBefore: 'import{writeDocumentRows as r}from"./documents-file.js"',
+  importBefore: 'import{writeDocumentRows as i}from"./documents-file.js"',
   importAfter:
-    'import{writeDocumentRows as r,getDocumentsJson as __wcposGDJ}from"./documents-file.js"',
+    'import{writeDocumentRows as i,getDocumentsJson as __wcposGDJ}from"./documents-file.js"',
   loopBefore:
     "for(var p=[],k=0;k<l.indexStates.length;k++){l.indexStates[k].appendWriteOperations(u,f.documentPositions,p)}",
   loopAfter:
@@ -129,16 +142,16 @@ const cjsShim = shim({
   ctx: "e",
   docHandle: "u",
   events: "g",
-  getDocumentsJson: "(0,n.getDocumentsJson)",
+  getDocumentsJson: "(0,a.getDocumentsJson)",
 });
 const cjsPrepared = preparePatch(cjs, {
-  importBefore: 'n=require("./documents-file.js")',
-  importAfter: 'n=require("./documents-file.js")',
+  importBefore: 'a=require("./documents-file.js")',
+  importAfter: 'a=require("./documents-file.js")',
   loopBefore:
-    "for(var f=[],I=0;I<c.indexStates.length;I++){c.indexStates[I].appendWriteOperations(g,p.documentPositions,f)}",
+    "for(var f=[],k=0;k<c.indexStates.length;k++){c.indexStates[k].appendWriteOperations(g,p.documentPositions,f)}",
   loopAfter:
     cjsShim +
-    "for(var f=[],I=0;I<c.indexStates.length;I++){c.indexStates[I].appendWriteOperations(__wcposIdxEvents,p.documentPositions,f)}",
+    "for(var f=[],k=0;k<c.indexStates.length;k++){c.indexStates[k].appendWriteOperations(__wcposIdxEvents,p.documentPositions,f)}",
 });
 
 commitPatches([esmPrepared, cjsPrepared]);

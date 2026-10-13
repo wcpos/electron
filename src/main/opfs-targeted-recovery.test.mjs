@@ -71,13 +71,27 @@ function document(id, sequence) {
   };
 }
 
+// Cleanup persists an epoch envelope; rebuilds and legacy files use bare rows.
+async function readIndexRows(path) {
+  const stored = JSON.parse(await readFile(path, "utf8"));
+  return Array.isArray(stored) ? stored : stored.rows;
+}
+
+async function writeIndexRows(path, rows) {
+  const stored = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(
+    path,
+    JSON.stringify(Array.isArray(stored) ? rows : { ...stored, rows }),
+  );
+}
+
 async function corruptRecord(basePath, id, makeCorruptBytes) {
   const directory = join(basePath, (await readdir(basePath))[0]);
   const indexPaths = (await readdir(directory))
     .filter((name) => name.startsWith("index-"))
     .map((name) => join(directory, name));
   const parsedIndexes = await Promise.all(
-    indexPaths.map(async (path) => JSON.parse(await readFile(path, "utf8"))),
+    indexPaths.map(readIndexRows),
   );
   const targetRow = parsedIndexes.flat().find((row) => row[0].includes(id));
   assert.ok(targetRow, `missing index row for ${id}`);
@@ -104,7 +118,7 @@ async function corruptRecord(basePath, id, makeCorruptBytes) {
         row[2] = corruptEnd;
       }
     }
-    await writeFile(indexPaths[index], JSON.stringify(parsedIndexes[index]));
+    await writeIndexRows(indexPaths[index], parsedIndexes[index]);
   }
 }
 
@@ -114,7 +128,7 @@ async function corruptRecordInPlace(basePath, id, makeCorruptBytes) {
     directory,
     (await readdir(directory)).find((name) => name.startsWith("index-")),
   );
-  const targetRow = JSON.parse(await readFile(indexPath, "utf8")).find((row) =>
+  const targetRow = (await readIndexRows(indexPath)).find((row) =>
     row[0].includes(id),
   );
   assert.ok(targetRow, `missing index row for ${id}`);
@@ -988,12 +1002,12 @@ async function shiftSecondaryIndexOffsets(basePath, id, shift, position = 1) {
   // index-00000 backs the primary metaIdMap; index-00001 is the second
   // schema index (["_deleted", "beta", "id"]) that queries plan onto.
   const indexPath = join(directory, indexNames[position]);
-  const rows = JSON.parse(await readFile(indexPath, "utf8"));
+  const rows = await readIndexRows(indexPath);
   const targetRow = rows.find((row) => row[0].includes(id));
   assert.ok(targetRow, `missing index row for ${id}`);
   targetRow[1] += shift;
   targetRow[2] += shift;
-  await writeFile(indexPath, JSON.stringify(rows));
+  await writeIndexRows(indexPath, rows);
 }
 
 test("rebuilds a secondary index whose rows point at stale byte ranges", async () => {
@@ -1134,12 +1148,12 @@ test("refuses an index rebuild when the primary index is itself unsound", async 
         .filter((n) => n.startsWith("index-"))
         .sort()[0],
     );
-    const rows = JSON.parse(await readFile(primaryPath, "utf8"));
+    const rows = await readIndexRows(primaryPath);
     const aaaRow = rows.find((row) => row[0].includes("lane:aaa"));
     const bbbRow = rows.find((row) => row[0].includes("lane:bbb"));
     bbbRow[1] = aaaRow[1];
     bbbRow[2] = aaaRow[2];
-    await writeFile(primaryPath, JSON.stringify(rows));
+    await writeIndexRows(primaryPath, rows);
 
     const { withTargetedOpfsRecovery } =
       await import("./opfs-targeted-recovery.mjs");
@@ -1231,7 +1245,7 @@ test("refuses a rebuild when the primary points at a stale duplicate revision", 
         .filter((n) => n.startsWith("index-"))
         .sort()[0],
     );
-    const rows = JSON.parse(await readFile(primaryPath, "utf8"));
+    const rows = await readIndexRows(primaryPath);
     const cccRow = rows.find((row) => row[0].includes("lane:ccc"));
     const documentsPath = join(directory, "documents.json");
     const documentsBytes = await readFile(documentsPath);
@@ -1239,7 +1253,7 @@ test("refuses a rebuild when the primary points at a stale duplicate revision", 
     await writeFile(documentsPath, Buffer.concat([documentsBytes, copy]));
     cccRow[1] = documentsBytes.length;
     cccRow[2] = documentsBytes.length + copy.length;
-    await writeFile(primaryPath, JSON.stringify(rows));
+    await writeIndexRows(primaryPath, rows);
 
     const { withTargetedOpfsRecovery } =
       await import("./opfs-targeted-recovery.mjs");
@@ -1286,10 +1300,10 @@ test("rebuilds every index from documents.json when the primary index is missing
         .filter((n) => n.startsWith("index-"))
         .sort()[0],
     );
-    const rows = JSON.parse(await readFile(primaryPath, "utf8"));
-    await writeFile(
+    const rows = await readIndexRows(primaryPath);
+    await writeIndexRows(
       primaryPath,
-      JSON.stringify(rows.filter((row) => !row[0].includes("lane:ccc"))),
+      rows.filter((row) => !row[0].includes("lane:ccc")),
     );
 
     const rebuilds = [];
@@ -1450,10 +1464,10 @@ test("refuses a rebuild when index ID sets differ despite equal counts", async (
         .filter((n) => n.startsWith("index-"))
         .sort()[2],
     );
-    const rows = JSON.parse(await readFile(metaPath, "utf8"));
+    const rows = await readIndexRows(metaPath);
     const cccRow = rows.find((row) => row[0].includes("lane:ccc"));
     cccRow[0] = cccRow[0].replace("lane:ccc", "lane:ddd");
-    await writeFile(metaPath, JSON.stringify(rows));
+    await writeIndexRows(metaPath, rows);
 
     const { withTargetedOpfsRecovery } =
       await import("./opfs-targeted-recovery.mjs");
@@ -1502,7 +1516,7 @@ test("rebuilds every index from documents.json when the primary index holds dupl
         .filter((n) => n.startsWith("index-"))
         .sort()[0],
     );
-    const rows = JSON.parse(await readFile(primaryPath, "utf8"));
+    const rows = await readIndexRows(primaryPath);
     const aaaRow = rows.find((row) => row[0].includes("lane:aaa"));
     const bbbRow = rows.find((row) => row[0].includes("lane:bbb"));
     const documentsPath = join(directory, "documents.json");
@@ -1512,7 +1526,7 @@ test("rebuilds every index from documents.json when the primary index holds dupl
     bbbRow[0] = aaaRow[0];
     bbbRow[1] = documentsBytes.length;
     bbbRow[2] = documentsBytes.length + copy.length;
-    await writeFile(primaryPath, JSON.stringify(rows));
+    await writeIndexRows(primaryPath, rows);
 
     const rebuilds = [];
     globalThis.__wcposOnIndexRebuild = (event) => rebuilds.push(event);
@@ -1572,11 +1586,11 @@ test("rebuilds a secondary index that duplicates one document and drops another"
         .filter((n) => n.startsWith("index-"))
         .sort()[1],
     );
-    const rows = JSON.parse(await readFile(betaPath, "utf8"));
+    const rows = await readIndexRows(betaPath);
     const bbbRow = rows.find((row) => row[0].includes("lane:bbb"));
     const cccPosition = rows.findIndex((row) => row[0].includes("lane:ccc"));
     rows[cccPosition] = [bbbRow[0], bbbRow[1] - 2, bbbRow[2] - 2];
-    await writeFile(betaPath, JSON.stringify(rows));
+    await writeIndexRows(betaPath, rows);
 
     const { withTargetedOpfsRecovery } =
       await import("./opfs-targeted-recovery.mjs");
@@ -2323,12 +2337,12 @@ test("refuses a row that points at another document and still lands the write", 
       entry.startsWith("index-"),
     )) {
       const path = join(directory, name);
-      const rows = JSON.parse(await readFile(path, "utf8"));
+      const rows = await readIndexRows(path);
       const victimRow = rows.find((row) => row[0].includes(victim.id));
       const shiftedRow = rows.find((row) => row[0].includes(shifted.id));
       shiftedRow[1] = victimRow[1];
       shiftedRow[2] = victimRow[2];
-      await writeFile(path, JSON.stringify(rows));
+      await writeIndexRows(path, rows);
     }
 
     const { withTargetedOpfsRecovery } =
@@ -2988,14 +3002,14 @@ async function orphanPrimaryRow(basePath, orphanId, siblingId) {
   for (const [position, name] of indexNames.entries()) {
     const removedId = position === 0 ? orphanId : siblingId;
     const indexPath = join(directory, name);
-    const rows = JSON.parse(await readFile(indexPath, "utf8"));
+    const rows = await readIndexRows(indexPath);
     const remaining = rows.filter((row) => !row[0].includes(removedId));
     assert.equal(
       rows.length - remaining.length,
       1,
       `one row for ${removedId} in ${name}`,
     );
-    await writeFile(indexPath, JSON.stringify(remaining));
+    await writeIndexRows(indexPath, remaining);
   }
 }
 

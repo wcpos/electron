@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 export const MARKER = 'WCPOS_CLEANUP_COMPACTION_BATCH_PATCH';
 // Bump on prelude/rewrite changes; older patched dists must be restored first.
-export const PATCH_VERSION = 1;
+export const PATCH_VERSION = 2;
 const MARKER_PRELUDE = `globalThis.${MARKER}=${PATCH_VERSION};\n`;
 const COMPACTION_PRELUDE = `${MARKER_PRELUDE}
 // A move costs ~0.3 ms of worker CPU. The task queue holds the cross-tab lock for
@@ -36,7 +36,7 @@ async function __wcposCompactDocumentsBatched(storageInstance,runState,deps){
 var a=storageInstance,t=runState,e=deps.ensureNotFalsy,o=deps.getAccessHandle,p=deps.getDocumentsJson,r=await a.internals.statePromise,pending=[];
 try{for(var n=e(r.indexStates.find((e=>"_meta.lwt"===e.index[0]&&e.index[1]===a.primaryPath&&2===e.index.length))),i=await o(r.documentFileHandle,t),s=await i.getSize(),budget=__wcposCompactionBatch(),started=Date.now(),g=0,d=0,m=0;;){if(d>=budget.documents||d>0&&Date.now()-started>=budget.ms)return d;
 var u=n.rows[m];if(m+=1,!u){if(g<s)await i.truncate(g);return d;}
-var w=u[1],h=u[2];if(w===g)g=h;else{d+=1;var f=(await p(r,i,t,[u]))[0],v=g,x=w-v,D,C,E=a._encode(JSON.stringify(f));if(x>=E.byteLength){D=await i.getWritable(),await D.write(E,{at:v}),C=E.byteLength}else{var y=a._encode(" ".repeat(x));D=await i.getWritable();await D.write(y,{at:v});var P=[];for(var S of r.indexStates){var O=S.changeDocumentPosition(f,[v,h]);P.push(O)}await r.changelog.addChangelogOperations(t,P),pending.push(...P);C=h-w;var b=JSON.stringify(f)+" ".repeat(x),j=a._encode(b);D=await i.getWritable(),await D.write(j,{at:v})}var F=v+C,I=[];for(var J of r.indexStates){var _=J.changeDocumentPosition(f,[v,F]);I.push(_)}await r.changelog.addChangelogOperations(t,I),pending.push(...I),g+=C}}}finally{if(pending.length>0)await deps.broadcast(a,r,pending)}}
+var h=u[1],w=u[2];if(h===g)g=w;else{d+=1;var f=(await p(r,i,t,[u]))[0],v=g,x=h-v,D,C,E=a._encode(JSON.stringify(f));if(x>=E.byteLength){D=await i.getWritable(),await D.write(E,{at:v}),C=E.byteLength}else{var y=a._encode(" ".repeat(x));D=await i.getWritable();await D.write(y,{at:v});var P=[];for(var S of r.indexStates){var O=S.changeDocumentPosition(f,[v,w]);P.push(O)}await r.changelog.addChangelogOperations(t,P),pending.push(...P);C=w-h;var b=JSON.stringify(f)+" ".repeat(x),I=a._encode(b);D=await i.getWritable(),await D.write(I,{at:v})}var j=v+C,F=[];for(var J of r.indexStates){var _=J.changeDocumentPosition(f,[v,j]);F.push(_)}await r.changelog.addChangelogOperations(t,F),pending.push(...F),g+=C}}}finally{if(pending.length>0)await deps.broadcast(a,r,pending)}}
 `;
 
 const DISTS = [
@@ -68,9 +68,9 @@ const DISTS = [
 					{
 						name: 'batchedCleanup',
 						before:
-							'async function o(e,a,t){return!((await s(e,a,t)).length>0)&&(!((await g(e,a)).length>0)&&(!(await d(e,a)>0)||(e.devMode&&await(0,n.debug_checkIfAllDocsCanBeRead)(e,a),!1)))}',
+							'async function i(e,a,t){return!((await s(e,a,t)).length>0)&&(!((await g(e,a)).length>0)&&(!(await d(e,a)>0)||(e.devMode&&await(0,n.debug_checkIfAllDocsCanBeRead)(e,a),!1)))}',
 						after:
-							'async function o(storageInstance,runState,minimumDeletedTime){if((await s(storageInstance,runState,minimumDeletedTime)).length>0)return false;if((await g(storageInstance,runState)).length>0)return false;var moved=await __wcposCompactDocumentsBatched(storageInstance,runState,{ensureNotFalsy:e.ensureNotFalsy,getAccessHandle:a.getAccessHandle,getDocumentsJson:r.getDocumentsJson,broadcast:n.broadcastChangelogOperations});if(moved>0){if(storageInstance.devMode)await (0,n.debug_checkIfAllDocsCanBeRead)(storageInstance,runState);await g(storageInstance,runState);return false}return true}',
+							'async function i(storageInstance,runState,minimumDeletedTime){if((await s(storageInstance,runState,minimumDeletedTime)).length>0)return false;if((await g(storageInstance,runState)).length>0)return false;var moved=await __wcposCompactDocumentsBatched(storageInstance,runState,{ensureNotFalsy:e.ensureNotFalsy,getAccessHandle:a.getAccessHandle,getDocumentsJson:r.getDocumentsJson,broadcast:n.broadcastChangelogOperations});if(moved>0){if(storageInstance.devMode)await (0,n.debug_checkIfAllDocsCanBeRead)(storageInstance,runState);await g(storageInstance,runState);return false}return true}',
 					},
 				],
 			},

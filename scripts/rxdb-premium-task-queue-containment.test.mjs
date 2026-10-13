@@ -155,14 +155,28 @@ test('a marked file missing a rewrite is corrupt, not "already patched"', () => 
 });
 
 test('a marked file carrying every rewrite reports "already patched"', () => {
-	const anchors = syntheticAnchors;
-	const everyAfter = Object.entries(anchors)
-		.filter(([key]) => key.endsWith('After'))
+	const anchors = { ...syntheticAnchors, constructorBefore: '__before_constructor__' };
+	const before = Object.entries(anchors)
+		.filter(([key]) => key.endsWith('Before'))
 		.map(([, value]) => value)
 		.join('');
-
-	withFixture(MARKER + everyAfter, (path) => {
+	withFixture(before, (path) => {
+		const { next } = preparePatch(path, anchors);
+		writeFileSync(path, next);
 		assert.deepEqual(preparePatch(path, anchors), { path, status: 'already patched' });
+	});
+});
+
+test('a marked file with every rewrite but an outdated prelude is refused', () => {
+	const anchors = { ...syntheticAnchors, constructorBefore: '__before_constructor__' };
+	const before = Object.entries(anchors)
+		.filter(([key]) => key.endsWith('Before'))
+		.map(([, value]) => value)
+		.join('');
+	withFixture(before, (path) => {
+		const { next } = preparePatch(path, anchors);
+		writeFileSync(path, next.replace('var current=initial;', 'var current=undefined;'));
+		assert.throws(() => preparePatch(path, anchors), /outdated prelude/);
 	});
 });
 

@@ -7,11 +7,11 @@
  * The changes file (`changes.json`) is the per-run write-ahead log of the
  * abstract-filesystem storage: `bulkWrite` appends each non-direct event bulk
  * there before resolving, and the pre-run hook folds the bulks into
- * documents.json and truncates the file. Upstream never advances the offset it
- * appends at, so a run's second bulk overwrites the head of a longer first one,
- * and a crash mid-run leaves `{bulk N}` + tail-of-bulk-N-1 for the next boot's
- * bare `JSON.parse` to choke on — every boot, forever, with that run's callers
- * pending (Sentry WOOCOMMERCE-POS-2GA).
+ * documents.json and truncates the file. Upstream 17.6.0 advances append
+ * offsets, separates bulks and emits comma-less changes; the append/replay
+ * tests pin that upstream behavior. Earlier versions overwrote prior bulks,
+ * leaving crash residue that the still-unvalidated reader cannot parse
+ * (Sentry WOOCOMMERCE-POS-2GA). The patch salvages that legacy residue.
  *
  * These tests drive the REAL storage instance: the writes are spied on at the
  * access-handle level to pin the on-disk shape, and the crash residue is built
@@ -134,7 +134,7 @@ function byId(documents) {
 /**
  * Seeds two documents, waits for that run to end, then issues two updates in
  * ONE fresh run (neither document touched yet, so no hook runs between them —
- * the exact shape whose second append overwrote the first upstream). Returns
+ * the shape whose second append overwrote the first before upstream 17.6.0). Returns
  * the captured appends and the documents as stored afterwards.
  */
 async function seedAndUpdateInOneRun(runtime, basePath) {
@@ -217,9 +217,7 @@ async function bootWithRecoveryEvents(runtime, basePath, prepare) {
 	globalThis.__wcposOnStorageRecovery = hook;
 	let instance;
 	try {
-		instance = await runtime
-			.getStorage({ basePath })
-			.createStorageInstance(storageParams('boot'));
+		instance = await runtime.getStorage({ basePath }).createStorageInstance(storageParams('boot'));
 		prepare?.(instance);
 		const documents = await Promise.race([
 			instance.findDocumentsById(['order:alpha', 'order:beta'], false),
@@ -290,7 +288,7 @@ test('preparePatch fails closed on a marker with an outdated prelude', () => {
 });
 
 for (const runtime of runtimes) {
-	test(`[${runtime.dist}] appends successive bulks of one run instead of overwriting the first`, async () => {
+	test(`[${runtime.dist}] upstream 17.6.0 appends successive bulks without overwriting the first`, async () => {
 		const basePath = mkdtempSync(join(tmpdir(), `wcpos-salvage-append-${runtime.dist}-`));
 		try {
 			const { writes, stored, emitted } = await seedAndUpdateInOneRun(runtime, basePath);
@@ -321,7 +319,7 @@ for (const runtime of runtimes) {
 		const basePath = mkdtempSync(join(tmpdir(), `wcpos-salvage-overwrite-${runtime.dist}-`));
 		try {
 			const { writes, stored } = await seedAndUpdateInOneRun(runtime, basePath);
-			// What upstream left behind: the shorter second bulk written at offset
+			// What upstream versions before 17.6.0 left behind: the shorter second bulk written at offset
 			// 0 over the longer first one, then a crash before the run's hook.
 			const short = rewriteBulk(writes[1].bytes, stored, 'from-wal', '3-beta');
 			const residue = Buffer.concat([short, writes[0].bytes.subarray(short.length)]);
@@ -381,7 +379,7 @@ for (const runtime of runtimes) {
 		}
 	});
 
-	test(`[${runtime.dist}] replays every bulk of a crashed run now that appends are separated`, async () => {
+	test(`[${runtime.dist}] replays every crashed-run bulk separated by the upstream 17.6.0 writer`, async () => {
 		const basePath = mkdtempSync(join(tmpdir(), `wcpos-salvage-replay-${runtime.dist}-`));
 		try {
 			const { writes, stored } = await seedAndUpdateInOneRun(runtime, basePath);

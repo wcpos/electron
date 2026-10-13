@@ -309,7 +309,7 @@ test('patch preparation refuses a dist patched by an older script version', () =
 					prelude: `globalThis.${MARKER}=${PATCH_VERSION};\n`,
 					rewrites: [{ name: 'fixture', before: '__anchor__', after: '__patched__' }],
 				}),
-			/carries patch v0 but this script is v\d+: restore the pristine dist/
+			/carries patch v\d+ but this script is v\d+: restore the pristine dist/
 		);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });

@@ -127,45 +127,46 @@ current=next&&typeof next.catch==="function"?next.catch(function(error){__wcposR
 const DISTS = [
 	{
 		dist: 'esm',
-		constructorBefore: 'this.queue=e,this.readTasks=[]',
-		constructorAfter: `this.queue=e,${MARKER}(this,e),this.readTasks=[]`,
-		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var s={type:"WRITE"',
-		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var s={type:"WRITE"',
-		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(s),await this.cleanupAfterRun(s)}}))',
+		constructorBefore: 'constructor(e,s,t){this.lockId=e',
+		constructorAfter: `constructor(e,s,t){${MARKER}(this,this.queue);this.lockId=e`,
+		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var t={type:"WRITE"',
+		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var t={type:"WRITE"',
+		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(t),await this.cleanupAfterRun(t)}}))',
 		writeCleanupAfter:
-			'await this.beforeTaskReadOrWrite(s)}finally{if(s)await this.cleanupAfterRun(s)}}}))',
+			'await this.beforeTaskReadOrWrite(t)}finally{if(t)await this.cleanupAfterRun(t)}}}))',
 		readRunBefore:
-			'(async()=>{var e={type:"READ",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+			'(async()=>{var e={type:"READ",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
 		readRunAfter:
-			'(async()=>{try{var e={type:"READ",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
-		readCleanupBefore: '0===this.readTasks.length&&(s=!0)}return this.cleanupAfterRun(e)}))',
+			'(async()=>{try{var e={type:"READ",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+		readCleanupBefore: '0===this.readTasks.length&&(t=!0)}return this.cleanupAfterRun(e)}))',
 		readCleanupAfter:
-			'0===this.readTasks.length&&(s=!0)}}finally{if(e)await this.cleanupAfterRun(e)}}))',
+			'0===this.readTasks.length&&(t=!0)}}finally{if(e)await this.cleanupAfterRun(e)}}))',
 		cleanupRunBefore:
-			'(async()=>{var r={type:"CLEANUP",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>s(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
+			'(async()=>{var r={type:"CLEANUP",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
 		cleanupRunAfter:
-			'(async()=>{try{var r={type:"CLEANUP",storageInstance:t(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>s(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:s(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 	{
 		dist: 'cjs',
-		constructorBefore: 'this.queue=e.PROMISE_RESOLVE_VOID,this.readTasks=[]',
-		constructorAfter: `this.queue=e.PROMISE_RESOLVE_VOID,${MARKER}(this,e.PROMISE_RESOLVE_VOID),this.readTasks=[]`,
-		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var a={type:"WRITE"',
-		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var a={type:"WRITE"',
-		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(a),await this.cleanupAfterRun(a)}}))',
+		constructorBefore:
+			'(0,t.default)(this,"queue",s.PROMISE_RESOLVE_VOID),(0,t.default)(this,"readTasks",[])',
+		constructorAfter: `(0,t.default)(this,"queue",s.PROMISE_RESOLVE_VOID),${MARKER}(this,this.queue),(0,t.default)(this,"readTasks",[])`,
+		writeRunBefore: '(async()=>{if(0!==this.writeTasks.length){for(var t={type:"WRITE"',
+		writeRunAfter: '(async()=>{if(0!==this.writeTasks.length){try{for(var t={type:"WRITE"',
+		writeCleanupBefore: 'await this.beforeTaskReadOrWrite(t),await this.cleanupAfterRun(t)}}))',
 		writeCleanupAfter:
-			'await this.beforeTaskReadOrWrite(a)}finally{if(a)await this.cleanupAfterRun(a)}}}))',
+			'await this.beforeTaskReadOrWrite(t)}finally{if(t)await this.cleanupAfterRun(t)}}}))',
 		readRunBefore:
-			'(async()=>{var s={type:"READ",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(s);',
+			'(async()=>{var e={type:"READ",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
 		readRunAfter:
-			'(async()=>{try{var s={type:"READ",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(s);',
-		readCleanupBefore: '0===this.readTasks.length&&(a=!0)}return this.cleanupAfterRun(s)}))',
+			'(async()=>{try{var e={type:"READ",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(e);',
+		readCleanupBefore: '0===this.readTasks.length&&(t=!0)}return this.cleanupAfterRun(e)}))',
 		readCleanupAfter:
-			'0===this.readTasks.length&&(a=!0)}}finally{if(s)await this.cleanupAfterRun(s)}}))',
+			'0===this.readTasks.length&&(t=!0)}}finally{if(e)await this.cleanupAfterRun(e)}}))',
 		cleanupRunBefore:
-			'(async()=>{var r={type:"CLEANUP",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await t(r).then((e=>s(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
+			'(async()=>{var r={type:"CLEANUP",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e))),await this.cleanupAfterRun(r)}))',
 		cleanupRunAfter:
-			'(async()=>{try{var r={type:"CLEANUP",storageInstance:(0,e.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await t(r).then((e=>s(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
+			'(async()=>{try{var r={type:"CLEANUP",storageInstance:(0,s.ensureNotFalsy)(this.storageInstance),accessHandlers:new Map,touchedWriteDocuments:new Set,knownChangesContent:[]};await this.beforeTaskReadOrWrite(r),await e(r).then((e=>t(e))).catch((e=>a(e)))}finally{if(r)await this.cleanupAfterRun(r)}}))',
 	},
 ];
 
@@ -187,6 +188,9 @@ export function preparePatch(path, anchors) {
 						'the patched file is incomplete; reinstall rxdb-premium to restore a pristine dist'
 				);
 			}
+		}
+		if (!source.includes(PRELUDE)) {
+			throw new Error(`${path} carries an outdated prelude — reinstall rxdb-premium`);
 		}
 		return { path, status: 'already patched' };
 	}
