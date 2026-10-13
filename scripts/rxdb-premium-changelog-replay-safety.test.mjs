@@ -154,6 +154,18 @@ async function findAll(collection) {
 		.sort((left, right) => left.id.localeCompare(right.id));
 }
 
+/** Query through the `status` index, so a stale secondary row cannot hide behind a full scan. */
+async function assertStatusQueries(collection, expected) {
+	for (const status of ['a', 'b']) {
+		const found = await collection.find({ selector: { status } }).exec();
+		assert.deepEqual(
+			found.map((doc) => doc.id).sort(),
+			expected.filter((doc) => doc.status === status).map((doc) => doc.id),
+			`status ${status} query`
+		);
+	}
+}
+
 /**
  * Cleanup bakes epoch-tagged index files, then dies before changelog.empty.
  * Also cover death before the first persist and between index persists: each
@@ -818,6 +830,136 @@ for (const runtime of runtimes) {
 			assert.deepEqual(opened.events, []);
 			await opened.db.close();
 		} finally {
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	// monorepo#2280: boot replay used to run all primary-index history before any
+	// secondary op, so the linked range gate compared a historical secondary A/R
+	// with the primary's FINAL bytes, skipped it, and the next op on that row
+	// rebuilt every index on every reopen.
+	const histories = {
+		'insert → replace': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await (await collection.findOne('k').exec()).incrementalPatch({ note: 'v2' });
+		},
+		'insert → replace that moves the secondary string': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await (await collection.findOne('k').exec()).incrementalPatch({ status: 'b' });
+		},
+		'insert → delete': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await collection.insert({ id: 'gone', status: 'a', note: 'v1' });
+			await (await collection.findOne('gone').exec()).remove();
+		},
+		'replace → replace': async (collection) => {
+			await collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await fullCleanup(collection);
+			const doc = await collection.findOne('k').exec();
+			const patched = await doc.incrementalPatch({ note: 'v2' });
+			await patched.incrementalPatch({ status: 'b', note: 'v3' });
+		},
+	};
+	for (const [name, write] of Object.entries(histories)) {
+		test(`${runtime.dist}: ${name} replays through linked indexes without rebuilding`, async () => {
+			const basePath = makeDirectory(`${runtime.dist}-history`);
+			let db;
+			try {
+				const initial = await openDatabase(runtime, basePath);
+				db = initial.db;
+				await write(initial.collection);
+				const expected = await findAll(initial.collection);
+				await db.close();
+				for (let reopen = 0; reopen < 2; reopen++) {
+					const opened = await openWithRebuildEvents(runtime, basePath);
+					db = opened.db;
+					assert.deepEqual(await findAll(opened.collection), expected);
+					assert.deepEqual(opened.events, [], `reopen ${reopen} replays without a rebuild`);
+					await assertStatusQueries(opened.collection, expected);
+					opened.stopCapture();
+					await db.close();
+				}
+				db = undefined;
+			} finally {
+				delete globalThis.__wcposOnIndexRebuild;
+				await db?.close();
+				rmSync(basePath, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test(`${runtime.dist}: a secondary A whose bytes never matched the primary still rebuilds`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-forged-secondary`);
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath);
+			db = initial.db;
+			const expected = [
+				{ id: 'one', status: 'a', note: 'first' },
+				{ id: 'two', status: 'b', note: 'second' },
+			];
+			for (const document of expected) await initial.collection.insert(document);
+			await db.close();
+			const path = join(collectionDirectory(basePath), 'changelog.txt');
+			const operations = JSON.parse(`[${readFileSync(path, 'utf8')}]`);
+			const forged = operations.find((op) => Array.isArray(op) && op[0] !== 0 && op[2] === 'A');
+			assert.ok(forged, 'fixture holds a secondary A');
+			forged[3] = [forged[3][0], forged[3][1] + 1, forged[3][2] + 1];
+			writeFileSync(path, operations.map((op) => JSON.stringify(op)).join(','));
+			const opened = await openWithRebuildEvents(runtime, basePath);
+			db = opened.db;
+			assert.deepEqual(await findAll(opened.collection), expected);
+			assert.equal(opened.events.length, 1, 'the range gate still runs during boot replay');
+			await assertStatusQueries(opened.collection, expected);
+			opened.stopCapture();
+		} finally {
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
+			rmSync(basePath, { recursive: true, force: true });
+		}
+	});
+
+	test(`${runtime.dist}: a changelog torn after an update's index-0 ops rebuilds and compaction keeps the update`, async () => {
+		const basePath = makeDirectory(`${runtime.dist}-torn-update`);
+		let db;
+		try {
+			const initial = await openDatabase(runtime, basePath);
+			db = initial.db;
+			await initial.collection.insert({ id: 'k', status: 'a', note: 'v1' });
+			await (await initial.collection.findOne('k').exec()).incrementalPatch({ note: 'v2' });
+			const expected = await findAll(initial.collection);
+			await db.close();
+			// Keep the update's primary-index ops; lose its secondary ops, as a torn append would.
+			const path = join(collectionDirectory(basePath), 'changelog.txt');
+			const operations = JSON.parse(`[${readFileSync(path, 'utf8')}]`);
+			let lastPrimary = operations.length - 1;
+			while (!Array.isArray(operations[lastPrimary]) || operations[lastPrimary][0] !== 0) {
+				lastPrimary--;
+			}
+			assert.ok(lastPrimary < operations.length - 1, 'fixture has secondary ops to drop');
+			writeFileSync(
+				path,
+				operations
+					.slice(0, lastPrimary + 1)
+					.map((op) => JSON.stringify(op))
+					.join(',')
+			);
+			let opened = await openWithRebuildEvents(runtime, basePath);
+			db = opened.db;
+			assert.deepEqual(await findAll(opened.collection), expected);
+			assert.equal(opened.events.length, 1, 'the torn changelog rebuilds');
+			opened.stopCapture();
+			await fullCleanup(opened.collection);
+			await db.close();
+			opened = await openWithRebuildEvents(runtime, basePath);
+			db = opened.db;
+			assert.deepEqual(await findAll(opened.collection), expected, 'compaction kept v2');
+			await assertStatusQueries(opened.collection, expected);
+			assert.deepEqual(opened.events, []);
+			opened.stopCapture();
+		} finally {
+			delete globalThis.__wcposOnIndexRebuild;
+			await db?.close();
 			rmSync(basePath, { recursive: true, force: true });
 		}
 	});
