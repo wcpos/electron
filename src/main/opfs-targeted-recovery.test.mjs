@@ -90,9 +90,7 @@ async function corruptRecord(basePath, id, makeCorruptBytes) {
   const indexPaths = (await readdir(directory))
     .filter((name) => name.startsWith("index-"))
     .map((name) => join(directory, name));
-  const parsedIndexes = await Promise.all(
-    indexPaths.map(readIndexRows),
-  );
+  const parsedIndexes = await Promise.all(indexPaths.map(readIndexRows));
   const targetRow = parsedIndexes.flat().find((row) => row[0].includes(id));
   assert.ok(targetRow, `missing index row for ${id}`);
   const originalStart = targetRow[1];
