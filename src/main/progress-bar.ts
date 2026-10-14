@@ -4,7 +4,7 @@ import { t } from './translations';
 import { getMainWindow } from './window';
 
 export class ProgressBar {
-	private mainWindow: BrowserWindow;
+	private mainWindow: BrowserWindow | null;
 	private progressWindow: BrowserWindow;
 
 	constructor() {
@@ -43,13 +43,13 @@ export class ProgressBar {
 
 		win.on('closed', () => {
 			this.progressWindow = null;
-			this.mainWindow.setProgressBar(-1, { mode: 'none' });
+			this.setTaskbarProgress(-1, 'none');
 		});
 	}
 
 	public updateProgress(progress: number): void {
 		if (this.progressWindow) {
-			this.mainWindow.setProgressBar(progress / 100, { mode: 'normal' });
+			this.setTaskbarProgress(progress / 100, 'normal');
 			this.progressWindow.webContents.executeJavaScript(`
 					document.querySelector('.progress-bar-inner').style.width = '${progress}%';
 				`);
@@ -58,9 +58,20 @@ export class ProgressBar {
 
 	public close(): void {
 		if (this.progressWindow) {
-			this.mainWindow.setProgressBar(-1, { mode: 'none' });
+			this.setTaskbarProgress(-1, 'none');
 			this.progressWindow.close();
 			this.progressWindow = null;
+		}
+	}
+
+	/**
+	 * The updater can run with no main window (macOS keeps the app alive after its last window
+	 * closes), and the main window can be destroyed mid-download. The taskbar progress is
+	 * cosmetic, so skip it rather than throw.
+	 */
+	private setTaskbarProgress(progress: number, mode: 'none' | 'normal'): void {
+		if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+			this.mainWindow.setProgressBar(progress, { mode });
 		}
 	}
 }
