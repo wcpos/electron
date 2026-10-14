@@ -38,7 +38,7 @@
 
 - **Receipt printing** to USB, serial and network (ESC/POS) printers, plus the system print dialog.
 - **Printer discovery** on the local network via Bonjour/mDNS.
-- **Local-first data** stored on disk by RxDB's filesystem-node storage in the main process, exposed to the renderer over an IPC storage bridge.
+- **Local-first data** stored on disk by RxDB's SQLite storage (Node's built-in `node:sqlite`) in the main process, exposed to the renderer over an IPC storage bridge.
 - **OAuth deep-linking** via a custom `wcpos://` protocol handler.
 - **Auto-updates** delivered straight from GitHub releases.
 
@@ -57,7 +57,7 @@ flowchart LR
       IPC["whitelisted ipcRenderer\nsend / invoke / on"]
     end
     subgraph Main["Main process (src/index.ts)"]
-      DB["RxDB storage bridge\n(filesystem-node)"]
+      DB["RxDB storage bridge\n(SQLite, node:sqlite)"]
       PRINT["Printing\nUSB · Serial · TCP/ESC-POS · system"]
       DISCO["Printer discovery\n(Bonjour / mDNS)"]
       PROTO["wcpos:// protocol\n(OAuth deep links)"]
@@ -75,7 +75,7 @@ Communication is locked down for security: `contextIsolation` is on, `nodeIntegr
 | Area | Files | Notes |
 | --- | --- | --- |
 | App bootstrap | [`src/index.ts`](./src/index.ts) | Window lifecycle, power-monitor events, startup sequence |
-| Storage | [`src/main/rxdb-storage.ts`](./src/main/rxdb-storage.ts) | RxDB v17 over `getRxStorageFilesystemNode`, served to the renderer via the RxDB remote IPC bridge (with attachment serialization and targeted corruption recovery) |
+| Storage | [`src/main/rxdb-storage.ts`](./src/main/rxdb-storage.ts), [`src/main/sqlite-basics-node.ts`](./src/main/sqlite-basics-node.ts), [`src/main/purge-legacy-databases.ts`](./src/main/purge-legacy-databases.ts) | RxDB v17 over premium `getRxStorageSQLite` on `node:sqlite`, served to the renderer via the RxDB remote IPC bridge (with attachment serialization); the 1.x filesystem databases are purged, not migrated |
 | Printing | [`src/main/print-raw-tcp.ts`](./src/main/print-raw-tcp.ts), [`src/main/usb-printer.ts`](./src/main/usb-printer.ts), [`src/main/serial-printer.ts`](./src/main/serial-printer.ts), [`src/main/winspool-printer.ts`](./src/main/winspool-printer.ts), [`src/main/print-external-url.ts`](./src/main/print-external-url.ts) | Raw ESC/POS over TCP, USB and serial; Windows USB routes through the print spooler |
 | Discovery | [`src/main/printer-discovery.ts`](./src/main/printer-discovery.ts), [`src/main/bluetooth-select.ts`](./src/main/bluetooth-select.ts) | mDNS network printer discovery and Bluetooth device selection |
 | Networking | [`src/main/http-bridge.ts`](./src/main/http-bridge.ts), [`src/main/image-cache.ts`](./src/main/image-cache.ts) | The `http-request` IPC channel over Chromium `net.fetch` (axios-shaped payloads — the renderer's client library is axios) and image caching |
