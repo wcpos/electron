@@ -11,6 +11,8 @@ import { PRELOAD_EXTRA_INVOKE_CHANNELS } from './preload-channels';
 import type { TypedIpcRenderer } from './ipc-channels';
 
 const exposures: Record<string, any> = {};
+const mainWorld: Record<string, any> = {};
+let mainWorldArgs: any[] = [];
 const onCalls: {
 	channel: string;
 	listener: (...args: unknown[]) => void;
@@ -28,6 +30,15 @@ const electronMock = {
 	contextBridge: {
 		exposeInMainWorld(name: string, value: unknown) {
 			exposures[name] = value;
+		},
+		executeInMainWorld({ func, args }: { func: (...args: any[]) => unknown; args: any[] }) {
+			mainWorldArgs = args;
+			const execute = new Function(
+				'window',
+				'args',
+				`return (${func.toString()}).apply(null, args);`
+			);
+			return execute(mainWorld, args);
 		},
 	},
 	ipcRenderer: {
@@ -110,6 +121,55 @@ async function main() {
 		exposedElectron.installId,
 		'install-test',
 		'preload should expose the install id from Electron additionalArguments'
+	);
+
+	assert.equal(exposures.Buffer, undefined, 'Buffer should not be exposed via exposeInMainWorld');
+	assert.equal(mainWorldArgs.length, 1, 'Buffer should receive a single bridged argument object');
+	assert.deepEqual(
+		Object.keys(mainWorldArgs[0]).sort(),
+		['alloc', 'concat', 'from'],
+		'only alloc, concat and from should cross the context bridge'
+	);
+	assert.deepEqual(
+		Object.keys(mainWorld.Buffer).sort(),
+		['alloc', 'concat', 'from', 'isBuffer'],
+		'window.Buffer should retain its four-function shape'
+	);
+	assert.equal(Object.isFrozen(mainWorld.Buffer), true, 'window.Buffer should be frozen');
+	assert.equal(
+		Object.getOwnPropertyDescriptor(mainWorld, 'Buffer').writable,
+		false,
+		'window.Buffer should not be writable'
+	);
+	assert.equal(
+		mainWorld.Buffer.isBuffer(new Proxy({ a: 1 }, {})),
+		false,
+		'Buffer.isBuffer should accept a Proxy without throwing'
+	);
+	assert.equal(
+		mainWorld.Buffer.isBuffer(new Uint8Array(2)),
+		false,
+		'Buffer.isBuffer should return false for a Uint8Array'
+	);
+	assert.equal(
+		mainWorld.Buffer.isBuffer(undefined),
+		false,
+		'Buffer.isBuffer should return false for undefined'
+	);
+	assert.equal(
+		mainWorld.Buffer.from('ab').toString('utf8'),
+		'ab',
+		'Buffer.from should still call the bridged implementation'
+	);
+	assert.equal(
+		mainWorld.Buffer.alloc(3).length,
+		3,
+		'Buffer.alloc should still allocate the requested size'
+	);
+	assert.equal(
+		mainWorld.Buffer.concat([Buffer.from('a'), Buffer.from('b')]).toString('utf8'),
+		'ab',
+		'Buffer.concat should still call the bridged implementation'
 	);
 
 	const exposedIpcRenderer = exposures.ipcRenderer;
