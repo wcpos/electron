@@ -247,6 +247,14 @@ async function main() {
 			fail(`the preload did not expose an ipcRenderer.invoke bridge (saw ${bridgeShape})`);
 		}
 
+		const bufferProbe = await evaluate(
+			page,
+			"(() => { try { return 'OK:' + window.Buffer.isBuffer(new Proxy({}, {})); } catch (e) { return 'ERR:' + e.message; } })()"
+		);
+		if (bufferProbe !== 'OK:false') {
+			fail(`window.Buffer.isBuffer must accept a Proxy without crossing the context bridge (saw ${bufferProbe}); see wcpos/electron#322`);
+		}
+
 		const outcome = await evaluate(
 			page,
 			`window.ipcRenderer.invoke('http-request', {
