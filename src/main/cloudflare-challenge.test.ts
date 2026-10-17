@@ -29,7 +29,12 @@ type ChallengeModule = {
 			setWindowOpenHandler(handler: () => { action: 'deny' }): unknown;
 			on(
 				event: 'will-navigate' | 'will-redirect',
-				listener: (event: { preventDefault(): void }, url: string) => void
+				listener: (
+					event: { preventDefault(): void },
+					url: string,
+					isInPlace?: boolean,
+					isMainFrame?: boolean
+				) => void
 			): unknown;
 		},
 		host: string
@@ -131,7 +136,15 @@ async function main() {
 		const mod = require('./cloudflare-challenge') as ChallengeModule;
 
 		let windowOpen!: () => { action: 'deny' };
-		const listeners = new Map<string, (event: { preventDefault(): void }, url: string) => void>();
+		const listeners = new Map<
+			string,
+			(
+				event: { preventDefault(): void },
+				url: string,
+				isInPlace?: boolean,
+				isMainFrame?: boolean
+			) => void
+		>();
 		mod.hardenChallengeWindow(
 			{
 				setWindowOpenHandler: (handler) => {
@@ -163,6 +176,22 @@ async function main() {
 				);
 				assert.equal(prevented, expected, `${eventName} ${url}`);
 			}
+		}
+		// A cross-host redirect inside a sub-frame (Cloudflare's own challenge
+		// iframe) is not the window leaving the store and must not be cancelled.
+		{
+			let prevented = false;
+			listeners.get('will-redirect')!(
+				{
+					preventDefault: () => {
+						prevented = true;
+					},
+				},
+				'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/',
+				false,
+				false
+			);
+			assert.equal(prevented, false, 'sub-frame redirect left alone');
 		}
 
 		assert.equal(mod.isChallengeResponse(new Headers({ 'cf-mitigated': 'challenge' })), true);

@@ -61,17 +61,30 @@ export function hardenChallengeWindow(
 		setWindowOpenHandler(handler: () => { action: 'deny' }): unknown;
 		on(
 			event: 'will-navigate' | 'will-redirect',
-			listener: (event: { preventDefault(): void }, url: string) => void
+			listener: (
+				event: { preventDefault(): void },
+				url: string,
+				isInPlace?: boolean,
+				isMainFrame?: boolean
+			) => void
 		): unknown;
 	},
 	host: string
 ): void {
 	webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 	// The challenge must reload its own page, but cannot leave the store. A
-	// page-initiated navigation arrives as will-navigate; a server 3xx to another
-	// host arrives as will-redirect and would otherwise leave the store unchecked.
-	const stayOnHost = (event: { preventDefault(): void }, url: string) => {
-		if (new URL(url).host !== host) event.preventDefault();
+	// page-initiated navigation arrives as will-navigate (main frame only); a
+	// server 3xx to another host arrives as will-redirect, for every frame, and
+	// would otherwise leave the store unchecked. Only the top frame is held:
+	// Cloudflare's own challenges.cloudflare.com iframe must be free to redirect
+	// or clearance never completes.
+	const stayOnHost = (
+		event: { preventDefault(): void },
+		url: string,
+		_isInPlace?: boolean,
+		isMainFrame = true
+	) => {
+		if (isMainFrame && new URL(url).host !== host) event.preventDefault();
 	};
 	webContents.on('will-navigate', stayOnHost);
 	webContents.on('will-redirect', stayOnHost);
