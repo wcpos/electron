@@ -60,17 +60,21 @@ export function hardenChallengeWindow(
 	webContents: {
 		setWindowOpenHandler(handler: () => { action: 'deny' }): unknown;
 		on(
-			event: 'will-navigate',
+			event: 'will-navigate' | 'will-redirect',
 			listener: (event: { preventDefault(): void }, url: string) => void
 		): unknown;
 	},
 	host: string
 ): void {
 	webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-	// The challenge must reload its own page, but cannot leave the store.
-	webContents.on('will-navigate', (event, url) => {
+	// The challenge must reload its own page, but cannot leave the store. A
+	// page-initiated navigation arrives as will-navigate; a server 3xx to another
+	// host arrives as will-redirect and would otherwise leave the store unchecked.
+	const stayOnHost = (event: { preventDefault(): void }, url: string) => {
 		if (new URL(url).host !== host) event.preventDefault();
-	});
+	};
+	webContents.on('will-navigate', stayOnHost);
+	webContents.on('will-redirect', stayOnHost);
 }
 
 export type CookieLike = {
