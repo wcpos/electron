@@ -211,16 +211,33 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 	},
 });
 
-/**
- * For some reason, the Buffer object is not available in the renderer process.
- * perhaps due to context isolation? This is a workaround to expose the Buffer object.
- *
- * https://github.com/electron/electron/blob/5b60698dea0830c8b82d154578afb5e29e83d7df/lib/renderer/init.ts#L120
- * https://www.electronjs.org/docs/latest/tutorial/context-isolation
- */
-contextBridge.exposeInMainWorld('Buffer', {
-	from: (data: any, encoding?: any) => Buffer.from(data, encoding),
-	alloc: (size: number) => Buffer.alloc(size),
-	isBuffer: (obj: any) => Buffer.isBuffer(obj),
-	concat: (buffers: any[], totalLength?: number) => Buffer.concat(buffers, totalLength),
+// The renderer bundle expects a global Buffer. Keep isBuffer in the main world:
+// bridged functions structured-clone arguments, so a Proxy throws "An object could
+// not be cloned." before the preload runs, crashing lodash isEqual on RxDB document
+// proxies (wcpos/electron#322). It returns false because nothing in the main world
+// is a Node Buffer: bridged Buffers arrive as Uint8Array, so the bridged version
+// already returned false. func is serialized and must not capture preload scope.
+contextBridge.executeInMainWorld({
+	func: (bridged: {
+		from: (data: any, encoding?: any) => Uint8Array;
+		alloc: (size: number) => Uint8Array;
+		concat: (buffers: any[], totalLength?: number) => Uint8Array;
+	}) => {
+		Object.defineProperty(window, 'Buffer', {
+			value: Object.freeze({
+				from: bridged.from,
+				alloc: bridged.alloc,
+				concat: bridged.concat,
+				isBuffer: () => false,
+			}),
+			enumerable: true,
+		});
+	},
+	args: [
+		{
+			from: (data: any, encoding?: any) => Buffer.from(data, encoding),
+			alloc: (size: number) => Buffer.alloc(size),
+			concat: (buffers: any[], totalLength?: number) => Buffer.concat(buffers, totalLength),
+		},
+	],
 });
