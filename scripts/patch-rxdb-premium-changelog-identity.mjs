@@ -75,7 +75,9 @@ export function applyChangelogOperation(indexState, op, primaryKeyFromIndexableS
 		at = validPosition ? pos : lowerBound(rows, row[0]);
 		if (rows[at] && rows[at][0] === row[0]) rows[at] = row;
 		else {
-			if (!validPosition && hasDifferentString()) return;
+			// Identity before every insertion, valid position or not: a stale A whose document
+			// already moved to another string can still land at a sorted slot (#2002 review).
+			if (hasDifferentString()) return;
 			rows.splice(at, 0, row);
 		}
 		if (map) map.set(key, row);

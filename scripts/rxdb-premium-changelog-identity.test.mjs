@@ -83,8 +83,11 @@ const c = ['c003', 30, 40];
 const updatedB = ['b002', 100, 120];
 const movedB = ['d002', 100, 120];
 const cases = [
+	// Position 1 is a VALID sorted slot for the stale string ('a001' < 'b002' <= 'c003'): the
+	// fast path must still consult the identity map, or the old row is inserted beside the new
+	// one and the map is overwritten with the stale byte range (Codex on #2002).
 	...['A', 'R'].flatMap((kind) =>
-		[0, 9].map((pos) => ({
+		[0, 1, 9].map((pos) => ({
 			name: `stale ${kind} old-string at position ${pos} after D old/A new is ignored`,
 			rows: [a, b, c],
 			ops: [
