@@ -374,6 +374,22 @@ async function main() {
 	);
 	assert.equal(JSON.parse(fs.readFileSync(removed.meta, 'utf-8')).status, 404);
 
+	// A corrupt meta file is a cache miss: fetch again and rewrite the entry.
+	const corruptUrl = 'https://secure.gravatar.com/avatar/corrupt?s=96&d=404';
+	const corrupt = entryPaths(corruptUrl);
+	fs.writeFileSync(corrupt.meta, '{"url":');
+	statusByUrl.set(corruptUrl, 404);
+	errorMessages.length = 0;
+	const corruptResponse = await imageHandler!(requestFromRenderer(corrupt.encoded));
+	assert.equal(corruptResponse.status, 404, 'the origin 404 should be served');
+	assert.equal(fetchCounts.get(corruptUrl), 1, 'a corrupt meta file should lead to a fetch');
+	assert.equal(
+		JSON.parse(fs.readFileSync(corrupt.meta, 'utf-8')).status,
+		404,
+		'the corrupt meta file should be rewritten as a valid entry'
+	);
+	assert.equal(errorMessages.length, 0, 'a corrupt meta file is a cache miss, not an error');
+
 	// A 5xx is a failure, not an answer: nothing cached, the next request fetches again.
 	const brokenUrl = 'https://demo.wcpos.com/wp-content/uploads/broken.jpg';
 	const broken = entryPaths(brokenUrl);

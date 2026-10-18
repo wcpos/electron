@@ -144,6 +144,20 @@ function writeDownloadResult(
 	writeCacheEntry(imagePath, metaPath, result.buffer, result.contentType, url);
 }
 
+/**
+ * A missing, truncated or unparseable meta file is a cache miss, not an error:
+ * the caller downloads again and a good download rewrites the entry. A
+ * negative entry has no image file to fall back on, so throwing here would
+ * fail every request for that URL until the file was removed by hand.
+ */
+function readMeta(metaPath: string): CacheMeta | undefined {
+	try {
+		return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as CacheMeta;
+	} catch {
+		return undefined;
+	}
+}
+
 function notFoundResponse(): Response {
 	return new Response(null, {
 		status: NOT_FOUND_STATUS,
@@ -228,9 +242,7 @@ app.on('ready', () => {
 			// Serve from cache if exists. Stale-while-revalidate applies to both
 			// entry kinds: serve what is cached, refresh in the background, so a
 			// person who adds a picture later gets it.
-			const meta: CacheMeta | undefined = fs.existsSync(metaPath)
-				? JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
-				: undefined;
+			const meta = readMeta(metaPath);
 			const isStale = meta !== undefined && Date.now() - meta.cachedAt > STALE_AGE_MS;
 
 			if (meta?.status === NOT_FOUND_STATUS) {
