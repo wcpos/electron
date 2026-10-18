@@ -14,6 +14,9 @@ let imageHandler: ((request: ImageRequest) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
 let nextImageBytes = Buffer.from('image-bytes');
 const warnMessages: unknown[][] = [];
+const errorMessages: unknown[][] = [];
+const fetchCounts = new Map<string, number>();
+const statusByUrl = new Map<string, number>();
 const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-image-cache-test-'));
 
 const electronMock = {
@@ -53,6 +56,11 @@ const imageBytes = Buffer.from('image-bytes');
 const originalFetch = globalThis.fetch;
 globalThis.fetch = ((url: string | URL | Request) => {
 	requestedUrl = String(url);
+	fetchCounts.set(requestedUrl, (fetchCounts.get(requestedUrl) ?? 0) + 1);
+	const status = statusByUrl.get(requestedUrl) ?? 200;
+	if (status !== 200) {
+		return Promise.resolve(new Response(null, { status }));
+	}
 	return Promise.resolve(
 		new Response(Uint8Array.from(nextImageBytes), {
 			status: 200,
@@ -62,11 +70,14 @@ globalThis.fetch = ((url: string | URL | Request) => {
 }) as typeof globalThis.fetch;
 
 const loggerMock = {
+	debug() {},
 	info() {},
 	warn(...args: unknown[]) {
 		warnMessages.push(args);
 	},
-	error() {},
+	error(...args: unknown[]) {
+		errorMessages.push(args);
+	},
 };
 
 async function waitFor(condition: () => boolean, message: string) {
@@ -280,6 +291,102 @@ async function main() {
 		fs.existsSync(failedMetaPath),
 		false,
 		'failed metadata promotion should not leave metadata behind'
+	);
+
+	const entryPaths = (url: string) => {
+		const urlHash = crypto.createHash('sha256').update(url).digest('hex');
+		return {
+			image: path.join(cacheDir, urlHash),
+			meta: path.join(cacheDir, `${urlHash}.json`),
+			encoded: Buffer.from(url, 'utf-8').toString('base64url'),
+		};
+	};
+
+	// A 404 is an answer ("no picture"), cached on disk and served without a refetch.
+	const missingUrl = 'https://secure.gravatar.com/avatar/abc?s=96&d=404';
+	const missing = entryPaths(missingUrl);
+	statusByUrl.set(missingUrl, 404);
+	errorMessages.length = 0;
+	const firstMissing = await imageHandler!(requestFromRenderer(missing.encoded));
+	assert.equal(firstMissing.status, 404, 'an origin 404 should be served as a 404');
+	assert.equal(
+		firstMissing.headers.get('Access-Control-Allow-Origin'),
+		'*',
+		'a 404 must stay readable by renderer fetch()'
+	);
+	assert.equal(fs.existsSync(missing.image), false, 'a 404 should not write an image file');
+	const missingMeta = JSON.parse(fs.readFileSync(missing.meta, 'utf-8'));
+	assert.deepEqual(
+		missingMeta,
+		{ url: missingUrl, status: 404, cachedAt: missingMeta.cachedAt },
+		'a 404 should write a negative-cache meta entry'
+	);
+	assert.equal(typeof missingMeta.cachedAt, 'number');
+
+	const secondMissing = await imageHandler!(requestFromRenderer(missing.encoded));
+	assert.equal(secondMissing.status, 404, 'the negative entry should be served as a 404');
+	assert.equal(fetchCounts.get(missingUrl), 1, 'a fresh negative entry must not refetch');
+	assert.equal(
+		errorMessages.length,
+		0,
+		'a 404 is an answer, not an error: nothing logged as error'
+	);
+
+	// A stale negative entry is refreshed in the background (the person may have added a picture).
+	const addedUrl = 'https://secure.gravatar.com/avatar/def?s=96&d=404';
+	const added = entryPaths(addedUrl);
+	const addedBytes = Buffer.from('new-gravatar-bytes');
+	fs.writeFileSync(
+		added.meta,
+		JSON.stringify({ url: addedUrl, status: 404, cachedAt: Date.now() - 8 * 24 * 60 * 60 * 1000 })
+	);
+	nextImageBytes = addedBytes;
+	const staleMissing = await imageHandler!(requestFromRenderer(added.encoded));
+	assert.equal(staleMissing.status, 404, 'a stale negative entry is still served while refreshing');
+	await waitFor(
+		() =>
+			fs.existsSync(added.image) && !!JSON.parse(fs.readFileSync(added.meta, 'utf-8')).contentType,
+		'expected the stale negative entry to be replaced by the picture'
+	);
+	assert.equal(fetchCounts.get(addedUrl), 1, 'a stale negative entry should refetch once');
+	const afterRefresh = await imageHandler!(requestFromRenderer(added.encoded));
+	assert.equal(afterRefresh.status, 200, 'the refreshed picture should be served');
+	assert.deepEqual(Buffer.from(await afterRefresh.arrayBuffer()), addedBytes);
+
+	// A picture that the origin now answers 404 for becomes a negative entry on refresh.
+	const removedUrl = 'https://demo.wcpos.com/wp-content/uploads/removed.jpg';
+	const removed = entryPaths(removedUrl);
+	fs.writeFileSync(removed.image, Buffer.from('old-picture'));
+	fs.writeFileSync(
+		removed.meta,
+		JSON.stringify({
+			url: removedUrl,
+			contentType: 'image/jpeg',
+			cachedAt: Date.now() - 8 * 24 * 60 * 60 * 1000,
+		})
+	);
+	statusByUrl.set(removedUrl, 404);
+	const staleRemoved = await imageHandler!(requestFromRenderer(removed.encoded));
+	assert.equal(staleRemoved.status, 200, 'the stale picture is served while refreshing');
+	await waitFor(
+		() => !fs.existsSync(removed.image),
+		'expected a refresh that 404s to remove the old picture'
+	);
+	assert.equal(JSON.parse(fs.readFileSync(removed.meta, 'utf-8')).status, 404);
+
+	// A 5xx is a failure, not an answer: nothing cached, the next request fetches again.
+	const brokenUrl = 'https://demo.wcpos.com/wp-content/uploads/broken.jpg';
+	const broken = entryPaths(brokenUrl);
+	statusByUrl.set(brokenUrl, 500);
+	const firstBroken = await imageHandler!(requestFromRenderer(broken.encoded));
+	assert.equal(firstBroken.status, 404, 'a 500 still fails the request');
+	assert.equal(fs.existsSync(broken.meta), false, 'a 500 must not write a cache entry');
+	assert.equal(fs.existsSync(broken.image), false, 'a 500 must not write an image');
+	await imageHandler!(requestFromRenderer(broken.encoded));
+	assert.equal(fetchCounts.get(brokenUrl), 2, 'a 500 is not cached, so the next request refetches');
+	assert.ok(
+		errorMessages.some((args) => String(args[0]).includes('Image cache error')),
+		'a 500 is still logged as an error'
 	);
 }
 
