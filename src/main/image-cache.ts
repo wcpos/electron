@@ -9,11 +9,25 @@ import './window';
 import { getImageCachePath } from './image-cache-path';
 import { logger } from './log';
 
+/**
+ * A picture entry is the image file plus this meta file. A "no picture" entry
+ * is the meta file alone with `status: 404` and no contentType: the origin
+ * answered 404, which is a cacheable answer, not an error. The app asks
+ * Gravatar for `d=404` so a person with no Gravatar falls back to their
+ * initials; any other missing upload is the same answer.
+ */
 interface CacheMeta {
 	url: string;
-	contentType: string;
+	contentType?: string;
 	cachedAt: number;
+	status?: typeof NOT_FOUND_STATUS;
 }
+
+// Only a 404 is cached as "no picture". 5xx, timeouts and network failures
+// stay failures: they say nothing about whether the picture exists.
+const NOT_FOUND_STATUS = 404;
+
+type DownloadResult = { kind: 'image'; buffer: Buffer; contentType: string } | { kind: 'missing' };
 
 /**
  * The wcpos-image:// scheme must be fetchable from the renderer: the thermal
@@ -96,12 +110,68 @@ function writeCacheEntry(
 }
 
 /**
+ * Record "no picture" for a URL. The meta file is promoted first so a reader
+ * that races the removal of an older picture already sees the 404 marker.
+ */
+function writeMissingEntry(imagePath: string, metaPath: string, url: string): void {
+	fs.mkdirSync(path.dirname(metaPath), { recursive: true });
+
+	const metaTempPath = getTempPath(metaPath);
+	try {
+		fs.writeFileSync(
+			metaTempPath,
+			JSON.stringify({ url, status: NOT_FOUND_STATUS, cachedAt: Date.now() } satisfies CacheMeta)
+		);
+		fs.renameSync(metaTempPath, metaPath);
+	} catch (err) {
+		removeIfExists(metaTempPath);
+		throw err;
+	}
+	removeIfExists(imagePath);
+}
+
+function writeDownloadResult(
+	imagePath: string,
+	metaPath: string,
+	result: DownloadResult,
+	url: string
+): void {
+	if (result.kind === 'missing') {
+		writeMissingEntry(imagePath, metaPath, url);
+		logger.debug('Image not found, cached as no picture:', url);
+		return;
+	}
+	writeCacheEntry(imagePath, metaPath, result.buffer, result.contentType, url);
+}
+
+/**
+ * A missing, truncated or unparseable meta file is a cache miss, not an error:
+ * the caller downloads again and a good download rewrites the entry. A
+ * negative entry has no image file to fall back on, so throwing here would
+ * fail every request for that URL until the file was removed by hand.
+ */
+function readMeta(metaPath: string): CacheMeta | undefined {
+	try {
+		return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as CacheMeta;
+	} catch {
+		return undefined;
+	}
+}
+
+function notFoundResponse(): Response {
+	return new Response(null, {
+		status: NOT_FOUND_STATUS,
+		headers: { 'Access-Control-Allow-Origin': '*' },
+	});
+}
+
+/**
  * Deduplicate in-flight downloads so multiple <img> tags requesting the
  * same uncached image don't trigger parallel downloads.
  */
-const inFlight = new Map<string, Promise<{ buffer: Buffer; contentType: string }>>();
+const inFlight = new Map<string, Promise<DownloadResult>>();
 
-async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType: string }> {
+async function downloadImage(url: string): Promise<DownloadResult> {
 	const existing = inFlight.get(url);
 	if (existing) return existing;
 
@@ -109,11 +179,18 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType
 	// honor the system proxy and OS trust store like the rest of the app.
 	const promise = (async () => {
 		const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+		if (response.status === NOT_FOUND_STATUS) {
+			return { kind: 'missing' } as const;
+		}
 		if (!response.ok) {
 			throw new Error(`Image download failed: HTTP ${response.status}`);
 		}
 		const contentType = response.headers.get('content-type') || 'image/jpeg';
-		return { buffer: Buffer.from(await response.arrayBuffer()), contentType };
+		return {
+			kind: 'image',
+			buffer: Buffer.from(await response.arrayBuffer()),
+			contentType,
+		} as const;
 	})().finally(() => {
 		inFlight.delete(url);
 	});
@@ -124,8 +201,8 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; contentType
 
 function refreshInBackground(url: string, imagePath: string, metaPath: string): void {
 	downloadImage(url)
-		.then(({ buffer, contentType }) => {
-			writeCacheEntry(imagePath, metaPath, buffer, contentType, url);
+		.then((result) => {
+			writeDownloadResult(imagePath, metaPath, result, url);
 		})
 		.catch((err) => {
 			logger.warn('Background image refresh failed:', url, err.message);
@@ -162,13 +239,23 @@ app.on('ready', () => {
 			const imagePath = path.join(cacheDir, hash);
 			const metaPath = path.join(cacheDir, `${hash}.json`);
 
-			// Serve from cache if exists
-			if (fs.existsSync(imagePath) && fs.existsSync(metaPath)) {
-				const meta: CacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+			// Serve from cache if exists. Stale-while-revalidate applies to both
+			// entry kinds: serve what is cached, refresh in the background, so a
+			// person who adds a picture later gets it.
+			const meta = readMeta(metaPath);
+			const isStale = meta !== undefined && Date.now() - meta.cachedAt > STALE_AGE_MS;
+
+			if (meta?.status === NOT_FOUND_STATUS) {
+				if (isStale) {
+					refreshInBackground(originalUrl, imagePath, metaPath);
+				}
+				return notFoundResponse();
+			}
+
+			if (meta?.contentType && fs.existsSync(imagePath)) {
 				const body = fs.readFileSync(imagePath);
 
-				// Stale-while-revalidate: serve cached but refresh in background
-				if (Date.now() - meta.cachedAt > STALE_AGE_MS) {
+				if (isStale) {
 					refreshInBackground(originalUrl, imagePath, metaPath);
 				}
 
@@ -183,9 +270,13 @@ app.on('ready', () => {
 			}
 
 			// Download and cache
-			const { buffer, contentType } = await downloadImage(originalUrl);
+			const result = await downloadImage(originalUrl);
 
-			writeCacheEntry(imagePath, metaPath, buffer, contentType, originalUrl);
+			writeDownloadResult(imagePath, metaPath, result, originalUrl);
+			if (result.kind === 'missing') {
+				return notFoundResponse();
+			}
+			const { buffer, contentType } = result;
 
 			return new Response(
 				buffer.buffer.slice(
