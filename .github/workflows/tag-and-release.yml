@@ -433,7 +433,7 @@ jobs:
   publish-linux:
     needs:
       - build-expo
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # ubuntu-latest became 26.04 on 2026-10-25: its rpm 4.20 broke electron-installer-redhat's %install (cp usr/*), 1.11.6 publish-linux
     env:
       WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
