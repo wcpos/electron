@@ -18,7 +18,7 @@
 			"shell-quote@<1.11.0": "^1.11.0",
 			"seroval@<1.7.6": "^1.7.6",
 			"seroval-plugins@<1.7.6": "^1.7.6",
-			"zod@<4.6.6": "^4.6.6"
+			"body-parser@<1.20.9": "^1.20.9"
 		},
 		"onlyBuiltDependencies": [
 			"@sentry/cli",

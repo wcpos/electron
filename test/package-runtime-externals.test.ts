@@ -103,8 +103,8 @@ async function main() {
 			'serialport should load with SerialPort.list available'
 		);
 
-		// The allow-list in .github/workflows/dependency-review.yml forgives 13
-		// advisories in tar, extract-zip and image-size, purely because they are
+		// The allow-list in .github/workflows/dependency-review.yml forgives 14
+		// advisories in tar, extract-zip, image-size and zod, purely because they are
 		// build-time tooling that never reaches the packaged app. Nothing in that
 		// workflow can enforce it: it runs only when a manifest or lockfile
 		// changes, so a PR that pulls one of them into the runtime via
@@ -113,7 +113,7 @@ async function main() {
 		//
 		// This assertion is where that invariant actually holds — this suite runs
 		// on forge.config.ts and src/ changes too.
-		for (const buildTimeOnly of ['tar', 'extract-zip', 'image-size']) {
+		for (const buildTimeOnly of ['tar', 'extract-zip', 'image-size', 'zod']) {
 			assert.ok(
 				!fs.existsSync(path.join(buildPath, 'node_modules', buildTimeOnly)),
 				`${buildTimeOnly} carries allow-listed security advisories and must not ship in the ` +
