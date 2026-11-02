@@ -3,7 +3,7 @@ name: Monorepo Drift
 on:
   pull_request:
   push:
-    branches: [main, next]
+    branches: [main, next, 1.11.x]
   # A commit in the other repo can cause drift without firing anything here.
   schedule:
     - cron: '17 5 * * *'

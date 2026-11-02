@@ -19,8 +19,12 @@ Respect documented author intent and check for companion PRs.
 
 ## Branch lanes
 
-This repo has two permanent trunks:
-- **`main`** — the **stable**, released line (1.9.x patches ship from here).
-- **`next`** — the **in-development** major/minor (1.10, then 1.11, 2.0 …).
+Three trunks during the 2.0 beta period (from the 2.0 promotion in November 2026 until 2.0 GA):
 
-Feature work usually targets `next`; patches to the shipped release target `main`. Never commit directly to either trunk — branch off the correct one in a worktree, and target the PR's base at the same lane. **If it isn't clear which lane a task belongs to, ask "main or next?" before branching, pulling (`git pull origin <lane>`), or opening a PR — don't default to `main`.**
+- **`1.11.x`** — the stable patch line; this branch. A fix for a merchant on 1.11 branches from `origin/1.11.x` and targets `1.11.x`; a patch release (`1.11.N`) is cut from its tip. It has no dev site (Paul, 2026-11-01: *"1.11.x does not get a dev site"*): a patch is verified by its Test workflow plus a local run of the app from the branch. Nothing flows from `1.11.x` into `main`; a fix that 2.0 also needs is re-applied to `main` in its own PR.
+- **`main`** — 2.0 (beta, then GA). dev-free and dev-pro run it.
+- **`next`** — frozen until 2.0 GA; nothing targets it.
+
+A 1.11 desktop release is `tag-and-release.yml` dispatched with `--ref 1.11.x`; `.monorepo-ref` on this branch pins the 1.11 app tag the renderer is built from, and `monorepo-drift.yml` checks it on every push here.
+
+Never commit directly to a trunk — branch off the right one in a worktree and target the PR's base at the same lane. When the lane is not explicit, ask "1.11.x or main?" rather than defaulting.
