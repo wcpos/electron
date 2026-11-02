@@ -215,8 +215,10 @@ const config: ForgeConfig = {
 			// Release lane: a draft the release train publishes by hand. Next lane (WCPOS_LANE=next,
 			// set by the Publish workflow on the `next` branch): a published prerelease, so testers
 			// can download it, and never GitHub's "latest", so updates.wcpos.com never serves it.
+			// A prerelease version on the release lane (2.0.0-beta.1) is a prerelease too: GitHub's
+			// "latest" must never point at a beta, whichever lane built it.
 			draft: process.env.WCPOS_LANE !== 'next',
-			prerelease: process.env.WCPOS_LANE === 'next',
+			prerelease: process.env.WCPOS_LANE === 'next' || pkg.version.includes('-'),
 		}),
 		// new PublisherGithubLatestYml({
 		// 	repository: {
