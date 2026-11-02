@@ -2,7 +2,7 @@ name: Test
 
 on:
   push:
-    branches: [main, next]
+    branches: [main, next, 1.11.x]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -10,7 +10,7 @@ on:
       - '.editorconfig'
       - '.gitignore'
   pull_request:
-    branches: [main, next]
+    branches: [main, next, 1.11.x]
     paths-ignore:
       - '**.md'
       - 'docs/**'
