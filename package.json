@@ -115,7 +115,7 @@
 		"@typescript-eslint/parser": "^8.71.2",
 		"@vercel/webpack-asset-relocator-loader": "1.11.0",
 		"@wcpos/eslint-config": "^2.2.0",
-		"electron": "43.7.3",
+		"electron": "43.8.1",
 		"electron-debug": "^4.1.0",
 		"electron-devtools-installer": "4.0.0",
 		"electron-squirrel-startup": "^1.0.1",

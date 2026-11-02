@@ -118,8 +118,8 @@ importers:
         specifier: ^2.2.0
         version: 2.2.0(eslint-config-expo@55.0.1(eslint@9.39.5(jiti@2.7.0))(typescript@6.0.3))(eslint-config-prettier@10.1.8(eslint@9.39.5(jiti@2.7.0)))(eslint-plugin-prettier@5.5.6(eslint-config-prettier@10.1.8(eslint@9.39.5(jiti@2.7.0)))(eslint@9.39.5(jiti@2.7.0))(prettier@3.9.8))(eslint@9.39.5(jiti@2.7.0))(prettier-plugin-tailwindcss@0.7.4(prettier@3.9.8))(prettier@3.9.8)
       electron:
-        specifier: 43.7.3
-        version: 43.7.3
+        specifier: 43.8.1
+        version: 43.8.1
       electron-debug:
         specifier: ^4.1.0
         version: 4.1.0
@@ -2476,8 +2476,8 @@ packages:
     resolution: {integrity: sha512-j9ETcBGJaXxAY/b6UBpR7LZfjdU4BAO+yvr4ifqHEdyuc3UNCy91PDGkWKY5UQ4coHNYfnwFggrqD6QPeFGAlg==}
     engines: {node: '>=8.0.0'}
 
-  electron@43.7.3:
-    resolution: {integrity: sha512-I0MQyoe/6QIhQb6QFDUCLIplB8wq/IXR4q2IbOFQXq8AYlHqOAl6OmCknvNLSl4hVBH0bGsx1ypBqE5ns6LjoQ==}
+  electron@43.8.1:
+    resolution: {integrity: sha512-Qa6/xXODEn60oIkyuV8jXmyX84z6nicuBh7BOkPHVZlTTCG1MeTYjAkmxX+1B/kEkErPjs3WCP+JdtwkRaKRcQ==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -8783,7 +8783,7 @@ snapshots:
       - supports-color
     optional: true
 
-  electron@43.7.3:
+  electron@43.8.1:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0
