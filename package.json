@@ -15,7 +15,9 @@
 			"secp256k1@<=3.8.0": "3.8.1",
 			"ws@>=8.0.0 <8.21.0": "^8.21.0",
 			"tmp@<0.2.6": "^0.2.6",
-			"shell-quote@<1.11.0": "^1.11.0"
+			"shell-quote@<1.11.0": "^1.11.0",
+			"seroval@<1.7.6": "^1.7.6",
+			"seroval-plugins@<1.7.6": "^1.7.6"
 		},
 		"onlyBuiltDependencies": [
 			"@sentry/cli",
