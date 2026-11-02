@@ -17,7 +17,8 @@
 			"tmp@<0.2.6": "^0.2.6",
 			"shell-quote@<1.11.0": "^1.11.0",
 			"seroval@<1.7.6": "^1.7.6",
-			"seroval-plugins@<1.7.6": "^1.7.6"
+			"seroval-plugins@<1.7.6": "^1.7.6",
+			"zod@<4.6.6": "^4.6.6"
 		},
 		"onlyBuiltDependencies": [
 			"@sentry/cli",
