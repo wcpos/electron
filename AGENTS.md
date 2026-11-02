@@ -19,8 +19,11 @@ Respect documented author intent and check for companion PRs.
 
 ## Branch lanes
 
-This repo has two permanent trunks:
-- **`main`** — the **stable**, released line (1.9.x patches ship from here).
-- **`next`** — the **in-development** major/minor (1.10, then 1.11, 2.0 …).
+Three trunks during the 2.0 beta period (from the 2.0 promotion of 2026-11-02 until 2.0 GA):
 
-Feature work usually targets `next`; patches to the shipped release target `main`. Never commit directly to either trunk — branch off the correct one in a worktree, and target the PR's base at the same lane. **If it isn't clear which lane a task belongs to, ask "main or next?" before branching, pulling (`git pull origin <lane>`), or opening a PR — don't default to `main`.**
+- **`main`** — WCPOS Desktop 2.0, this branch: `2.0.0-beta.1` now, GA later. `.monorepo-ref` pins the monorepo commit the renderer is built from (a `main` SHA during the beta, the app tag once Phase 4 re-pins it); `monorepo-drift.yml` checks it. A push here builds Linux only and publishes nothing; releases come from `tag-and-release.yml` dispatched by hand.
+- **`1.11.x`** — the stable patch line for merchants still on 1.11. A 1.11 fix branches from `origin/1.11.x` and targets `1.11.x`; a 1.11 desktop release is `tag-and-release.yml --ref 1.11.x`. A fix 2.0 also needs is re-applied to `main` through a PR of its own.
+- **`next`** — frozen until 2.0 GA; nothing targets it. At GA it is re-cut from `main`.
+
+Never commit directly to a trunk — branch off the right one in a worktree and target the PR's base at the same lane. When the lane is not explicit, ask "main or 1.11.x?" rather than defaulting.
+

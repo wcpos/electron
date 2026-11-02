@@ -18,7 +18,7 @@ type LocaleInfo = {
 const store = new Store<Record<string, TranslationRecord>>();
 // On next, this is wcpos/translations' moving jsDelivr branch ref, refreshed by the CDN within about 12 hours.
 // On main, the release workflow replaces it with a CalVer tag; resolve this one-line conflict in main's favour when merging next.
-const TRANSLATION_VERSION = 'next';
+const TRANSLATION_VERSION = '2026.11.2';
 // A rolling ref must be re-fetched because its content changes under the same name.
 // (Named REF, not VERSION, so the release bump regex `TRANSLATION_VERSION = '…'` cannot match it.)
 const ROLLING_TRANSLATION_REF = 'next';
