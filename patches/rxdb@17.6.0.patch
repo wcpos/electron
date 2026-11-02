@@ -1,0 +1,66 @@
+diff --git a/dist/cjs/plugins/storage-sqlite/sqlite-helpers.js b/dist/cjs/plugins/storage-sqlite/sqlite-helpers.js
+index d2749d11373b9682903f9c3aa0ec775b49943ff4..fe984e50af077e5ab4e53502ff9153780825bff6 100644
+--- a/dist/cjs/plugins/storage-sqlite/sqlite-helpers.js
++++ b/dist/cjs/plugins/storage-sqlite/sqlite-helpers.js
+@@ -109,13 +109,24 @@ context) {
+   if (!queue) {
+     queue = _index.PROMISE_RESOLVE_VOID;
+   }
+-  queue = queue.then(async () => {
++  // wcpos: a transaction whose handler throws must (1) roll back, so the connection
++  // leaves BEGIN, and (2) not poison the queue — a rejected link skipped every later
++  // `.then` and replayed the same error on EVERY write to that database until the
++  // process died (64 rejected bulkWrites and a till that could not save an order,
++  // 2026-10-06). The caller still sees its own failure; the queue goes on.
++  var result = queue.then(async () => {
+     await openSqliteTransaction(database, sqliteBasics);
+-    var handlerResult = await handler();
++    var handlerResult;
++    try {
++      handlerResult = await handler();
++    } catch (err) {
++      await finishSqliteTransaction(database, sqliteBasics, 'ROLLBACK', context).catch(() => {});
++      throw err;
++    }
+     await finishSqliteTransaction(database, sqliteBasics, handlerResult, context);
+   });
+-  TX_QUEUE_BY_DATABASE.set(database, queue);
+-  return queue;
++  TX_QUEUE_BY_DATABASE.set(database, result.catch(() => {}));
++  return result;
+ }
+ 
+ /**
+diff --git a/dist/esm/plugins/storage-sqlite/sqlite-helpers.js b/dist/esm/plugins/storage-sqlite/sqlite-helpers.js
+index 7cf5dc391a3f3a9fc281371b280fbce588db9068..6723bc42d37a0d536740f35447afbf8f57d88ea0 100644
+--- a/dist/esm/plugins/storage-sqlite/sqlite-helpers.js
++++ b/dist/esm/plugins/storage-sqlite/sqlite-helpers.js
+@@ -93,13 +93,24 @@ context) {
+   if (!queue) {
+     queue = PROMISE_RESOLVE_VOID;
+   }
+-  queue = queue.then(async () => {
++  // wcpos: a transaction whose handler throws must (1) roll back, so the connection
++  // leaves BEGIN, and (2) not poison the queue — a rejected link skipped every later
++  // `.then` and replayed the same error on EVERY write to that database until the
++  // process died (64 rejected bulkWrites and a till that could not save an order,
++  // 2026-10-06). The caller still sees its own failure; the queue goes on.
++  var result = queue.then(async () => {
+     await openSqliteTransaction(database, sqliteBasics);
+-    var handlerResult = await handler();
++    var handlerResult;
++    try {
++      handlerResult = await handler();
++    } catch (err) {
++      await finishSqliteTransaction(database, sqliteBasics, 'ROLLBACK', context).catch(() => {});
++      throw err;
++    }
+     await finishSqliteTransaction(database, sqliteBasics, handlerResult, context);
+   });
+-  TX_QUEUE_BY_DATABASE.set(database, queue);
+-  return queue;
++  TX_QUEUE_BY_DATABASE.set(database, result.catch(() => {}));
++  return result;
+ }
+ 
+ /**

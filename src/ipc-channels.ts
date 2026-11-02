@@ -107,16 +107,27 @@ export interface IpcInvokeChannels {
 	'http-request': { req: unknown; res: unknown };
 	novu: { req: NovuBridgeRequest; res: NovuBridgeResponse };
 	'auth:prompt': { req: AuthPromptParams; res: AuthResult };
+	purgeLegacyDatabases: { req: undefined; res: { removed: string[] } };
 	'storage:measure': {
 		req: undefined;
 		res: {
-			entries: { name: string; bytes: number; root: 'fsdbs' | 'legacy-sqlite' | 'image-cache' }[];
+			entries: {
+				name: string;
+				bytes: number;
+				root: 'sqlite' | 'fsdbs' | 'legacy-sqlite' | 'image-cache';
+			}[];
 		};
 	};
 }
 
 /** The merchant's tracking consent, as stored by the plugin's general settings. */
 export type TelemetryConsent = 'undecided' | 'allowed' | 'denied';
+
+/**
+ * Whether the app theme's top strip is light or dark — every theme but `light`
+ * has a dark rail. Colours the Windows/Linux window-control glyphs (src/main/title-bar.ts).
+ */
+export type WindowColorScheme = 'light' | 'dark';
 
 export interface IpcSendChannels {
 	clearData: unknown;
@@ -128,6 +139,7 @@ export interface IpcSendChannels {
 	// The renderer forwards the store's consent so main gates its own Sentry
 	// client on the same switch (src/main/telemetry-consent.ts).
 	'telemetry-consent': TelemetryConsent;
+	'window-color-scheme': WindowColorScheme;
 }
 
 export interface IpcOnChannels {
@@ -150,6 +162,7 @@ export const INVOKE_CHANNELS = [
 	'novu',
 	'auth:prompt',
 	'storage:measure',
+	'purgeLegacyDatabases',
 ] as const satisfies readonly (keyof IpcInvokeChannels)[];
 
 export const SEND_CHANNELS = [
@@ -160,6 +173,7 @@ export const SEND_CHANNELS = [
 	'serial-port-selected',
 	'hid-device-selected',
 	'telemetry-consent',
+	'window-color-scheme',
 ] as const satisfies readonly (keyof IpcSendChannels)[];
 
 export const ON_CHANNELS = [

@@ -106,4 +106,8 @@ dist/
 # Electron dev filesystem-backed databases
 filesystem-databases/
 
-pnpm-lock.yaml
+# Desktop SQLite storage
+sqlite-databases/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

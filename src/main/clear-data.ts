@@ -2,12 +2,20 @@ import { app, dialog, ipcMain } from 'electron';
 import fs from 'fs-extra';
 
 import { logger } from './log';
-import { getFilesystemNodeBasePath, getLegacySqliteBasePath } from './rxdb-storage';
+import {
+	getFilesystemNodeBasePath,
+	getLegacySqliteBasePath,
+	getSqliteBasePath,
+} from './rxdb-storage';
 import { t } from './translations';
 
 const CLEAR_APP_DATA_ON_STARTUP_ARG = '--clear-app-data-on-startup';
 
-const getDbFolders = () => [getLegacySqliteBasePath(), getFilesystemNodeBasePath()];
+const getDbFolders = () => [
+	getSqliteBasePath(),
+	getLegacySqliteBasePath(),
+	getFilesystemNodeBasePath(),
+];
 
 const getRelaunchArgs = () => [
 	...process.argv.slice(1).filter((arg) => arg !== CLEAR_APP_DATA_ON_STARTUP_ARG),
@@ -48,9 +56,8 @@ export const clearAppDataDialog = () => {
 		})
 		.then(({ response }) => {
 			if (response === 0) {
-				// Relaunch before deleting the db folders: filesystem-node storage has no
-				// explicit close, so the relaunched process clears them before the storage
-				// bridge is initialised and opens filesystem handles.
+				// Relaunch before deleting the db folders so no active storage connections
+				// can write to files while Clear data removes them.
 				try {
 					app.relaunch({ args: getRelaunchArgs() });
 					app.quit();

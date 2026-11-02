@@ -1,10 +1,11 @@
 import * as path from 'path';
 
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import serve from 'electron-serve';
 
 import { getInstallId } from './install-id';
 import { logger as log } from './log';
+import { applyWindowColorScheme, isWindowColorScheme, titleBarOptions } from './title-bar';
 import { isDevelopment } from './util';
 
 // Keep in sync with src/preload.ts.
@@ -35,6 +36,8 @@ export const createWindow = (): BrowserWindow => {
 		width: 1024,
 		height: 728,
 		icon: path.join(__dirname, '../../icons/icon.ico'),
+		// No native title bar; see title-bar.ts for what replaces it.
+		...titleBarOptions(),
 		webPreferences: {
 			preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
 			sandbox: false, // Required for preload script to work
@@ -118,3 +121,13 @@ export const createWindow = (): BrowserWindow => {
 export const getMainWindow = (): BrowserWindow | null => {
 	return mainWindow;
 };
+
+// The renderer reports its theme so the Windows/Linux window controls stay legible on it.
+ipcMain.on('window-color-scheme', (event, scheme: unknown) => {
+	if (!isWindowColorScheme(scheme)) {
+		log.warn(`[window-color-scheme] ignored unknown scheme: ${String(scheme)}`);
+		return;
+	}
+	const window = BrowserWindow.fromWebContents(event.sender);
+	if (window) applyWindowColorScheme(window, scheme);
+});

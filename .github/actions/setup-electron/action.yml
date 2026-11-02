@@ -19,6 +19,17 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
+        # Keep the pnpm store holding patched rxdb-premium out of the Actions cache.
+        # From setup-node v5, packageManager in package.json would otherwise enable auto-caching.
+        package-manager-cache: false
+
+    - name: 🔒 Assert the pnpm side-effects cache is off
+      shell: bash
+      run: |
+        if [ "$(pnpm config get side-effects-cache)" != "false" ]; then
+          echo "::error::pnpm side-effects cache must be off because postinstall patches rxdb-premium in place."
+          exit 1
+        fi
 
     - name: 📦 Download expo-dist artifact
       if: inputs.download-expo-artifact == 'true'

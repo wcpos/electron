@@ -43,11 +43,11 @@ export interface LaunchDeps {
 
 /**
  * Decide whether this process is the one that boots. Only one WCPOS process may
- * touch an install's storage: two processes on the same `wcpos_fsdbs` files each
- * keep their own index rows in memory, so the second one's compaction moves
- * documents out from under the first, whose first cleanup round then reads the
- * old ranges as blank and drops them — the login row included (Sentry 2MN/2RG,
- * every drop boot carried two `app_start_time`s seconds apart). A Squirrel event
+ * touch an install's storage. Each process runs its own storage bridge and RxDB
+ * instance over the same `wcpos_sqlite` files, with no cross-process event
+ * stream between them. On 1.10's filesystem storage this dropped the login row
+ * (Sentry 2MN/2RG, every drop boot carried two `app_start_time`s seconds apart:
+ * the second process's compaction moved documents out from under the first). A Squirrel event
  * process never boots either: it used to open a window, and therefore storage,
  * while the running app still owned the files.
  */

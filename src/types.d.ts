@@ -8,11 +8,9 @@ interface Window {
 
 // Type declarations for packages without @types
 declare module 'semver' {
-	export function gt(
-		v1: string | ReturnType<typeof coerce>,
-		v2: string | ReturnType<typeof coerce>
-	): boolean;
-	export function coerce(version: string | null | undefined): { version: string } | null;
+	export function gt(v1: string, v2: string): boolean;
+	export function valid(version: string | null | undefined): string | null;
+	export function prerelease(version: string): readonly (string | number)[] | null;
 }
 
 // Augment electron-store to expose get/set methods properly
