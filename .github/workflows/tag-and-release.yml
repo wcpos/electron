@@ -6,6 +6,7 @@ name: Publish
 #           wcpos/monorepo `next` (unless monorepo_ref says otherwise). Testers install it from
 #           the releases page; GitHub's "latest" (what updates.wcpos.com serves) never points at
 #           a prerelease, and a prerelease build skips scheduled update checks.
+#   1.11.x → release lane by dispatch only: a DRAFT 1.11 release; `latest` sets the publish command it prints (refused after 2.0 GA).
 # A push builds Linux only; dispatch with platform=all for signed macOS and Windows installers.
 on:
   push:
@@ -30,6 +31,11 @@ on:
           - macos-arm64
           - windows
           - linux
+      latest:
+        description: "Publish this release as Latest. Before 2.0 GA a 1.11 release needs true to reach users; after GA it is refused. Sets the publish command this run prints."
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.platform || 'push' }}
@@ -46,6 +52,7 @@ jobs:
       version: ${{ steps.lane.outputs.version }}
       monorepo_ref: ${{ steps.pin.outputs.ref }}
       monorepo_sha: ${{ steps.source.outputs.sha }}
+      latest_flag: ${{ steps.flag.outputs.flag }}
     if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
@@ -71,6 +78,16 @@ jobs:
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
+      # The monorepo checkout below wipes the workspace; the flag step uses this before then.
+      - name: Check out the release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tooling
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Resolve lane and version
         id: lane
         env:
@@ -88,6 +105,20 @@ jobs:
           echo "lane=$lane" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           printf 'Lane: %s\nVersion: %s\n' "$lane" "$version" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Fails the run before any platform job (and its signing) when latest=true after 2.0 GA.
+      - name: Resolve the publish flag
+        id: flag
+        if: steps.lane.outputs.lane == 'release' && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          LATEST: ${{ github.event.inputs.latest }}
+          VERSION: ${{ steps.lane.outputs.version }}
+        run: |
+          set -euo pipefail
+          flag=$(bash .release-tooling/.github/scripts/latest-flag.sh "$VERSION" "$LATEST")
+          echo "flag=$flag" >> "$GITHUB_OUTPUT"
 
       - name: Tag the next-lane build at this commit
         if: steps.lane.outputs.lane == 'next'
@@ -624,3 +655,14 @@ jobs:
           fi
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$notes_file"
           echo "Release notes set on $tag from wcpos/monorepo $app_ref."
+
+      # The release stays a draft: this prints the publish command, it never publishes.
+      - name: 📣 Print the publish command
+        if: needs.build-expo.outputs.latest_flag != ''
+        env:
+          VERSION: ${{ needs.build-expo.outputs.version }}
+          LATEST_FLAG: ${{ needs.build-expo.outputs.latest_flag }}
+        run: |
+          line="Check the nine assets, then publish with: gh release edit v$VERSION -R $GITHUB_REPOSITORY --draft=false $LATEST_FLAG (never the web page's default, which sets Latest)"
+          echo "::notice::$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"

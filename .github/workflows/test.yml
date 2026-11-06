@@ -36,6 +36,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: 🧪 Test the release Latest flag
+        run: bash .github/scripts/test-latest-flag.sh
+
       - name: 🏗 Setup Electron
         uses: ./.github/actions/setup-electron
 
