@@ -3,6 +3,7 @@ import * as path from 'path';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import serve from 'electron-serve';
 
+import { guardMainFrameNavigation } from './app-origin';
 import { getInstallId } from './install-id';
 import { logger as log } from './log';
 import { applyWindowColorScheme, isWindowColorScheme, titleBarOptions } from './title-bar';
@@ -64,6 +65,8 @@ export const createWindow = (): BrowserWindow => {
 	if (isDevelopment) {
 		mainWindow.webContents.openDevTools();
 	}
+
+	guardMainFrameNavigation(mainWindow.webContents);
 
 	// Load the application
 	loadURL(mainWindow);

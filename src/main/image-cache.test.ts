@@ -9,7 +9,7 @@ const readyListeners: (() => void)[] = [];
 const privilegedSchemeCalls: { scheme: string; privileges: Record<string, boolean> }[][] = [];
 const serveCalls: { scheme?: string; partition?: string }[] = [];
 const moduleLoadOrder: string[] = [];
-type ImageRequest = { url: string; headers: Headers };
+type ImageRequest = { url: string; headers: Headers; initiatorOrigin?: string };
 let imageHandler: ((request: ImageRequest) => Promise<Response>) | undefined;
 let requestedUrl: string | undefined;
 let nextImageBytes = Buffer.from('image-bytes');
@@ -17,6 +17,11 @@ const warnMessages: unknown[][] = [];
 const errorMessages: unknown[][] = [];
 const fetchCounts = new Map<string, number>();
 const statusByUrl = new Map<string, number>();
+const contentTypeByUrl = new Map<string, string>();
+const clearStorageDataCalls: unknown[] = [];
+let protocolHandleCalls = 0;
+// Required with the module mocks in place, in main().
+let appOrigin: () => string;
 const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-image-cache-test-'));
 
 const electronMock = {
@@ -34,12 +39,22 @@ const electronMock = {
 	protocol: {
 		handle(scheme: string, handler: (request: ImageRequest) => Promise<Response>) {
 			assert.equal(scheme, 'wcpos-image');
+			protocolHandleCalls += 1;
 			imageHandler = handler;
 		},
 		registerSchemesAsPrivileged(
 			schemes: { scheme: string; privileges: Record<string, boolean> }[]
 		) {
 			privilegedSchemeCalls.push(schemes);
+		},
+	},
+	session: {
+		defaultSession: {
+			// Rejects, to prove a failed clear cannot stop the handler registering.
+			clearStorageData(options: unknown) {
+				clearStorageDataCalls.push(options);
+				return Promise.reject(new Error('simulated clearStorageData failure'));
+			},
 		},
 	},
 };
@@ -64,7 +79,7 @@ globalThis.fetch = ((url: string | URL | Request) => {
 	return Promise.resolve(
 		new Response(Uint8Array.from(nextImageBytes), {
 			status: 200,
-			headers: { 'content-type': 'image/jpeg' },
+			headers: { 'content-type': contentTypeByUrl.get(requestedUrl) ?? 'image/jpeg' },
 		})
 	);
 }) as typeof globalThis.fetch;
@@ -94,11 +109,32 @@ async function waitFor(condition: () => boolean, message: string) {
  * Origin/Referer headers (verified empirically on Electron 41: they arrive
  * as null for both fetch() and <img> loads). Model that here so the tests
  * cannot pass with header-based gating that would reject every real request.
+ * Electron does set initiatorOrigin, outside the page's control; the app's own
+ * requests carry appOrigin().
  */
-const requestFromRenderer = (encodedUrl: string): ImageRequest => ({
-	url: `wcpos-image://cache/${encodedUrl}`,
+const requestFromRenderer = (encodedUrl: string, host = 'cache'): ImageRequest => ({
+	url: `wcpos-image://${host}/${encodedUrl}`,
 	headers: new Headers(),
+	initiatorOrigin: appOrigin(),
 });
+
+/**
+ * Every response, whatever its status, names the app origin (never `*`), so a
+ * store page in the checkout iframe cannot read it, and cannot run as a document.
+ */
+function assertLockedHeaders(response: Response, kind: string) {
+	assert.equal(
+		response.headers.get('Access-Control-Allow-Origin'),
+		'wcpos://-',
+		`${kind}: only the app document may read the response`
+	);
+	assert.equal(
+		response.headers.get('Content-Security-Policy'),
+		"sandbox; default-src 'none'",
+		`${kind}: the response must not run as a document`
+	);
+	assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff', `${kind}: nosniff`);
+}
 
 type ModuleWithMutableLoad = typeof Module & {
 	_load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
@@ -125,6 +161,8 @@ async function main() {
 	try {
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		require('./image-cache');
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		({ appOrigin } = require('./app-origin'));
 	} finally {
 		mutableModule._load = originalLoad;
 	}
@@ -148,6 +186,16 @@ async function main() {
 	assert.equal(readyListeners.length, 1, 'image cache should register a ready listener');
 	readyListeners[0]!();
 	assert.ok(imageHandler, 'image cache should register the wcpos-image handler');
+	assert.equal(protocolHandleCalls, 1, 'a clearStorageData rejection must not stop registration');
+	assert.deepEqual(
+		clearStorageDataCalls,
+		[{ origin: 'wcpos-image://cache', storages: ['serviceworkers'] }],
+		'ready should clear any service worker on the handler origin'
+	);
+	await waitFor(
+		() => warnMessages.some((args) => String(args[0]).includes('service workers')),
+		'expected a clearStorageData rejection to be logged as a warning'
+	);
 
 	const cacheDir = path.join(userDataPath, 'wcpos_dbs', 'image-cache');
 	assert.ok(fs.existsSync(cacheDir), 'ready handler should create the cache directory');
@@ -170,11 +218,9 @@ async function main() {
 		'handler should respond with the downloaded image bytes'
 	);
 	assert.equal(requestedUrl, originalUrl, 'handler should download the decoded URL');
-	assert.equal(
-		response.headers.get('Access-Control-Allow-Origin'),
-		'*',
-		'download response must allow cross-origin renderer fetch() (the print pipeline relies on it)'
-	);
+	assertLockedHeaders(response, 'fresh download');
+	assert.equal(response.headers.get('Content-Type'), 'image/jpeg');
+	assert.equal(response.headers.get('Cache-Control'), 'max-age=31536000');
 	assert.ok(fs.existsSync(cacheDir), 'handler should leave the cache directory on disk');
 
 	const hash = crypto.createHash('sha256').update(originalUrl).digest('hex');
@@ -229,11 +275,7 @@ async function main() {
 		const staleEncoded = Buffer.from(staleUrl, 'utf-8').toString('base64url');
 		const staleResponse = await imageHandler!(requestFromRenderer(staleEncoded));
 		assert.equal(staleResponse.status, 200, 'stale cache response should still be served');
-		assert.equal(
-			staleResponse.headers.get('Access-Control-Allow-Origin'),
-			'*',
-			'cached response must allow cross-origin renderer fetch()'
-		);
+		assertLockedHeaders(staleResponse, 'stale cached');
 		assert.deepEqual(
 			Buffer.from(await staleResponse.arrayBuffer()),
 			staleBytes,
@@ -309,11 +351,7 @@ async function main() {
 	errorMessages.length = 0;
 	const firstMissing = await imageHandler!(requestFromRenderer(missing.encoded));
 	assert.equal(firstMissing.status, 404, 'an origin 404 should be served as a 404');
-	assert.equal(
-		firstMissing.headers.get('Access-Control-Allow-Origin'),
-		'*',
-		'a 404 must stay readable by renderer fetch()'
-	);
+	assertLockedHeaders(firstMissing, 'negative');
 	assert.equal(fs.existsSync(missing.image), false, 'a 404 should not write an image file');
 	const missingMeta = JSON.parse(fs.readFileSync(missing.meta, 'utf-8'));
 	assert.deepEqual(
@@ -325,6 +363,7 @@ async function main() {
 
 	const secondMissing = await imageHandler!(requestFromRenderer(missing.encoded));
 	assert.equal(secondMissing.status, 404, 'the negative entry should be served as a 404');
+	assertLockedHeaders(secondMissing, 'cached negative');
 	assert.equal(fetchCounts.get(missingUrl), 1, 'a fresh negative entry must not refetch');
 	assert.equal(
 		errorMessages.length,
@@ -351,6 +390,8 @@ async function main() {
 	assert.equal(fetchCounts.get(addedUrl), 1, 'a stale negative entry should refetch once');
 	const afterRefresh = await imageHandler!(requestFromRenderer(added.encoded));
 	assert.equal(afterRefresh.status, 200, 'the refreshed picture should be served');
+	assertLockedHeaders(afterRefresh, 'cached');
+	assert.equal(afterRefresh.headers.get('Cache-Control'), 'max-age=31536000');
 	assert.deepEqual(Buffer.from(await afterRefresh.arrayBuffer()), addedBytes);
 
 	// A picture that the origin now answers 404 for becomes a negative entry on refresh.
@@ -396,6 +437,7 @@ async function main() {
 	statusByUrl.set(brokenUrl, 500);
 	const firstBroken = await imageHandler!(requestFromRenderer(broken.encoded));
 	assert.equal(firstBroken.status, 404, 'a 500 still fails the request');
+	assertLockedHeaders(firstBroken, 'catch-all 404');
 	assert.equal(fs.existsSync(broken.meta), false, 'a 500 must not write a cache entry');
 	assert.equal(fs.existsSync(broken.image), false, 'a 500 must not write an image');
 	await imageHandler!(requestFromRenderer(broken.encoded));
@@ -404,6 +446,96 @@ async function main() {
 		errorMessages.some((args) => String(args[0]).includes('Image cache error')),
 		'a 500 is still logged as an error'
 	);
+
+	// 400s: a payload that is not a URL, a scheme other than http(s), and a host
+	// other than `cache`. None of them fetches.
+	const fetchesBefore = [...fetchCounts.values()].reduce((a, b) => a + b, 0);
+	const badUrl = await imageHandler!(
+		requestFromRenderer(Buffer.from('not a url', 'utf-8').toString('base64url'))
+	);
+	assert.equal(badUrl.status, 400, 'a payload that is not a URL is a 400');
+	assertLockedHeaders(badUrl, '400 bad URL');
+	const badScheme = await imageHandler!(
+		requestFromRenderer(Buffer.from('ftp://demo.wcpos.com/a.jpg', 'utf-8').toString('base64url'))
+	);
+	assert.equal(badScheme.status, 400, 'a non-http(s) URL is a 400');
+	assertLockedHeaders(badScheme, '400 bad scheme');
+	const wrongHostUrl = 'https://demo.wcpos.com/wp-content/uploads/wrong-host.jpg';
+	const wrongHost = await imageHandler!(
+		requestFromRenderer(entryPaths(wrongHostUrl).encoded, 'other')
+	);
+	assert.equal(wrongHost.status, 400, 'a host other than `cache` is a 400');
+	assertLockedHeaders(wrongHost, '400 wrong host');
+	assert.equal(fetchCounts.get(wrongHostUrl), undefined, 'a wrong host must not fetch');
+	assert.equal(
+		[...fetchCounts.values()].reduce((a, b) => a + b, 0),
+		fetchesBefore,
+		'no 400 fetches anything'
+	);
+
+	// Only the app origin is served. A store page (in the checkout iframe, or a
+	// worker it starts), an opaque sandboxed child ('null') and a request with no
+	// initiator all get an empty 403, before any cache read or download.
+	const gatedUrl = 'https://demo.wcpos.com/wp-content/uploads/gated.jpg';
+	const gated = entryPaths(gatedUrl);
+	const refusedOrigins: [string, string | undefined][] = [
+		['store origin', 'http://127.0.0.1:8080'],
+		['opaque origin', 'null'],
+		['absent origin', undefined],
+	];
+	for (const [kind, initiatorOrigin] of refusedOrigins) {
+		for (const host of ['cache', 'other']) {
+			const refused = await imageHandler!({
+				url: `wcpos-image://${host}/${gated.encoded}`,
+				headers: new Headers(),
+				...(initiatorOrigin === undefined ? {} : { initiatorOrigin }),
+			});
+			assert.equal(refused.status, 403, `${kind}, host ${host}: refused whatever the URL`);
+			assert.equal((await refused.arrayBuffer()).byteLength, 0, `${kind}: empty body`);
+			assertLockedHeaders(refused, `403 ${kind}`);
+		}
+	}
+	assert.equal(fetchCounts.get(gatedUrl), undefined, 'a refused request must not download');
+	assert.equal(fs.existsSync(gated.image), false, 'a refused request must not cache an image');
+	assert.equal(fs.existsSync(gated.meta), false, 'a refused request must not cache meta');
+	nextImageBytes = imageBytes;
+	const served = await imageHandler!(requestFromRenderer(gated.encoded));
+	assert.equal(served.status, 200, 'the app origin is still served');
+	assert.deepEqual(Buffer.from(await served.arrayBuffer()), imageBytes);
+	assert.equal(fetchCounts.get(gatedUrl), 1, 'the same URL downloads for the app origin');
+
+	// Content-Type: only image/* passes through; anything else is served as
+	// octet-stream so it cannot be rendered as a document.
+	const htmlUrl = 'https://demo.wcpos.com/wp-content/uploads/page.html';
+	contentTypeByUrl.set(htmlUrl, 'text/html');
+	const freshHtml = await imageHandler!(requestFromRenderer(entryPaths(htmlUrl).encoded));
+	assert.equal(freshHtml.status, 200, 'a non-image is still served, not refused');
+	assert.equal(freshHtml.headers.get('Content-Type'), 'application/octet-stream');
+	assertLockedHeaders(freshHtml, 'fresh text/html');
+
+	// An entry already on disk from before this check, written with text/html.
+	const oldHtmlUrl = 'https://demo.wcpos.com/wp-content/uploads/old-page.html';
+	const oldHtml = entryPaths(oldHtmlUrl);
+	fs.writeFileSync(oldHtml.image, Buffer.from('<script>alert(1)</script>'));
+	fs.writeFileSync(
+		oldHtml.meta,
+		JSON.stringify({ url: oldHtmlUrl, contentType: 'text/html', cachedAt: Date.now() })
+	);
+	const cachedHtml = await imageHandler!(requestFromRenderer(oldHtml.encoded));
+	assert.equal(cachedHtml.status, 200);
+	assert.equal(cachedHtml.headers.get('Content-Type'), 'application/octet-stream');
+	assert.equal(fetchCounts.get(oldHtmlUrl), undefined, 'a fresh cache hit does not refetch');
+	assertLockedHeaders(cachedHtml, 'cached text/html');
+
+	for (const contentType of ['IMAGE/PNG', 'image/svg+xml']) {
+		const imageUrl = `https://demo.wcpos.com/wp-content/uploads/${encodeURIComponent(contentType)}`;
+		contentTypeByUrl.set(imageUrl, contentType);
+		const fresh = await imageHandler!(requestFromRenderer(entryPaths(imageUrl).encoded));
+		assert.equal(fresh.headers.get('Content-Type'), contentType, `${contentType} passes through`);
+		const cached = await imageHandler!(requestFromRenderer(entryPaths(imageUrl).encoded));
+		assert.equal(cached.headers.get('Content-Type'), contentType, `cached ${contentType} too`);
+		assert.equal(fetchCounts.get(imageUrl), 1);
+	}
 }
 
 main()
