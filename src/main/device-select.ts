@@ -8,8 +8,8 @@ import {
 	type WebFrameMain,
 } from 'electron';
 
+import { isAppUrl } from './app-origin';
 import { logger } from './log';
-import { isDevelopment } from './util';
 
 /**
  * Wire Web Serial / WebHID device selection for a window so barcode scanners can
@@ -56,38 +56,14 @@ interface HidDeviceDetails {
 export function registerScannerDeviceSelection(window: BrowserWindow): void {
 	const { session } = window.webContents;
 	const isThisWindow = (webContents: WebContents | undefined) => webContents === window.webContents;
-	// Compare origins rather than raw port strings: the URL parser canonicalizes a
-	// default port away, so `new URL('http://localhost:80').port` is '' while an
-	// EXPO_PORT of '80' is '80'. Comparing those directly disabled serial/HID in that
-	// documented development configuration. Production keeps the protocol/hostname
-	// check because a custom scheme has an opaque origin.
-	const trustedDevOrigin = (() => {
-		try {
-			return new URL(`http://localhost:${process.env.EXPO_PORT || '8088'}`).origin;
-		} catch {
-			return null;
-		}
-	})();
-	const isTrustedUrl = (value: string | undefined) => {
-		if (!value) return false;
-		try {
-			const url = new URL(value);
-			return isDevelopment
-				? trustedDevOrigin !== null && url.origin === trustedDevOrigin
-				: url.protocol === 'wcpos:' && url.hostname === '-';
-		} catch {
-			return false;
-		}
-	};
 	const isTrustedFrame = (frame: unknown) => {
 		const mainFrame = window.webContents.mainFrame;
-		return !!mainFrame && frame === mainFrame && isTrustedUrl(mainFrame.url);
+		return !!mainFrame && frame === mainFrame && isAppUrl(mainFrame.url);
 	};
 
 	session.setDevicePermissionHandler(
 		(details) =>
-			(details.deviceType === 'serial' || details.deviceType === 'hid') &&
-			isTrustedUrl(details.origin)
+			(details.deviceType === 'serial' || details.deviceType === 'hid') && isAppUrl(details.origin)
 	);
 	// 'media' must stay grantable: once a check handler is registered it answers
 	// EVERY navigator.permissions.query(), and Electron's default request handler
@@ -105,7 +81,7 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 			isThisWindow(webContents || undefined) &&
 			(permission === 'serial' || permission === 'hid') &&
 			details.isMainFrame &&
-			isTrustedUrl(requestingOrigin)
+			isAppUrl(requestingOrigin)
 		);
 	});
 

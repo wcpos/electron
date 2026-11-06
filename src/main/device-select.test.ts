@@ -409,10 +409,11 @@ try {
 	// The URL parser drops a default port, so comparing url.port ('') against '80'
 	// disabled every trust check; origins compare correctly. Load device-select
 	// again with './util' faked to development so the isDevelopment branch runs.
+	// './util' is reached through './app-origin', so that module is reloaded too.
 	{
-		const modulePath = require.resolve('./device-select');
+		const modulePaths = [require.resolve('./device-select'), require.resolve('./app-origin')];
 		const originalExpoPort = process.env.EXPO_PORT;
-		delete require.cache[modulePath];
+		for (const modulePath of modulePaths) delete require.cache[modulePath];
 		fakeUtil = { isDevelopment: true };
 		process.env.EXPO_PORT = '80';
 		try {
@@ -430,7 +431,7 @@ try {
 			fakeUtil = null;
 			if (originalExpoPort === undefined) delete process.env.EXPO_PORT;
 			else process.env.EXPO_PORT = originalExpoPort;
-			delete require.cache[modulePath];
+			for (const modulePath of modulePaths) delete require.cache[modulePath];
 		}
 	}
 

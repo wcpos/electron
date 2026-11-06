@@ -88,6 +88,13 @@ inMode(true, undefined, () => {
 	assert.equal(isAppUrl('http://localhost:9999/'), false);
 	assert.equal(isAppUrl('wcpos://-/'), false, 'the packaged scheme is not the app in development');
 });
+inMode(true, 'not-a-port', () => {
+	assert.doesNotThrow(
+		() => isAppUrl('http://localhost:8088/'),
+		'a malformed EXPO_PORT must not throw'
+	);
+	assert.equal(isAppUrl('http://localhost:8088/'), false, 'a malformed EXPO_PORT trusts nothing');
+});
 
 // --- guardMainFrameNavigation() ----------------------------------------------------
 type NavEvent = { url: string; isMainFrame: boolean; prevented: boolean; preventDefault(): void };
