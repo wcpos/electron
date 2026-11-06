@@ -3,7 +3,9 @@ import {
 	type Event,
 	ipcMain,
 	type IpcMainEvent,
+	webContents,
 	type WebContents,
+	type WebFrameMain,
 } from 'electron';
 
 import { logger } from './log';
@@ -43,7 +45,7 @@ interface HidDeviceLike {
 
 interface HidSelectDetails {
 	deviceList: HidDeviceLike[];
-	frame?: unknown;
+	frame?: WebFrameMain | null;
 }
 
 interface HidDeviceDetails {
@@ -202,7 +204,17 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		details: HidSelectDetails,
 		callback: (deviceId?: string) => void
 	) => {
-		if (!isTrustedFrame(details.frame)) return;
+		// Same rule as serial: another window's chooser is left unprevented for that
+		// window's handler; an untrusted frame of ours (a subframe, or a frame already
+		// gone so it has no owner) is prevented and cancelled, never left to fail open.
+		const owner = details.frame ? webContents.fromFrame(details.frame) : undefined;
+		if (owner && !isThisWindow(owner)) return;
+		if (!isTrustedFrame(details.frame)) {
+			event.preventDefault();
+			logger.info('[device-select] select-hid-device refused: untrusted frame');
+			callback();
+			return;
+		}
 		event.preventDefault();
 		logger.debug(
 			`[device-select] select-hid-device fired with ${details.deviceList.length} device(s)`
@@ -250,6 +262,27 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		}
 	};
 	ipcMain.on('hid-device-selected', onHidSelected);
+
+	// A new main-frame document cannot answer the previous document's chooser (the
+	// opener-frame check above refuses it), so cancel any open chooser rather than
+	// strand its callback. In-page route changes and subframe navigations (the
+	// checkout iframe) leave it open. Not removed on 'closed': the webContents must
+	// not be touched there, and this listener goes with it.
+	window.webContents.on('did-start-navigation', (details) => {
+		if (!details.isMainFrame || details.isSameDocument) return;
+		if (!pendingSerial && !pendingHid) return;
+		const serialCallback = pendingSerial;
+		const hidCallback = pendingHid;
+		pendingSerial = null;
+		pendingSerialFrame = null;
+		serialPorts = [];
+		pendingHid = null;
+		pendingHidFrame = null;
+		hidDevices = [];
+		logger.info('[device-select] chooser cancelled by navigation');
+		serialCallback?.('');
+		hidCallback?.();
+	});
 
 	window.on('closed', () => {
 		session.removeListener('select-serial-port', onSelectSerialPort);

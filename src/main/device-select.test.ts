@@ -7,6 +7,14 @@ type ModuleWithMutableLoad = typeof Module & {
 };
 
 const fakeIpcMain = new EventEmitter();
+// webContents.fromFrame: a main frame resolves to the webContents currently holding
+// it; a subframe resolves through this map; anything else (a gone frame) is undefined.
+const allWebContents: { mainFrame: unknown }[] = [];
+const subframeOwners = new Map<unknown, unknown>();
+const fromFrame = (frame: unknown) =>
+	subframeOwners.get(frame) ?? allWebContents.find((wc) => wc.mainFrame === frame);
+// Set to fake './util' (development mode) for a second load of device-select.
+let fakeUtil: { isDevelopment: boolean } | null = null;
 
 const mutableModule = Module as ModuleWithMutableLoad;
 const originalLoad = mutableModule._load;
@@ -15,7 +23,8 @@ mutableModule._load = function patchedLoad(
 	parent: NodeModule | null,
 	isMain: boolean
 ) {
-	if (request === 'electron') return { ipcMain: fakeIpcMain };
+	if (request === 'electron') return { ipcMain: fakeIpcMain, webContents: { fromFrame } };
+	if (request === './util' && fakeUtil) return fakeUtil;
 	if (request === './log') {
 		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
 	}
@@ -50,6 +59,10 @@ try {
 		session = new FakeSession();
 		mainFrame = { id: 'initial-main-frame', url: 'about:blank' };
 		sent: { channel: string; payload: unknown }[] = [];
+		constructor() {
+			super();
+			allWebContents.push(this);
+		}
 		send(channel: string, payload: unknown) {
 			this.sent.push({ channel, payload });
 		}
@@ -139,9 +152,8 @@ try {
 		false
 	);
 
-	// EXPO_PORT=80 is a documented development configuration. The URL parser drops a
-	// default port, so comparing url.port ('') against trustedPort ('80') disabled every
-	// trust check; origins compare correctly.
+	// The development origin (EXPO_PORT=80) is tested at the end, with development
+	// mode on; this run is production.
 	assert.equal(
 		session.permissionCheckHandler!(webContents, 'hid', 'wcpos://-', { isMainFrame: true }),
 		true,
@@ -243,24 +255,63 @@ try {
 		);
 		assert.deepEqual(staleCalls, [], 'a replacement document must not complete the old chooser');
 		// Nor can the frame that opened it: that document is gone, so isTrustedFrame
-		// already rejects it. After a navigation the chooser is therefore stranded
-		// rather than mis-answered — safe, but the callback is never invoked. Cancelling
-		// it on did-start-navigation is the separate lifecycle change noted on #318.
+		// already rejects it.
 		fakeIpcMain.emit('serial-port-selected', { sender: webContents, senderFrame: opener }, 'p1');
 		assert.deepEqual(staleCalls, [], 'the replaced document cannot complete it either');
-		// Reset shared chooser state for the assertions that follow.
+		// The main-frame navigation cancels the chooser with '' instead of stranding it.
+		webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+		assert.deepEqual(staleCalls, [''], 'navigation cancels the open chooser');
+		fakeIpcMain.emit(
+			'serial-port-selected',
+			{ sender: webContents, senderFrame: webContents.mainFrame },
+			'p1'
+		);
+		assert.deepEqual(staleCalls, [''], 'a reply after the cancel does nothing');
 		webContents.mainFrame = opener;
-		fakeIpcMain.emit('serial-port-selected', { sender: webContents, senderFrame: opener }, '');
 	}
 
 	// --- HID: frame filter, live refresh, and no-arg cancel. -------------------
-	// A request from a different frame is ignored.
-	session.emit(
-		'select-hid-device',
-		noopEvent,
-		{ deviceList: [{ deviceId: 'zz' }], frame: { id: 'other-frame' } },
-		(deviceId?: string) => hidCalls.push([deviceId])
-	);
+	// A request from another window's frame is not ours: not prevented, not answered.
+	{
+		const otherWindow = new FakeWebContents();
+		otherWindow.mainFrame = { id: 'other-window-frame', url: 'wcpos://-/index.html' };
+		let prevented = false;
+		const foreignCalls: unknown[][] = [];
+		session.emit(
+			'select-hid-device',
+			{
+				preventDefault() {
+					prevented = true;
+				},
+			},
+			{ deviceList: [{ deviceId: 'zz' }], frame: otherWindow.mainFrame },
+			(...args: unknown[]) => foreignCalls.push(args)
+		);
+		assert.equal(prevented, false, "another window's HID chooser must not be prevented");
+		assert.deepEqual(foreignCalls, [], "another window's HID chooser must not be answered");
+	}
+	// A subframe of this window (the checkout iframe), and a frame that is already
+	// gone (null), are refused: prevented and cancelled with no argument.
+	{
+		const checkoutFrame = { id: 'checkout-iframe', url: 'https://store.example/checkout' };
+		subframeOwners.set(checkoutFrame, webContents);
+		for (const frame of [checkoutFrame, null]) {
+			let prevented = false;
+			const refusedCalls: unknown[][] = [];
+			session.emit(
+				'select-hid-device',
+				{
+					preventDefault() {
+						prevented = true;
+					},
+				},
+				{ deviceList: [{ deviceId: 'zz' }], frame },
+				(...args: unknown[]) => refusedCalls.push(args)
+			);
+			assert.equal(prevented, true, `untrusted HID chooser (${frame?.id}) must be prevented`);
+			assert.deepEqual(refusedCalls, [[]], `untrusted HID chooser (${frame?.id}) cancelled`);
+		}
+	}
 	assert.equal(webContents.sent.filter((s) => s.channel === 'hid-devices').length, 0);
 
 	// This window's request surfaces candidates.
@@ -304,6 +355,47 @@ try {
 	);
 	assert.deepEqual(hidCalls[1], ['h3']);
 
+	// --- Navigation: a new main-frame document cancels any open chooser. --------
+	{
+		const navSerial: string[] = [];
+		const navHid: unknown[][] = [];
+		const openBoth = () => {
+			session.emit('select-serial-port', noopEvent, [{ portId: 'n1' }], webContents, (id: string) =>
+				navSerial.push(id)
+			);
+			session.emit(
+				'select-hid-device',
+				noopEvent,
+				{ deviceList: [{ deviceId: 'nh1' }], frame: webContents.mainFrame },
+				(...args: unknown[]) => navHid.push(args)
+			);
+		};
+		const replyBoth = () => {
+			const reply = { sender: webContents, senderFrame: webContents.mainFrame };
+			fakeIpcMain.emit('serial-port-selected', reply, 'n1');
+			fakeIpcMain.emit('hid-device-selected', reply, 'nh1');
+		};
+
+		// An in-page route change and a subframe navigation leave both choosers open.
+		openBoth();
+		webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
+		webContents.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false });
+		assert.deepEqual(navSerial, [], 'same-document/subframe navigation keeps serial open');
+		assert.deepEqual(navHid, [], 'same-document/subframe navigation keeps HID open');
+		replyBoth();
+		assert.deepEqual(navSerial, ['n1'], 'serial chooser still completes after them');
+		assert.deepEqual(navHid, [['nh1']], 'HID chooser still completes after them');
+
+		// A main-frame navigation to a new document cancels both.
+		openBoth();
+		webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+		assert.deepEqual(navSerial, ['n1', ''], "navigation cancels serial with ''");
+		assert.deepEqual(navHid, [['nh1'], []], 'navigation cancels HID with no argument');
+		replyBoth();
+		assert.deepEqual(navSerial, ['n1', ''], 'a later serial reply does nothing');
+		assert.deepEqual(navHid, [['nh1'], []], 'a later HID reply does nothing');
+	}
+
 	// --- Window close removes every listener.
 	win.emit('closed');
 	assert.equal(fakeIpcMain.listenerCount('serial-port-selected'), 0);
@@ -312,6 +404,35 @@ try {
 	assert.equal(session.listenerCount('serial-port-added'), 0);
 	assert.equal(session.listenerCount('select-hid-device'), 0);
 	assert.equal(session.listenerCount('hid-device-added'), 0);
+
+	// --- Development mode, EXPO_PORT=80 (a documented configuration). ---------
+	// The URL parser drops a default port, so comparing url.port ('') against '80'
+	// disabled every trust check; origins compare correctly. Load device-select
+	// again with './util' faked to development so the isDevelopment branch runs.
+	{
+		const modulePath = require.resolve('./device-select');
+		const originalExpoPort = process.env.EXPO_PORT;
+		delete require.cache[modulePath];
+		fakeUtil = { isDevelopment: true };
+		process.env.EXPO_PORT = '80';
+		try {
+			const devModule = require('./device-select') as typeof import('./device-select');
+			const devContents = new FakeWebContents();
+			const devWin = new EventEmitter() as EventEmitter & { webContents: FakeWebContents };
+			devWin.webContents = devContents;
+			devModule.registerScannerDeviceSelection(devWin as never);
+			const devHandler = devContents.session.devicePermissionHandler!;
+			assert.equal(devHandler({ deviceType: 'serial', origin: 'http://localhost' }), true);
+			assert.equal(devHandler({ deviceType: 'serial', origin: 'http://localhost:8088' }), false);
+			assert.equal(devHandler({ deviceType: 'serial', origin: 'wcpos://-' }), false);
+			devWin.emit('closed');
+		} finally {
+			fakeUtil = null;
+			if (originalExpoPort === undefined) delete process.env.EXPO_PORT;
+			else process.env.EXPO_PORT = originalExpoPort;
+			delete require.cache[modulePath];
+		}
+	}
 
 	console.log('device-select tests passed');
 } finally {
