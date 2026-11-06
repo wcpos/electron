@@ -2,10 +2,11 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { app, protocol } from 'electron';
+import { app, protocol, session } from 'electron';
 import serve from 'electron-serve';
 
 import './window';
+import { appOrigin } from './app-origin';
 import { getImageCachePath } from './image-cache-path';
 import { logger } from './log';
 
@@ -36,6 +37,16 @@ type DownloadResult = { kind: 'image'; buffer: Buffer; contentType: string } | {
  * packages/printer thermal-print.ts). Without supportFetchAPI the renderer's
  * fetch() throws, the <img> fallback taints the canvas, and logos are silently
  * dropped from printed receipts.
+ *
+ * The checkout and receipt iframes load store pages in this same default
+ * session. What stops a script there reading any URL through this handler is
+ * the handler's own origin gate: anything not issued by the app origin gets an
+ * empty 403. Access-Control-Allow-Origin cannot do it, because Electron does
+ * not enforce CORS on protocol.handle schemes, and webRequest.onBeforeRequest
+ * cannot either, because it never fires for a dedicated worker's fetch(). The
+ * ACAO value (appOrigin(), never `*`) is defence in depth only, should a later
+ * Electron enforce it. The sandbox CSP, nosniff and the image-only
+ * Content-Type stop a response running as a document or script.
  *
  * electron-serve batches synchronous serve() calls into Electron's single
  * registerSchemesAsPrivileged call. Registering this scheme through the same
@@ -158,11 +169,39 @@ function readMeta(metaPath: string): CacheMeta | undefined {
 	}
 }
 
+/** Headers for every response from the handler. */
+function responseHeaders(extra: Record<string, string> = {}): Record<string, string> {
+	return {
+		...extra,
+		'Access-Control-Allow-Origin': appOrigin(),
+		'Content-Security-Policy': "sandbox; default-src 'none'",
+		'X-Content-Type-Options': 'nosniff',
+	};
+}
+
+/**
+ * Applied when serving, not when writing, so entries cached before this check
+ * are covered. Not a refusal: buckets that label images binary/octet-stream
+ * must keep rendering.
+ */
+function servedContentType(contentType: string): string {
+	return contentType.toLowerCase().startsWith('image/') ? contentType : 'application/octet-stream';
+}
+
+function emptyResponse(status: number): Response {
+	return new Response(null, { status, headers: responseHeaders() });
+}
+
 function notFoundResponse(): Response {
-	return new Response(null, {
-		status: NOT_FOUND_STATUS,
-		headers: { 'Access-Control-Allow-Origin': '*' },
-	});
+	return emptyResponse(NOT_FOUND_STATUS);
+}
+
+/**
+ * Set by Electron from the requesting context, workers included; the page
+ * cannot set it. Absent when the browser started the request itself.
+ */
+function requestingOrigin(request: Request): string | undefined {
+	return (request as Request & { initiatorOrigin?: string }).initiatorOrigin;
 }
 
 /**
@@ -212,14 +251,32 @@ function refreshInBackground(url: string, imagePath: string, metaPath: string): 
 app.on('ready', () => {
 	getCacheDir();
 
+	// The scheme allows service workers, and one installed on this origin before
+	// the headers above existed would outlive them. Clear it on every start.
+	session.defaultSession
+		.clearStorageData({ origin: 'wcpos-image://cache', storages: ['serviceworkers'] })
+		.catch((err) => {
+			logger.warn('Failed to clear wcpos-image service workers:', err?.message);
+		});
+
 	// Do NOT gate on request headers here: Electron does not forward the
 	// renderer's Origin/Referer headers to protocol.handle handlers (they
 	// arrive as null), so header-based origin checks reject every real
 	// request. Plain <img> loads are no-cors and would never send Origin
 	// even if headers were forwarded. See wcpos/electron#298 follow-up.
+	// initiatorOrigin is not a header: Electron sets it, the page cannot.
 	protocol.handle('wcpos-image', async (request) => {
+		// First, before parsing or the cache, so every refusal looks the same and
+		// a store page cannot probe the cache or make the app fetch. Not logged:
+		// a store page could flood the log.
+		if (requestingOrigin(request) !== appOrigin()) {
+			return emptyResponse(403);
+		}
 		try {
 			const parsed = new URL(request.url);
+			if (parsed.hostname !== 'cache') {
+				return emptyResponse(400);
+			}
 			const encodedUrl = parsed.pathname.replace(/^\//, '');
 			const originalUrl = Buffer.from(encodedUrl, 'base64url').toString('utf-8');
 
@@ -228,10 +285,10 @@ app.on('ready', () => {
 			try {
 				validatedUrl = new URL(originalUrl);
 			} catch {
-				return new Response(null, { status: 400 });
+				return emptyResponse(400);
 			}
 			if (validatedUrl.protocol !== 'http:' && validatedUrl.protocol !== 'https:') {
-				return new Response(null, { status: 400 });
+				return emptyResponse(400);
 			}
 
 			const cacheDir = getCacheDir();
@@ -261,11 +318,10 @@ app.on('ready', () => {
 
 				return new Response(body, {
 					status: 200,
-					headers: {
-						'Content-Type': meta.contentType,
+					headers: responseHeaders({
+						'Content-Type': servedContentType(meta.contentType),
 						'Cache-Control': 'max-age=31536000',
-						'Access-Control-Allow-Origin': '*',
-					},
+					}),
 				});
 			}
 
@@ -285,16 +341,15 @@ app.on('ready', () => {
 				) as ArrayBuffer,
 				{
 					status: 200,
-					headers: {
-						'Content-Type': contentType,
+					headers: responseHeaders({
+						'Content-Type': servedContentType(contentType),
 						'Cache-Control': 'max-age=31536000',
-						'Access-Control-Allow-Origin': '*',
-					},
+					}),
 				}
 			);
 		} catch (err: any) {
 			logger.error('Image cache error:', err.message);
-			return new Response(null, { status: 404 });
+			return emptyResponse(404);
 		}
 	});
 
