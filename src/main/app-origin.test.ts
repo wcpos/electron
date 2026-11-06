@@ -110,7 +110,7 @@ inMode(false, undefined, () => {
 	webContents.emit('will-navigate', offNavigate);
 	assert.equal(offNavigate.prevented, true, 'off-origin will-navigate is prevented');
 	assert.ok(
-		warnMessages.some((args) => args.includes('https://store.example/pay')),
+		warnMessages.some((args) => args[1] === 'https://store.example/pay'),
 		'the blocked URL is logged without its query string'
 	);
 	assert.ok(
