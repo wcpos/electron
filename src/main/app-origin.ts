@@ -21,14 +21,14 @@ export function appOrigin(): string {
  */
 export function isAppUrl(value: string | undefined): boolean {
 	if (!value) return false;
-	let url: URL;
 	try {
-		url = new URL(value);
+		const url = new URL(value);
+		if (!isDevelopment) return url.protocol === 'wcpos:' && url.hostname === '-';
+		// Inside the try: a malformed EXPO_PORT makes appOrigin() throw, which is false.
+		return url.origin === appOrigin();
 	} catch {
 		return false;
 	}
-	if (!isDevelopment) return url.protocol === 'wcpos:' && url.hostname === '-';
-	return url.origin === appOrigin();
 }
 
 /**
