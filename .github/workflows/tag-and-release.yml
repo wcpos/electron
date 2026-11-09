@@ -634,7 +634,7 @@ jobs:
           if [ "$LANE" = "next" ]; then
             echo "**Next-lane prerelease** — desktop build of WCPOS app \`$app_ref\` at wcpos/monorepo@$MONOREPO_SHA, for testing. Not served by auto-update: the app's update check only offers newer next-lane builds, and updates.wcpos.com serves releases only, so install newer next builds from this page. If you are on 1.10.19-next.668 or older, install this build from this page and do not accept the offered update to a stable 1.10.x release; those builds predate the next-lane update check. Local data does not carry across between stable and next-lane builds, in either direction. Installing a next-lane build over a stable release deletes the stable app's local data on first start, so changes stable has not synced yet are lost. Going back to a stable 1.10.x release starts empty, and changes the next-lane build has not synced stay behind; sync before switching either way." >> "$notes_file"
           else
-            echo "Desktop build of WCPOS app **$app_version**. Available for macOS (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
+            echo "Desktop build of WCPOS app **$app_version**. Available for macOS 13 or later (Intel + Apple Silicon), Windows, and Linux (\`.deb\` / \`.rpm\`)." >> "$notes_file"
           fi
 
           # Re-check right before writing: GitHub has no conditional release
