@@ -23,6 +23,15 @@ updates:
       # Their version is governed by the monorepo, not this repo — never auto-bump.
       - dependency-name: "rxdb"
       - dependency-name: "rxdb-premium"
+      # electron#345: usb 3.x removes libusb; usb-printer.ts needs a transport rewrite first.
+      - dependency-name: "usb"
+        versions: [">=3"]
+      # electron#356: typescript-eslint caps TS at <6.1; TS 7 has no programmatic API until 7.1.
+      - dependency-name: "typescript"
+        versions: [">=7"]
+      # electron#170/#205: eslint-plugin-react via @wcpos/eslint-config uses removed context.getFilename.
+      - dependency-name: "eslint"
+        versions: [">=10"]
     groups:
       dev-dependencies:
         dependency-type: "development"
