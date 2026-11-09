@@ -51,7 +51,21 @@ if (!isDevelopment) {
 		// is identical by construction to the release the main-process source maps
 		// are uploaded under (webpack.main.config.ts).
 		release: `WCPOS@${app.getVersion()}`,
-		sendDefaultPii: false,
+		// v8 collects more by default; retain the previous restrictive collection policy.
+		dataCollection: {
+			userInfo: false,
+			cookies: false,
+			httpHeaders: {
+				request: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+				response: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+			},
+			httpBodies: [],
+			urlQueryParams: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+			genAI: { inputs: false, outputs: false },
+			databaseQueryData: false,
+			queues: false,
+			graphQL: { document: false, variables: false },
+		},
 		beforeSend(event) {
 			return shouldDropEvent(event, { quitting, windowsAlive: countWindows() }) ? null : event;
 		},

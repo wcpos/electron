@@ -43,7 +43,11 @@ type TransportFactory = (options: object) => {
 	send: (envelope: unknown) => Promise<unknown>;
 	flush: (timeout?: number) => Promise<boolean>;
 };
-const initCalls: { enabled?: boolean; transport?: TransportFactory }[] = [];
+const initCalls: {
+	enabled?: boolean;
+	transport?: TransportFactory;
+	dataCollection?: object;
+}[] = [];
 const users: unknown[] = [];
 const sentEnvelopes: unknown[] = [];
 const sentryStub = {
@@ -249,6 +253,24 @@ try {
 		require('./log.ts') as typeof import('./log');
 	assert.equal(initCalls.length, 1, 'initialises at module load');
 	assert.notEqual(initCalls[0].enabled, false, 'the client is enabled so integrations install');
+	assert.deepEqual(
+		initCalls[0].dataCollection,
+		{
+			userInfo: false,
+			cookies: false,
+			httpHeaders: {
+				request: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+				response: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+			},
+			httpBodies: [],
+			urlQueryParams: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+			genAI: { inputs: false, outputs: false },
+			databaseQueryData: false,
+			queues: false,
+			graphQL: { document: false, variables: false },
+		},
+		'the v8 data collection policy does not opt into broader collection'
+	);
 	assert.ok(initCalls[0].transport, 'consent is enforced at the transport');
 	const transport = initCalls[0].transport({});
 	assert.equal(isSentryReporting(), false, 'reporting is off until consent');
