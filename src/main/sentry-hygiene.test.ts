@@ -43,7 +43,11 @@ type TransportFactory = (options: object) => {
 	send: (envelope: unknown) => Promise<unknown>;
 	flush: (timeout?: number) => Promise<boolean>;
 };
-const initCalls: { enabled?: boolean; transport?: TransportFactory; dataCollection?: object }[] = [];
+const initCalls: {
+	enabled?: boolean;
+	transport?: TransportFactory;
+	dataCollection?: object;
+}[] = [];
 const users: unknown[] = [];
 const sentEnvelopes: unknown[] = [];
 const sentryStub = {
