@@ -24,6 +24,7 @@
 	"update.downloading_update": "Downloading update...",
 	"update.found_updates": "Found Updates",
 	"update.install_updates": "Install Updates",
+	"update.needs_newer_macos": "WCPOS {version} needs macOS {required} or later. This Mac has macOS {current}, so this copy of WCPOS will stay on its current version.",
 	"update.no_updates": "No Updates",
 	"update.remind_me_later": "Remind me later",
 	"update.updates_downloaded_application_will_restart_for": "Updates downloaded, application will restart for update to take effect."

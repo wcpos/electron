@@ -9,6 +9,7 @@ import semver from 'semver';
 
 import { detectLinuxPackageFormat } from './linux-package-format';
 import { logger } from './log';
+import { macosTooOld } from './macos-floor';
 import { ProgressBar } from './progress-bar';
 import { t } from './translations';
 import { createDir, isDevelopment } from './util';
@@ -81,7 +82,14 @@ export class AutoUpdater implements UpdaterHandle {
 		if (!this.updateUrlPromise) {
 			this.updateUrlPromise = detectLinuxPackageFormat().then((format) => {
 				const url = `${updateServer}/electron/${process.platform}-${process.arch}/${app.getVersion()}`;
-				return format ? `${url}?format=${format}` : url;
+				const query = new URLSearchParams();
+				if (format) query.set('format', format);
+				// Lets the update server tell Macs apart by OS. getSystemVersion exists only in Electron.
+				if (process.platform === 'darwin' && typeof process.getSystemVersion === 'function') {
+					query.set('os', process.getSystemVersion());
+				}
+				const search = query.toString();
+				return search ? `${url}?${search}` : url;
 			});
 		}
 		return this.updateUrlPromise;
@@ -424,6 +432,34 @@ export class AutoUpdater implements UpdaterHandle {
 
 			if (!hasUpdate) {
 				return false;
+			}
+
+			// Squirrel.Mac would install an update this Mac cannot open, so it is never offered.
+			if (process.platform === 'darwin') {
+				const systemVersion =
+					typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : undefined;
+				const required = macosTooOld(version, systemVersion, data.minimumSystemVersion);
+				if (required) {
+					logger.info('Update skipped: it needs a newer macOS', {
+						version,
+						required,
+						systemVersion,
+					});
+					if (!manual) return false;
+					const options = {
+						type: 'info' as const,
+						title: t('update.no_updates'),
+						message: t('update.needs_newer_macos', { version, required, current: systemVersion }),
+					};
+					const parent = this.dialogParent();
+					if (parent) {
+						await dialog.showMessageBox(parent, options);
+					} else {
+						await dialog.showMessageBox(options);
+					}
+					// true, so manualCheckForUpdates does not also say the app is up to date.
+					return true;
+				}
 			}
 
 			const userChoice = await this.confirmUpdateDialog(version, name, releaseDate, notes);
