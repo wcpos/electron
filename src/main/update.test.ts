@@ -714,10 +714,24 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		await flush();
 		assert.equal(openDialogs.length, questionsBefore, 'still no Found Updates dialog');
 		await manualFloor;
+		await flush();
 		assert.equal(noUpdateDialogs.length, infoBefore + 1, 'exactly one box on a manual check');
 		const floorBox = noUpdateDialogs[infoBefore] as { message?: string; type?: string };
 		assert.equal(floorBox.message, 'update.needs_newer_macos');
 		assert.equal(floorBox.type, 'info');
+
+		// A manual check that joins an in-flight automatic one still says why.
+		const joinedBefore = noUpdateDialogs.length;
+		const auto = floorUpdater.checkForUpdates();
+		const joined = floorUpdater.manualCheckForUpdates({ enabled: true } as never);
+		const autoResult = await auto;
+		await joined;
+		await flush();
+		assert.equal(noUpdateDialogs.length, joinedBefore + 1, 'exactly one box on a joined check');
+		const joinedBox = noUpdateDialogs[joinedBefore] as { message?: string };
+		assert.equal(joinedBox.message, 'update.needs_newer_macos');
+		assert.equal(openDialogs.length, questionsBefore, 'no Found Updates dialog on a joined check');
+		assert.equal(autoResult, false);
 
 		// A Mac that meets the floor is offered the update as before.
 		systemProcess.getSystemVersion = () => '13.0';

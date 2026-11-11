@@ -66,6 +66,7 @@ export class AutoUpdater implements UpdaterHandle {
 	// used to queue one dialog per hour behind the first, each revealed as the previous one
 	// was dismissed. While this is set, further checks join it instead of starting another.
 	private inFlight: Promise<boolean | undefined> | null = null;
+	private macosBlock: { version: string; required: string; systemVersion?: string } | null = null;
 	// An install hand-off is pending on the singleton electron autoUpdater. See installUpdates.
 	private installing = false;
 
@@ -409,6 +410,7 @@ export class AutoUpdater implements UpdaterHandle {
 	}
 
 	private async runCheck(manual: boolean): Promise<boolean | undefined> {
+		this.macosBlock = null;
 		const remindLaterTimestamp = store.get('remindLaterTimestamp', 0);
 		const now = Date.now();
 
@@ -435,6 +437,8 @@ export class AutoUpdater implements UpdaterHandle {
 			}
 
 			// Squirrel.Mac would install an update this Mac cannot open, so it is never offered.
+			// The check stays silent and records why; manualCheckForUpdates explains it, so a
+			// manual check that joined an in-flight automatic one still gets the reason.
 			if (process.platform === 'darwin') {
 				const systemVersion =
 					typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : undefined;
@@ -445,20 +449,8 @@ export class AutoUpdater implements UpdaterHandle {
 						required,
 						systemVersion,
 					});
-					if (!manual) return false;
-					const options = {
-						type: 'info' as const,
-						title: t('update.no_updates'),
-						message: t('update.needs_newer_macos', { version, required, current: systemVersion }),
-					};
-					const parent = this.dialogParent();
-					if (parent) {
-						await dialog.showMessageBox(parent, options);
-					} else {
-						await dialog.showMessageBox(options);
-					}
-					// true, so manualCheckForUpdates does not also say the app is up to date.
-					return true;
+					this.macosBlock = { version, required, systemVersion };
+					return false;
 				}
 			}
 
@@ -488,10 +480,21 @@ export class AutoUpdater implements UpdaterHandle {
 		try {
 			const hasUpdate = await this.checkForUpdates(true);
 			if (hasUpdate === false) {
-				const options = {
-					title: t('update.no_updates'),
-					message: t('update.current_version_is_up-to-date'),
-				};
+				const block = this.macosBlock;
+				const options = block
+					? {
+							type: 'info' as const,
+							title: t('update.no_updates'),
+							message: t('update.needs_newer_macos', {
+								version: block.version,
+								required: block.required,
+								current: block.systemVersion,
+							}),
+						}
+					: {
+							title: t('update.no_updates'),
+							message: t('update.current_version_is_up-to-date'),
+						};
 				const parent = this.dialogParent();
 				if (parent) {
 					dialog.showMessageBox(parent, options);
