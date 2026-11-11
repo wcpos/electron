@@ -681,12 +681,84 @@ Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true
 		await waitFor(() => feeds() > beforeFeedFail);
 		assert.equal(feeds(), beforeFeedFail + 1, 'a throwing hand-off does not wedge the session');
 
+		// 2.0 needs macOS 13 and Squirrel.Mac would install it on an older Mac regardless, leaving
+		// an app that will not open. The manifest offers 9.9.9, which the floor table covers.
+		const fetched: string[] = [];
+		electronStub.net.fetch = async (url: string) => {
+			fetched.push(url);
+			return foundUpdatePayload(url);
+		};
+		const systemProcess = process as unknown as { getSystemVersion?: () => string };
+		systemProcess.getSystemVersion = () => '12.7.6';
+		const floorUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		const questionsBefore = openDialogs.length;
+		const infoBefore = noUpdateDialogs.length;
+		const remindBefore = backing.get('remindLaterTimestamp');
+		const installsBefore = installStarted.length;
+		// Asserted before awaiting: an unanswered question dialog would otherwise leave the
+		// await pending and the process would exit 0 without reaching the assertions.
+		const automatic = floorUpdater.checkForUpdates();
+		await flush();
+		assert.ok(
+			fetched[fetched.length - 1].endsWith(`/electron/darwin-${process.arch}/1.0.0?os=12.7.6`),
+			'the manifest request names the macOS version'
+		);
+		assert.equal(openDialogs.length, questionsBefore, 'no Found Updates dialog');
+		assert.equal(await automatic, false, 'a too-new update is not offered');
+		assert.equal(noUpdateDialogs.length, infoBefore, 'and no other box on an automatic check');
+		assert.equal(backing.get('remindLaterTimestamp'), remindBefore, 'Remind me later untouched');
+		assert.equal(installStarted.length, installsBefore, 'nothing installed');
+
+		// A manual check says why, once, and does not also claim the app is up to date.
+		const manualFloor = floorUpdater.manualCheckForUpdates({ enabled: true } as never);
+		await flush();
+		assert.equal(openDialogs.length, questionsBefore, 'still no Found Updates dialog');
+		await manualFloor;
+		await flush();
+		assert.equal(noUpdateDialogs.length, infoBefore + 1, 'exactly one box on a manual check');
+		const floorBox = noUpdateDialogs[infoBefore] as { message?: string; type?: string };
+		assert.equal(floorBox.message, 'update.needs_newer_macos');
+		assert.equal(floorBox.type, 'info');
+
+		// A manual check that joins an in-flight automatic one still says why.
+		const joinedBefore = noUpdateDialogs.length;
+		const auto = floorUpdater.checkForUpdates();
+		const joined = floorUpdater.manualCheckForUpdates({ enabled: true } as never);
+		const autoResult = await auto;
+		await joined;
+		await flush();
+		assert.equal(noUpdateDialogs.length, joinedBefore + 1, 'exactly one box on a joined check');
+		const joinedBox = noUpdateDialogs[joinedBefore] as { message?: string };
+		assert.equal(joinedBox.message, 'update.needs_newer_macos');
+		assert.equal(openDialogs.length, questionsBefore, 'no Found Updates dialog on a joined check');
+		assert.equal(autoResult, false);
+
+		// A Mac that meets the floor is offered the update as before.
+		systemProcess.getSystemVersion = () => '13.0';
+		const supported = floorUpdater.checkForUpdates();
+		await flush();
+		assert.equal(openDialogs.length, questionsBefore + 1, 'macOS 13 is offered the update');
+		openDialogs[openDialogs.length - 1].resolve({ response: 2 });
+		assert.equal(await supported, true);
+
+		// No readable macOS version fails open: no os parameter, and the update is offered.
+		delete systemProcess.getSystemVersion;
+		const unknownOsUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		const unknownOs = unknownOsUpdater.checkForUpdates();
+		await flush();
+		assert.ok(!fetched[fetched.length - 1].includes('?'), 'no query without a macOS version');
+		assert.equal(openDialogs.length, questionsBefore + 2, 'an unknown macOS is offered the update');
+		openDialogs[openDialogs.length - 1].resolve({ response: 2 });
+		await unknownOs;
+		electronStub.net.fetch = foundUpdatePayload;
+
 		console.log('update.test.ts passed');
 	} catch (error) {
 		console.error(error);
 		process.exit(1);
 	} finally {
 		mutableModule._load = originalLoad;
+		delete (process as unknown as { getSystemVersion?: () => string }).getSystemVersion;
 		Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
 		rmSync(tempRoot, { recursive: true, force: true });
 	}
