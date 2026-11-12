@@ -81,6 +81,8 @@ export type NovuBridgeEvent =
 	| { kind: 'unseen_count_changed'; count: number }
 	| { kind: 'session_ready' };
 
+export type ClearDataRequestResult = 'declined' | 'relaunching';
+
 /**
  * invoke = render→main→render (Promise); send = render→main (fire-and-forget);
  * on = main→render push (renderer subscribes).
@@ -108,6 +110,8 @@ export interface IpcInvokeChannels {
 	novu: { req: NovuBridgeRequest; res: NovuBridgeResponse };
 	'auth:prompt': { req: AuthPromptParams; res: AuthResult };
 	purgeLegacyDatabases: { req: undefined; res: { removed: string[] } };
+	// Supersedes the `clearData` send for renderers that need the answer; `clearData` stays for older renderers.
+	'clearData:request': { req: undefined; res: ClearDataRequestResult };
 	'storage:measure': {
 		req: undefined;
 		res: {
@@ -163,6 +167,7 @@ export const INVOKE_CHANNELS = [
 	'auth:prompt',
 	'storage:measure',
 	'purgeLegacyDatabases',
+	'clearData:request',
 ] as const satisfies readonly (keyof IpcInvokeChannels)[];
 
 export const SEND_CHANNELS = [
