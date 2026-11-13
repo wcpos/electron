@@ -66,3 +66,26 @@ jobs:
           pnpm lint
           pnpm exec tsc
           pnpm test
+
+  image-cache-windows:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: windows-2022 # matches the release workflow's Windows pin
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 🏗 Setup Electron
+        uses: ./.github/actions/setup-electron
+
+      # This suite needs no native rebuild and no rxdb-premium patch, so no licence secret.
+      - name: 📦 Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: 🧪 Image cache test
+        shell: bash
+        run: pnpm run test:image-cache

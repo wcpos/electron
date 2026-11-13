@@ -18,6 +18,7 @@ const errorMessages: unknown[][] = [];
 const fetchCounts = new Map<string, number>();
 const statusByUrl = new Map<string, number>();
 const contentTypeByUrl = new Map<string, string>();
+const fetchErrorByUrl = new Map<string, unknown>();
 const clearStorageDataCalls: unknown[] = [];
 let protocolHandleCalls = 0;
 // Required with the module mocks in place, in main().
@@ -72,6 +73,9 @@ const originalFetch = globalThis.fetch;
 globalThis.fetch = ((url: string | URL | Request) => {
 	requestedUrl = String(url);
 	fetchCounts.set(requestedUrl, (fetchCounts.get(requestedUrl) ?? 0) + 1);
+	if (fetchErrorByUrl.has(requestedUrl)) {
+		return Promise.reject(fetchErrorByUrl.get(requestedUrl));
+	}
 	const status = statusByUrl.get(requestedUrl) ?? 200;
 	if (status !== 200) {
 		return Promise.resolve(new Response(null, { status }));
@@ -134,6 +138,40 @@ function assertLockedHeaders(response: Response, kind: string) {
 		`${kind}: the response must not run as a document`
 	);
 	assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff', `${kind}: nosniff`);
+}
+
+/**
+ * Runs `run` with fs.promises.rename failing the next `times` calls (Infinity:
+ * every call) with a Node-style system error carrying `code`, optionally only
+ * renames onto a `.json` target. Returns the number of rename attempts.
+ */
+async function withRenameFailure(
+	code: string,
+	times: number,
+	onlyJson: boolean,
+	run: () => Promise<void>
+): Promise<number> {
+	const originalRename = fs.promises.rename;
+	let attempts = 0;
+	let failuresLeft = times;
+	fs.promises.rename = async function patchedRename(from, to) {
+		attempts += 1;
+		if (failuresLeft > 0 && (!onlyJson || String(to).endsWith('.json'))) {
+			failuresLeft -= 1;
+			// Like Node's own: the message names both paths.
+			throw Object.assign(
+				new Error(`${code}: simulated, rename '${String(from)}' -> '${String(to)}'`),
+				{ code, syscall: 'rename', path: String(from), dest: String(to) }
+			);
+		}
+		return originalRename.call(fs.promises, from, to);
+	} as typeof fs.promises.rename;
+	try {
+		await run();
+	} finally {
+		fs.promises.rename = originalRename;
+	}
+	return attempts;
 }
 
 type ModuleWithMutableLoad = typeof Module & {
@@ -303,25 +341,26 @@ async function main() {
 	const failedMetaBytes = Buffer.from('failed-meta-image-bytes');
 	nextImageBytes = failedMetaBytes;
 
-	const originalRenameSync = fs.renameSync;
-	fs.renameSync = function patchedRenameSync(oldPath, newPath) {
+	const originalRename = fs.promises.rename;
+	fs.promises.rename = async function patchedRename(oldPath, newPath) {
 		if (String(oldPath).includes(failedMetaHash) && String(newPath).endsWith('.json')) {
 			throw new Error('simulated failed metadata promotion');
 		}
 
-		return originalRenameSync.call(fs, oldPath, newPath);
-	} as typeof fs.renameSync;
+		return originalRename.call(fs.promises, oldPath, newPath);
+	} as typeof fs.promises.rename;
 
 	try {
 		const failedMetaEncoded = Buffer.from(failedMetaUrl, 'utf-8').toString('base64url');
 		const failedMetaResponse = await imageHandler!(requestFromRenderer(failedMetaEncoded));
 		assert.equal(
 			failedMetaResponse.status,
-			404,
-			'failed metadata promotion should fail the request'
+			200,
+			'failed metadata promotion should still serve the download'
 		);
+		assert.deepEqual(Buffer.from(await failedMetaResponse.arrayBuffer()), failedMetaBytes);
 	} finally {
-		fs.renameSync = originalRenameSync;
+		fs.promises.rename = originalRename;
 	}
 
 	assert.equal(
@@ -478,6 +517,11 @@ async function main() {
 	// initiator all get an empty 403, before any cache read or download.
 	const gatedUrl = 'https://demo.wcpos.com/wp-content/uploads/gated.jpg';
 	const gated = entryPaths(gatedUrl);
+	const gateWarns = () =>
+		warnMessages.filter((args) =>
+			String(args[0]).startsWith('Image request refused by origin gate')
+		);
+	assert.equal(gateWarns().length, 0, 'no refusal yet, so no gate warning yet');
 	const refusedOrigins: [string, string | undefined][] = [
 		['store origin', 'http://127.0.0.1:8080'],
 		['opaque origin', 'null'],
@@ -495,6 +539,18 @@ async function main() {
 			assertLockedHeaders(refused, `403 ${kind}`);
 		}
 	}
+	assert.deepEqual(
+		gateWarns(),
+		[
+			[
+				'Image request refused by origin gate (logged once per run):',
+				'http://<host redacted>',
+				'expected',
+				'wcpos://-',
+			],
+		],
+		'the first refusal of the run (the store origin) is logged once, host redacted'
+	);
 	assert.equal(fetchCounts.get(gatedUrl), undefined, 'a refused request must not download');
 	assert.equal(fs.existsSync(gated.image), false, 'a refused request must not cache an image');
 	assert.equal(fs.existsSync(gated.meta), false, 'a refused request must not cache meta');
@@ -535,6 +591,165 @@ async function main() {
 		const cached = await imageHandler!(requestFromRenderer(entryPaths(imageUrl).encoded));
 		assert.equal(cached.headers.get('Content-Type'), contentType, `cached ${contentType} too`);
 		assert.equal(fetchCounts.get(imageUrl), 1);
+	}
+
+	// A good download is served even when the cache write fails (Windows
+	// EPERM/EBUSY/EACCES on rename). Each case uses its own URL.
+	const uploadUrl = (name: string) => `https://demo.wcpos.com/wp-content/uploads/${name}.jpg`;
+	const tmpFiles = () => fs.readdirSync(cacheDir).filter((name) => name.endsWith('.tmp'));
+	const writeFailedWarns = (from: number) =>
+		warnMessages
+			.slice(from)
+			.filter((args) => String(args[0]).startsWith('Image cache write failed'));
+	const logsFrom = { warn: warnMessages.length, error: errorMessages.length };
+
+	// T1: transient EPERM is retried and the entry is cached.
+	const transient = entryPaths(uploadUrl('transient-eperm'));
+	const transientBytes = Buffer.from('transient-bytes');
+	nextImageBytes = transientBytes;
+	let transientResponse: Response | undefined;
+	const transientAttempts = await withRenameFailure('EPERM', 2, false, async () => {
+		transientResponse = await imageHandler!(requestFromRenderer(transient.encoded));
+	});
+	assert.equal(transientResponse!.status, 200, 'T1: a transient EPERM still serves');
+	assert.deepEqual(Buffer.from(await transientResponse!.arrayBuffer()), transientBytes);
+	assert.ok(fs.existsSync(transient.image), 'T1: the image is cached after the retry');
+	assert.ok(fs.existsSync(transient.meta), 'T1: the meta is cached after the retry');
+	assert.ok(transientAttempts >= 4, `T1: 2 failures + 2 successes, got ${transientAttempts}`);
+	assert.deepEqual(tmpFiles(), [], 'T1: no temp file left');
+
+	// T2: a rename that keeps failing gives up after 6 attempts and serves the download.
+	const busyUrl = uploadUrl('persistent-ebusy');
+	const busy = entryPaths(busyUrl);
+	const busyBytes = Buffer.from('busy-bytes');
+	contentTypeByUrl.set(busyUrl, 'image/png');
+	nextImageBytes = busyBytes;
+	let busyResponse: Response | undefined;
+	const busyWarnsFrom = warnMessages.length;
+	const busyAttempts = await withRenameFailure('EBUSY', Infinity, false, async () => {
+		busyResponse = await imageHandler!(requestFromRenderer(busy.encoded));
+	});
+	assert.equal(busyResponse!.status, 200, 'T2: a failed cache write still serves the download');
+	assert.deepEqual(Buffer.from(await busyResponse!.arrayBuffer()), busyBytes);
+	assert.equal(busyResponse!.headers.get('Content-Type'), 'image/png');
+	assertLockedHeaders(busyResponse!, 'T2 uncached download');
+	assert.equal(busyAttempts, 6, 'T2: the image rename is tried 6 times, then given up');
+	const busyWarns = writeFailedWarns(busyWarnsFrom);
+	assert.equal(busyWarns.length, 1, 'T2: one write-failed warning');
+	assert.ok(busyWarns[0]!.includes('EBUSY rename'), 'T2: the warning names the cause');
+	assert.equal(fs.existsSync(busy.image), false, 'T2: no image left');
+	assert.equal(fs.existsSync(busy.meta), false, 'T2: no meta left');
+	assert.deepEqual(tmpFiles(), [], 'T2: no temp file left');
+	const busyAgain = await imageHandler!(requestFromRenderer(busy.encoded));
+	assert.equal(busyAgain.status, 200);
+	assert.equal(fetchCounts.get(busyUrl), 2, 'T2: the failed write was a cache miss next time');
+	assert.ok(fs.existsSync(busy.image) && fs.existsSync(busy.meta), 'T2: cached on the retry');
+
+	// T3: a rename error outside the retry codes is not retried.
+	const crossDevice = entryPaths(uploadUrl('non-retryable-exdev'));
+	nextImageBytes = imageBytes;
+	let crossDeviceResponse: Response | undefined;
+	const crossDeviceAttempts = await withRenameFailure('EXDEV', Infinity, false, async () => {
+		crossDeviceResponse = await imageHandler!(requestFromRenderer(crossDevice.encoded));
+	});
+	assert.equal(crossDeviceResponse!.status, 200, 'T3: served');
+	assert.equal(crossDeviceAttempts, 1, 'T3: EXDEV is not retried');
+
+	// T4: only the meta rename fails: the promoted image is removed again.
+	const metaOnly = entryPaths(uploadUrl('meta-only-eacces'));
+	let metaOnlyResponse: Response | undefined;
+	await withRenameFailure('EACCES', Infinity, true, async () => {
+		metaOnlyResponse = await imageHandler!(requestFromRenderer(metaOnly.encoded));
+	});
+	assert.equal(metaOnlyResponse!.status, 200, 'T4: served');
+	assert.equal(fs.existsSync(metaOnly.image), false, 'T4: the promoted image was removed');
+	assert.equal(fs.existsSync(metaOnly.meta), false, 'T4: no meta left');
+	assert.deepEqual(tmpFiles(), [], 'T4: no temp file left');
+
+	// T5: the 404 marker cannot be written: still a 404, and the cause is logged.
+	const markerUrl = uploadUrl('marker-eperm');
+	const marker = entryPaths(markerUrl);
+	statusByUrl.set(markerUrl, 404);
+	const markerWarnsFrom = warnMessages.length;
+	let markerResponse: Response | undefined;
+	await withRenameFailure('EPERM', Infinity, false, async () => {
+		markerResponse = await imageHandler!(requestFromRenderer(marker.encoded));
+	});
+	assert.equal(markerResponse!.status, 404, 'T5: the origin 404 is still served');
+	assert.equal(writeFailedWarns(markerWarnsFrom).length, 1, 'T5: the failed write is logged');
+	assert.equal(fs.existsSync(marker.meta), false, 'T5: no marker left');
+
+	// T6: an HTTP 500 is logged with its stage and cause.
+	const serverErrorUrl = uploadUrl('download-500');
+	statusByUrl.set(serverErrorUrl, 500);
+	const serverErrorFrom = errorMessages.length;
+	const serverError = await imageHandler!(requestFromRenderer(entryPaths(serverErrorUrl).encoded));
+	assert.equal(serverError.status, 404, 'T6: a 500 is a 404 to the app');
+	const serverErrors = errorMessages
+		.slice(serverErrorFrom)
+		.filter((args) => String(args[0]).startsWith('Image cache error:'));
+	assert.equal(serverErrors.length, 1, 'T6: one error');
+	assert.ok(serverErrors[0]!.includes('download'), 'T6: the stage is named');
+	assert.ok(serverErrors[0]!.includes('Error: Image download failed: HTTP 500'), 'T6: the cause');
+
+	// T7: a network failure names the system error behind it, not its message.
+	const offlineUrl = uploadUrl('network-failure');
+	// As undici's: new TypeError('fetch failed', { cause }). The tsconfig's ES6 lib
+	// has no ErrorOptions, so the cause is attached by hand.
+	fetchErrorByUrl.set(
+		offlineUrl,
+		Object.assign(new TypeError('fetch failed'), {
+			cause: Object.assign(new Error('getaddrinfo ENOTFOUND demo.wcpos.com'), {
+				code: 'ENOTFOUND',
+				syscall: 'getaddrinfo',
+			}),
+		})
+	);
+	const offlineFrom = errorMessages.length;
+	const offline = await imageHandler!(requestFromRenderer(entryPaths(offlineUrl).encoded));
+	assert.equal(offline.status, 404, 'T7: a network failure is a 404 to the app');
+	const offlineErrors = errorMessages.slice(offlineFrom);
+	assert.equal(offlineErrors.length, 1, 'T7: one error');
+	assert.ok(
+		offlineErrors[0]!.includes('TypeError: fetch failed (cause: ENOTFOUND getaddrinfo)'),
+		'T7: the cause is named without the host'
+	);
+
+	// T8: refusals after the first one are not logged.
+	const gatedAgain = entryPaths(uploadUrl('gated-again'));
+	for (const initiatorOrigin of [
+		'https://store.example.com',
+		'https://store.example.com',
+		undefined,
+	]) {
+		const refused = await imageHandler!({
+			url: `wcpos-image://cache/${gatedAgain.encoded}`,
+			headers: new Headers(),
+			...(initiatorOrigin === undefined ? {} : { initiatorOrigin }),
+		});
+		assert.equal(refused.status, 403, 'T8: refused');
+	}
+	assert.equal(gateWarns().length, 1, 'T8: the gate logs only the first refusal of the run');
+
+	// T9: none of the new log lines carries a host, a path or a temp file name.
+	const newLogLines = [
+		...warnMessages.slice(logsFrom.warn),
+		...errorMessages.slice(logsFrom.error),
+		...gateWarns(),
+	].filter((args) =>
+		['Image cache write failed', 'Image cache error:', 'Image request refused'].some((prefix) =>
+			String(args[0]).startsWith(prefix)
+		)
+	);
+	assert.ok(newLogLines.length >= 5, 'T9: the cases above logged their failures');
+	for (const args of newLogLines) {
+		for (const arg of args) {
+			const text = String(arg);
+			for (const forbidden of ['demo.wcpos.com', 'store.example.com', userDataPath]) {
+				assert.ok(!text.includes(forbidden), `T9: log argument leaks ${forbidden}: ${text}`);
+			}
+			assert.ok(!/\.tmp\b/.test(text), `T9: log argument names a temp file: ${text}`);
+		}
 	}
 }
 
