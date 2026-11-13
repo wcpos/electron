@@ -1,6 +1,13 @@
 import { app, BrowserWindow, net, powerMonitor, session } from 'electron';
 
-import { type AppContext, boot, type BootDeps, claimLaunch, recreateMainWindow } from './main/boot';
+import {
+	type AppContext,
+	boot,
+	type BootDeps,
+	claimLaunch,
+	recreateMainWindow,
+	shouldRecreateOnActivate,
+} from './main/boot';
 import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
 import { installExtensions } from './main/extensions';
@@ -70,6 +77,7 @@ const bootDeps: BootDeps = {
 };
 
 let appContext: AppContext | null = null;
+let bootSettled = false;
 
 // Squirrel shortcut events on Windows install/uninstall, then the single-instance
 // lock: see claimLaunch for why a second process must never reach boot.
@@ -98,6 +106,9 @@ if (launched) {
 		.catch((err) => {
 			logger.error('Error starting app');
 			logger.error(err);
+		})
+		.finally(() => {
+			bootSettled = true;
 		});
 }
 
@@ -113,11 +124,17 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
 	// On OS X it's common to re-create a window in the app when the
 	// dock icon is clicked and there are no other windows open.
-	if (BrowserWindow.getAllWindows().length === 0) {
-		const context: Partial<AppContext> = appContext ?? {};
-		if (recreateMainWindow(bootDeps, context) && context.mainWindow && context.updater) {
-			appContext = context as AppContext;
+	const isReady = app.isReady();
+	const openWindowCount = BrowserWindow.getAllWindows().length;
+	if (!shouldRecreateOnActivate({ isReady, bootSettled, openWindowCount })) {
+		if (!isReady || !bootSettled) {
+			logger.info('activate before boot finished; boot will open the window');
 		}
+		return;
+	}
+	const context: Partial<AppContext> = appContext ?? {};
+	if (recreateMainWindow(bootDeps, context) && context.mainWindow && context.updater) {
+		appContext = context as AppContext;
 	}
 });
 

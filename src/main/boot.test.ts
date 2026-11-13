@@ -192,6 +192,22 @@ mutableModule._load = function patchedLoad(
 			['quit'],
 			'a Squirrel event process quits without contending for the lock'
 		);
+		// macOS activate gate (Sentry 2Z6): a dock click while launching must not create a window.
+		// eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded after the Module._load fakes
+		const { shouldRecreateOnActivate } = require('./boot') as {
+			shouldRecreateOnActivate: (state: {
+				isReady: boolean;
+				bootSettled: boolean;
+				openWindowCount: number;
+			}) => boolean;
+		};
+		const activate = (isReady: boolean, bootSettled: boolean, openWindowCount: number) =>
+			shouldRecreateOnActivate({ isReady, bootSettled, openWindowCount });
+		assert.equal(activate(false, false, 0), false, 'not ready, boot running: skip');
+		assert.equal(activate(true, false, 0), false, 'ready, boot running: boot opens the window');
+		assert.equal(activate(true, true, 0), true, 'ready, boot settled, no window: recreate');
+		assert.equal(activate(true, true, 1), false, 'a window is already open: skip');
+		assert.equal(activate(false, true, 0), false, 'not ready: never create a window');
 		console.log('boot tests passed');
 	} finally {
 		mutableModule._load = originalLoad;
