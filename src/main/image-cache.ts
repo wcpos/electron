@@ -88,13 +88,54 @@ function removeIfExists(filePath: string): void {
 	}
 }
 
-function writeCacheEntry(
+// Windows: antivirus, the search indexer or a parallel request renaming onto the
+// same target hold the file briefly. Retry those codes only; total wait ~770 ms.
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const RENAME_RETRY_DELAYS_MS = [20, 50, 100, 200, 400];
+
+async function renameWithRetry(from: string, to: string): Promise<void> {
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			// Looked up per call: the test patches fs.promises.rename.
+			await fs.promises.rename(from, to);
+			return;
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			const delay = RENAME_RETRY_DELAYS_MS[attempt];
+			if (delay === undefined || !code || !RENAME_RETRY_CODES.has(code)) {
+				throw err;
+			}
+			await new Promise((resolve) => setTimeout(resolve, delay));
+		}
+	}
+}
+
+const URL_PATTERN = /[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi;
+
+function describeOneError(err: unknown): string {
+	const { code, syscall } = (err ?? {}) as { code?: unknown; syscall?: unknown };
+	if (typeof code === 'string') {
+		// A Node system error's message carries both paths: never log it.
+		return `${code}${syscall ? ' ' + syscall : ''}`;
+	}
+	const text = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+	return text.replace(URL_PATTERN, '<url>');
+}
+
+/** The cause of a failure, for the log: no URLs, no filesystem paths. */
+function describeError(err: unknown): string {
+	const cause = (err as { cause?: unknown } | undefined)?.cause;
+	const base = describeOneError(err);
+	return cause === undefined ? base : `${base} (cause: ${describeOneError(cause)})`;
+}
+
+async function writeCacheEntry(
 	imagePath: string,
 	metaPath: string,
 	buffer: Buffer,
 	contentType: string,
 	url: string
-): void {
+): Promise<void> {
 	fs.mkdirSync(path.dirname(imagePath), { recursive: true });
 
 	const imageTempPath = getTempPath(imagePath);
@@ -107,9 +148,9 @@ function writeCacheEntry(
 			metaTempPath,
 			JSON.stringify({ url, contentType, cachedAt: Date.now() } satisfies CacheMeta)
 		);
-		fs.renameSync(imageTempPath, imagePath);
+		await renameWithRetry(imageTempPath, imagePath);
 		imagePromoted = true;
-		fs.renameSync(metaTempPath, metaPath);
+		await renameWithRetry(metaTempPath, metaPath);
 	} catch (err) {
 		removeIfExists(imageTempPath);
 		removeIfExists(metaTempPath);
@@ -124,7 +165,7 @@ function writeCacheEntry(
  * Record "no picture" for a URL. The meta file is promoted first so a reader
  * that races the removal of an older picture already sees the 404 marker.
  */
-function writeMissingEntry(imagePath: string, metaPath: string, url: string): void {
+async function writeMissingEntry(imagePath: string, metaPath: string, url: string): Promise<void> {
 	fs.mkdirSync(path.dirname(metaPath), { recursive: true });
 
 	const metaTempPath = getTempPath(metaPath);
@@ -133,7 +174,7 @@ function writeMissingEntry(imagePath: string, metaPath: string, url: string): vo
 			metaTempPath,
 			JSON.stringify({ url, status: NOT_FOUND_STATUS, cachedAt: Date.now() } satisfies CacheMeta)
 		);
-		fs.renameSync(metaTempPath, metaPath);
+		await renameWithRetry(metaTempPath, metaPath);
 	} catch (err) {
 		removeIfExists(metaTempPath);
 		throw err;
@@ -141,18 +182,18 @@ function writeMissingEntry(imagePath: string, metaPath: string, url: string): vo
 	removeIfExists(imagePath);
 }
 
-function writeDownloadResult(
+async function writeDownloadResult(
 	imagePath: string,
 	metaPath: string,
 	result: DownloadResult,
 	url: string
-): void {
+): Promise<void> {
 	if (result.kind === 'missing') {
-		writeMissingEntry(imagePath, metaPath, url);
+		await writeMissingEntry(imagePath, metaPath, url);
 		logger.debug('Image not found, cached as no picture:', url);
 		return;
 	}
-	writeCacheEntry(imagePath, metaPath, result.buffer, result.contentType, url);
+	await writeCacheEntry(imagePath, metaPath, result.buffer, result.contentType, url);
 }
 
 /**
@@ -186,6 +227,20 @@ function responseHeaders(extra: Record<string, string> = {}): Record<string, str
  */
 function servedContentType(contentType: string): string {
 	return contentType.toLowerCase().startsWith('image/') ? contentType : 'application/octet-stream';
+}
+
+let gateRefusalLogged = false;
+
+/** Store hosts are redacted; 'null', wcpos://, file:// and the like are not store hosts. */
+function describeOrigin(o: string | undefined): string {
+	if (o === undefined) return '(none)';
+	try {
+		const { protocol } = new URL(o);
+		if (protocol === 'http:' || protocol === 'https:') return `${protocol}//<host redacted>`;
+	} catch {
+		// 'null' does not parse; it is logged as it is.
+	}
+	return o.slice(0, 100);
 }
 
 function emptyResponse(status: number): Response {
@@ -240,11 +295,9 @@ async function downloadImage(url: string): Promise<DownloadResult> {
 
 function refreshInBackground(url: string, imagePath: string, metaPath: string): void {
 	downloadImage(url)
-		.then((result) => {
-			writeDownloadResult(imagePath, metaPath, result, url);
-		})
+		.then((result) => writeDownloadResult(imagePath, metaPath, result, url))
 		.catch((err) => {
-			logger.warn('Background image refresh failed:', url, err.message);
+			logger.warn('Background image refresh failed:', url, describeError(err));
 		});
 }
 
@@ -267,11 +320,23 @@ app.on('ready', () => {
 	// initiatorOrigin is not a header: Electron sets it, the page cannot.
 	protocol.handle('wcpos-image', async (request) => {
 		// First, before parsing or the cache, so every refusal looks the same and
-		// a store page cannot probe the cache or make the app fetch. Not logged:
-		// a store page could flood the log.
-		if (requestingOrigin(request) !== appOrigin()) {
+		// a store page cannot probe the cache or make the app fetch. Only the first
+		// refusal per run is logged: a store page could flood the log.
+		const origin = requestingOrigin(request);
+		if (origin !== appOrigin()) {
+			if (!gateRefusalLogged) {
+				gateRefusalLogged = true;
+				logger.warn(
+					'Image request refused by origin gate (logged once per run):',
+					describeOrigin(origin),
+					'expected',
+					appOrigin()
+				);
+			}
 			return emptyResponse(403);
 		}
+		// Declared outside the try so the catch can name the stage that failed.
+		let stage = 'request';
 		try {
 			const parsed = new URL(request.url);
 			if (parsed.hostname !== 'cache') {
@@ -299,6 +364,7 @@ app.on('ready', () => {
 			// Serve from cache if exists. Stale-while-revalidate applies to both
 			// entry kinds: serve what is cached, refresh in the background, so a
 			// person who adds a picture later gets it.
+			stage = 'cache-read';
 			const meta = readMeta(metaPath);
 			const isStale = meta !== undefined && Date.now() - meta.cachedAt > STALE_AGE_MS;
 
@@ -325,10 +391,16 @@ app.on('ready', () => {
 				});
 			}
 
-			// Download and cache
+			// Download and cache. A failed cache write is only a cache miss next
+			// time: serve the good download anyway.
+			stage = 'download';
 			const result = await downloadImage(originalUrl);
 
-			writeDownloadResult(imagePath, metaPath, result, originalUrl);
+			try {
+				await writeDownloadResult(imagePath, metaPath, result, originalUrl);
+			} catch (err) {
+				logger.warn('Image cache write failed, serving the download uncached:', describeError(err));
+			}
 			if (result.kind === 'missing') {
 				return notFoundResponse();
 			}
@@ -347,8 +419,8 @@ app.on('ready', () => {
 					}),
 				}
 			);
-		} catch (err: any) {
-			logger.error('Image cache error:', err.message);
+		} catch (err) {
+			logger.error('Image cache error:', stage, describeError(err));
 			return emptyResponse(404);
 		}
 	});
