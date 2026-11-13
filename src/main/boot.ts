@@ -119,6 +119,25 @@ export function recreateMainWindow(deps: BootDeps, ctx: Partial<AppContext>): Br
 	return mainWindow;
 }
 
+export interface ActivateState {
+	/** app.isReady() at the moment `activate` fires. */
+	isReady: boolean;
+	/** boot() has resolved or rejected. */
+	bootSettled: boolean;
+	/** BrowserWindow.getAllWindows().length */
+	openWindowCount: number;
+}
+
+/**
+ * Whether macOS `activate` should re-create the main window. A dock click (or a
+ * second `open`) while WCPOS is still launching fires `activate` before boot has
+ * opened its window; creating one then throws before `ready` (Sentry 2Z6) or makes
+ * a second window after it. Boot opens the window itself, so those clicks are skipped.
+ */
+export function shouldRecreateOnActivate(state: ActivateState): boolean {
+	return state.isReady && state.bootSettled && state.openWindowCount === 0;
+}
+
 /** The canonical, ordered boot plan. Pure data — safe to import and inspect in a test. */
 export function bootPlan(deps: BootDeps): BootPhase[] {
 	return [
