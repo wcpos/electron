@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-11-14
+
+### Changed
+- The renderer is built from wcpos/monorepo `489d5e0b9` instead of the `v2.0.0` tag, so the desktop app gets the WCPOS app fixes made since 9 November 2026, among them the SYNC222 conflict message no longer naming fields nobody overwrote (wcpos/monorepo#3571) and the Sentry scrubber keeping log text that parses as a URL (wcpos/monorepo#3572)
+
 ## [1.9.5] - 2026-06-13
 
 ### Added
