@@ -3,7 +3,12 @@ import { app, BrowserWindow, dialog } from 'electron';
 import logger from 'electron-log/main';
 
 import { getInstallId } from './install-id';
-import { scrubBreadcrumbUrl, shouldDropEvent } from './sentry-filters';
+import {
+	maskPersonalDataInBreadcrumb,
+	maskPersonalDataInEvent,
+	scrubBreadcrumbUrl,
+	shouldDropEvent,
+} from './sentry-filters';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 
@@ -67,11 +72,13 @@ if (!isDevelopment) {
 			graphQL: { document: false, variables: false },
 		},
 		beforeSend(event) {
-			return shouldDropEvent(event, { quitting, windowsAlive: countWindows() }) ? null : event;
+			return shouldDropEvent(event, { quitting, windowsAlive: countWindows() })
+				? null
+				: maskPersonalDataInEvent(event);
 		},
 		// electron.net breadcrumbs carry the full request URL, i.e. the merchant's
 		// store hostname. Keep the path, drop the origin.
-		beforeBreadcrumb: scrubBreadcrumbUrl,
+		beforeBreadcrumb: (breadcrumb) => maskPersonalDataInBreadcrumb(scrubBreadcrumbUrl(breadcrumb)),
 	});
 }
 
