@@ -293,9 +293,41 @@ async function downloadImage(url: string): Promise<DownloadResult> {
 	return promise;
 }
 
+/**
+ * Cache writes: one per download, one at a time per entry. Requests that share
+ * a download share its write; a write for a later download of the same URL
+ * waits for the earlier one to settle. Separate writes would interleave at the
+ * awaited renames, and a failed meta promotion's cleanup would remove the image
+ * another write had just promoted.
+ */
+const writesByResult = new WeakMap<DownloadResult, Promise<void>>();
+const writesByEntry = new Map<string, Promise<void>>();
+
+function writeDownloadResultOnce(
+	imagePath: string,
+	metaPath: string,
+	result: DownloadResult,
+	url: string
+): Promise<void> {
+	const shared = writesByResult.get(result);
+	if (shared) return shared;
+	const previous = writesByEntry.get(metaPath) ?? Promise.resolve();
+	const write = previous
+		.catch((): void => undefined)
+		.then(() => writeDownloadResult(imagePath, metaPath, result, url));
+	writesByResult.set(result, write);
+	writesByEntry.set(metaPath, write);
+	void write
+		.catch((): void => undefined)
+		.then(() => {
+			if (writesByEntry.get(metaPath) === write) writesByEntry.delete(metaPath);
+		});
+	return write;
+}
+
 function refreshInBackground(url: string, imagePath: string, metaPath: string): void {
 	downloadImage(url)
-		.then((result) => writeDownloadResult(imagePath, metaPath, result, url))
+		.then((result) => writeDownloadResultOnce(imagePath, metaPath, result, url))
 		.catch((err) => {
 			logger.warn('Background image refresh failed:', url, describeError(err));
 		});
@@ -397,7 +429,7 @@ app.on('ready', () => {
 			const result = await downloadImage(originalUrl);
 
 			try {
-				await writeDownloadResult(imagePath, metaPath, result, originalUrl);
+				await writeDownloadResultOnce(imagePath, metaPath, result, originalUrl);
 			} catch (err) {
 				logger.warn('Image cache write failed, serving the download uncached:', describeError(err));
 			}

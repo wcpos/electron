@@ -666,6 +666,77 @@ async function main() {
 	assert.equal(fs.existsSync(metaOnly.meta), false, 'T4: no meta left');
 	assert.deepEqual(tmpFiles(), [], 'T4: no temp file left');
 
+	// T10: concurrent misses for one URL share one download and one write.
+	const sharedUrl = uploadUrl('concurrent-shared-write');
+	const shared = entryPaths(sharedUrl);
+	nextImageBytes = Buffer.from('shared-bytes');
+	let sharedResponses: Response[] = [];
+	const sharedRenames = await withRenameFailure('EPERM', 0, false, async () => {
+		const requests = [
+			imageHandler!(requestFromRenderer(shared.encoded)),
+			imageHandler!(requestFromRenderer(shared.encoded)),
+			imageHandler!(requestFromRenderer(shared.encoded)),
+		];
+		sharedResponses = await Promise.all(requests);
+	});
+	assert.equal(sharedResponses.length, 3, 'T10: three responses');
+	for (const response of sharedResponses) {
+		assert.equal(response.status, 200, 'T10: served');
+		assert.equal(Buffer.from(await response.arrayBuffer()).toString(), 'shared-bytes', 'T10: body');
+	}
+	assert.equal(fetchCounts.get(sharedUrl), 1, 'T10: one download for three requests');
+	assert.equal(sharedRenames, 2, 'T10: one image rename and one meta rename for three requests');
+	assert.ok(fs.existsSync(shared.image), 'T10: the image is cached');
+	assert.ok(fs.existsSync(shared.meta), 'T10: the meta is cached');
+	assert.deepEqual(tmpFiles(), [], 'T10: no temp file left');
+
+	// T11: a later download's write waits until the earlier write has settled.
+	const raceUrl = uploadUrl('serialized-writes');
+	const race = entryPaths(raceUrl);
+	nextImageBytes = imageBytes;
+	let releaseHeldMeta!: () => void;
+	const release = new Promise<void>((resolve) => {
+		releaseHeldMeta = resolve;
+	});
+	let metaHeld = false;
+	let heldFrom: string | undefined;
+	const originalRaceRename = fs.promises.rename;
+	fs.promises.rename = async function heldMetaRename(from, to) {
+		if (heldFrom === undefined && String(to).endsWith('.json')) {
+			heldFrom = String(from);
+			metaHeld = true;
+		}
+		if (String(from) === heldFrom) {
+			await release;
+			throw Object.assign(new Error('EXDEV: simulated, rename held meta'), {
+				code: 'EXDEV',
+				syscall: 'rename',
+			});
+		}
+		return originalRaceRename.call(fs.promises, from, to);
+	} as typeof fs.promises.rename;
+	try {
+		const first = imageHandler!(requestFromRenderer(race.encoded));
+		await waitFor(() => metaHeld, 'T11: writer A reached its meta rename');
+		const second = imageHandler!(requestFromRenderer(race.encoded));
+		await waitFor(() => fetchCounts.get(raceUrl) === 2, 'T11: second download started');
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		releaseHeldMeta();
+		const [firstResponse, secondResponse] = await Promise.all([first, second]);
+		assert.equal(firstResponse.status, 200, 'T11: the first request is served');
+		assert.equal(secondResponse.status, 200, 'T11: the second request is served');
+	} finally {
+		fs.promises.rename = originalRaceRename;
+	}
+	assert.ok(
+		fs.existsSync(race.image) && fs.existsSync(race.meta),
+		"T11: the later write's image survives the earlier write's cleanup"
+	);
+	assert.deepEqual(tmpFiles(), [], 'T11: no temp file left');
+	const raceCached = await imageHandler!(requestFromRenderer(race.encoded));
+	assert.equal(raceCached.status, 200, 'T11: the third request is served');
+	assert.equal(fetchCounts.get(raceUrl), 2, 'T11: served from cache');
+
 	// T5: the 404 marker cannot be written: still a 404, and the cause is logged.
 	const markerUrl = uploadUrl('marker-eperm');
 	const marker = entryPaths(markerUrl);
