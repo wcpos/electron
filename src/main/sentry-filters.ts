@@ -2,9 +2,15 @@
  * Pure `beforeSend` filters for the main-process Sentry client (src/main/log.ts).
  * No Electron imports, so src/main/sentry-hygiene.test.ts runs under plain ts-node.
  */
+import { scrubPii, scrubPiiValues } from './pii-redact';
+
 export interface SentryEventLike {
 	exception?: { values?: { type?: string; value?: string }[] };
 	message?: string;
+	extra?: Record<string, unknown>;
+	contexts?: Record<string, unknown>;
+	breadcrumbs?: { message?: string; data?: Record<string, unknown> }[];
+	request?: { url?: string };
 }
 
 export interface ShutdownState {
@@ -35,7 +41,47 @@ export function shouldDropEvent(event: SentryEventLike, state: ShutdownState): b
 }
 
 export interface BreadcrumbLike {
+	message?: string;
 	data?: Record<string, unknown>;
+}
+
+/**
+ * Renderer log lines arrive as console breadcrumbs. Mask their PII on events;
+ * never throw: drop an event if it cannot be scrubbed.
+ */
+export function maskPersonalDataInEvent<T extends SentryEventLike>(event: T): T | null {
+	try {
+		if (event.message != null) event.message = scrubPii(String(event.message));
+		for (const value of event.exception?.values ?? []) {
+			if (value.type != null) value.type = scrubPii(String(value.type));
+			if (value.value != null) value.value = scrubPii(String(value.value));
+		}
+		if (event.request?.url != null) event.request.url = scrubPii(String(event.request.url));
+		event.extra = scrubPiiValues(event.extra) as Record<string, unknown>;
+		event.contexts = scrubPiiValues(event.contexts) as Record<string, unknown>;
+		if (event.breadcrumbs) {
+			event.breadcrumbs = event.breadcrumbs
+				.map((breadcrumb) => maskPersonalDataInBreadcrumb(breadcrumb))
+				.filter((breadcrumb) => breadcrumb !== null);
+		}
+		return event;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Renderer log lines arrive as console breadcrumbs. Mask their PII here;
+ * never throw: drop a breadcrumb if it cannot be scrubbed.
+ */
+export function maskPersonalDataInBreadcrumb<T extends BreadcrumbLike>(breadcrumb: T): T | null {
+	try {
+		if (breadcrumb.message != null) breadcrumb.message = scrubPii(String(breadcrumb.message));
+		breadcrumb.data = scrubPiiValues(breadcrumb.data) as Record<string, unknown>;
+		return breadcrumb;
+	} catch {
+		return null;
+	}
 }
 
 /**
