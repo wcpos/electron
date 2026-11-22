@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 
 import { redactPersonalData, scrubPii, scrubPiiValues } from './pii-redact';
-import { maskPersonalDataInBreadcrumb, maskPersonalDataInEvent } from './sentry-filters';
+import {
+	maskPersonalDataInBreadcrumb,
+	maskPersonalDataInEvent,
+	type SentryEventLike,
+} from './sentry-filters';
 
 const MASKS: [string, string][] = [
 	['jane.doe+pos@example.co.uk', '[EMAIL]'],
@@ -85,6 +89,43 @@ assert.deepEqual(
 	maskPersonalDataInBreadcrumb({ message: '+34 612 345 678', data: { phone: '0612345678' } }),
 	{ message: '[PHONE]', data: { phone: '[PHONE]' } },
 	'masks breadcrumb message +34 612 345 678 and phone 0612345678'
+);
+
+const sdkContexts = () => ({
+	os: { name: 'Windows', version: '10.0.26100' },
+	chrome: { version: '142.0.7444.59' },
+	app: { telemetry: 'on' },
+});
+assert.deepEqual(
+	maskPersonalDataInEvent({ contexts: sdkContexts() })?.contexts,
+	sdkContexts(),
+	'keeps os 10.0.26100, chrome 142.0.7444.59 and app telemetry contexts'
+);
+const customer = { email: 'jane@example.com', phone: '+61 412 345 678' };
+const mixed = maskPersonalDataInEvent({
+	contexts: { ...sdkContexts(), customer: { ...customer } },
+});
+const maskedCustomer = mixed?.contexts?.customer as Record<string, unknown> | undefined;
+assert.ok(maskedCustomer, 'keeps the customer context');
+assert.equal(
+	String(maskedCustomer.email).includes(customer.email),
+	false,
+	'masks customer email in contexts'
+);
+assert.equal(
+	String(maskedCustomer.phone).includes(customer.phone),
+	false,
+	'masks customer phone in contexts'
+);
+assert.equal(
+	(mixed?.contexts?.os as { version?: string } | undefined)?.version,
+	'10.0.26100',
+	'keeps os version 10.0.26100 next to a masked customer context'
+);
+assert.equal(
+	maskPersonalDataInEvent<SentryEventLike>({ message: 'x' })?.contexts,
+	undefined,
+	'leaves missing contexts undefined'
 );
 
 const throwing = {

@@ -40,6 +40,18 @@ export function shouldDropEvent(event: SentryEventLike, state: ShutdownState): b
 	return isAbortedShellLoad(event) && (state.quitting || state.windowsAlive === 0);
 }
 
+// Filled by the Sentry SDK itself; they carry versions, not personal data.
+const SDK_CONTEXT_KEYS: ReadonlySet<string> = new Set([
+	'os',
+	'chrome',
+	'runtime',
+	'node',
+	'app',
+	'device',
+	'culture',
+	'trace',
+]);
+
 export interface BreadcrumbLike {
 	message?: string;
 	data?: Record<string, unknown>;
@@ -58,7 +70,13 @@ export function maskPersonalDataInEvent<T extends SentryEventLike>(event: T): T 
 		}
 		if (event.request?.url != null) event.request.url = scrubPii(String(event.request.url));
 		event.extra = scrubPiiValues(event.extra) as Record<string, unknown>;
-		event.contexts = scrubPiiValues(event.contexts) as Record<string, unknown>;
+		if (event.contexts != null) {
+			const contexts: Record<string, unknown> = {};
+			for (const [key, value] of Object.entries(event.contexts)) {
+				contexts[key] = SDK_CONTEXT_KEYS.has(key) ? value : scrubPiiValues(value);
+			}
+			event.contexts = contexts;
+		}
 		if (event.breadcrumbs) {
 			event.breadcrumbs = event.breadcrumbs
 				.map((breadcrumb) => maskPersonalDataInBreadcrumb(breadcrumb))
