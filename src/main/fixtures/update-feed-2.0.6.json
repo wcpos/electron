@@ -1,0 +1,124 @@
+{
+	"electron/darwin-arm64/2.0.5": {
+		"status": 200,
+		"data": {
+			"version": "2.0.6",
+			"name": "v2.0.6",
+			"assets": [
+				{
+					"name": "WCPOS-darwin-arm64-2.0.6.zip",
+					"contentType": "application/zip",
+					"size": 133978796,
+					"url": "https://github.com/wcpos/electron/releases/download/v2.0.6/WCPOS-darwin-arm64-2.0.6.zip"
+				}
+			],
+			"releaseDate": "2026-11-22T02:10:24Z",
+			"notes": "WCPOS 2.0.2 fixes the cart line's Edit and Remove strip on a mouse, where an open strip could not be closed and a double click could remove the line, and stops a payment recorded in a hidden tab from reporting that the store has not answered.\n\nUpgrade and compatibility\n- Works with every 2.0.x plugin. No plugin update is needed.\n\nFixed\n- With a mouse, an open Edit and Remove strip on a cart line can be closed: it has a Close button where the line total was, and Escape, a click elsewhere, scrolling the cart or opening another line also close it. Only one line is open at a time, and a double click on a line total no longer removes the line. With the keyboard, Enter on the total opens the strip on Edit and Tab moves through Edit, Remove and Close. Touch is unchanged: a short swipe opens the strip and a long swipe left removes the line (#3723).\n- A payment recorded while the browser tab or window was hidden waits until the app is awake and is then sent, instead of ending with \"store has not answered\" although nothing had been sent (#3719).\n\nDeveloper and contract changes\n- The native WebView applies `targetOrigin` to incoming messages, admitting the store's own www and https landing; this reaches phones and tablets with the next mobile update (#3693).\n\nMaintenance\n- CI, tests and release tooling (#3720, #3721, #3722).\n\nFull diff: https://github.com/wcpos/monorepo/compare/v2.0.1...v2.0.2\n\n\nDesktop build of WCPOS app **2.0.2**. Available for macOS 13 or later (Intel + Apple Silicon), Windows, and Linux (`.deb` / `.rpm`).\n",
+			"hasUpdate": true,
+			"currentVersion": "2.0.5"
+		}
+	},
+	"electron/darwin-x64/2.0.5": {
+		"status": 200,
+		"data": {
+			"version": "2.0.6",
+			"name": "v2.0.6",
+			"assets": [
+				{
+					"name": "WCPOS-darwin-x64-2.0.6.zip",
+					"contentType": "application/zip",
+					"size": 141105808,
+					"url": "https://github.com/wcpos/electron/releases/download/v2.0.6/WCPOS-darwin-x64-2.0.6.zip"
+				}
+			],
+			"releaseDate": "2026-11-22T02:10:24Z",
+			"notes": "WCPOS 2.0.2 fixes the cart line's Edit and Remove strip on a mouse, where an open strip could not be closed and a double click could remove the line, and stops a payment recorded in a hidden tab from reporting that the store has not answered.\n\nUpgrade and compatibility\n- Works with every 2.0.x plugin. No plugin update is needed.\n\nFixed\n- With a mouse, an open Edit and Remove strip on a cart line can be closed: it has a Close button where the line total was, and Escape, a click elsewhere, scrolling the cart or opening another line also close it. Only one line is open at a time, and a double click on a line total no longer removes the line. With the keyboard, Enter on the total opens the strip on Edit and Tab moves through Edit, Remove and Close. Touch is unchanged: a short swipe opens the strip and a long swipe left removes the line (#3723).\n- A payment recorded while the browser tab or window was hidden waits until the app is awake and is then sent, instead of ending with \"store has not answered\" although nothing had been sent (#3719).\n\nDeveloper and contract changes\n- The native WebView applies `targetOrigin` to incoming messages, admitting the store's own www and https landing; this reaches phones and tablets with the next mobile update (#3693).\n\nMaintenance\n- CI, tests and release tooling (#3720, #3721, #3722).\n\nFull diff: https://github.com/wcpos/monorepo/compare/v2.0.1...v2.0.2\n\n\nDesktop build of WCPOS app **2.0.2**. Available for macOS 13 or later (Intel + Apple Silicon), Windows, and Linux (`.deb` / `.rpm`).\n",
+			"hasUpdate": true,
+			"currentVersion": "2.0.5"
+		}
+	},
+	"electron/win32-x64/2.0.5": {
+		"status": 200,
+		"data": {
+			"version": "2.0.6",
+			"name": "v2.0.6",
+			"assets": [
+				{
+					"name": "RELEASES",
+					"contentType": "application/octet-stream",
+					"size": 85,
+					"url": "https://github.com/wcpos/electron/releases/download/v2.0.6/RELEASES"
+				},
+				{
+					"name": "WCPOS-2.0.6-Setup.exe",
+					"contentType": "application/x-msdos-program",
+					"size": 171073024,
+					"url": "https://github.com/wcpos/electron/releases/download/v2.0.6/WCPOS-2.0.6-Setup.exe"
+				},
+				{
+					"name": "WooCommercePOS-2.0.6-full.nupkg",
+					"contentType": "application/octet-stream",
+					"size": 168336839,
+					"url": "https://github.com/wcpos/electron/releases/download/v2.0.6/WooCommercePOS-2.0.6-full.nupkg"
+				}
+			],
+			"releaseDate": "2026-11-22T02:10:24Z",
+			"notes": "WCPOS 2.0.2 fixes the cart line's Edit and Remove strip on a mouse, where an open strip could not be closed and a double click could remove the line, and stops a payment recorded in a hidden tab from reporting that the store has not answered.\n\nUpgrade and compatibility\n- Works with every 2.0.x plugin. No plugin update is needed.\n\nFixed\n- With a mouse, an open Edit and Remove strip on a cart line can be closed: it has a Close button where the line total was, and Escape, a click elsewhere, scrolling the cart or opening another line also close it. Only one line is open at a time, and a double click on a line total no longer removes the line. With the keyboard, Enter on the total opens the strip on Edit and Tab moves through Edit, Remove and Close. Touch is unchanged: a short swipe opens the strip and a long swipe left removes the line (#3723).\n- A payment recorded while the browser tab or window was hidden waits until the app is awake and is then sent, instead of ending with \"store has not answered\" although nothing had been sent (#3719).\n\nDeveloper and contract changes\n- The native WebView applies `targetOrigin` to incoming messages, admitting the store's own www and https landing; this reaches phones and tablets with the next mobile update (#3693).\n\nMaintenance\n- CI, tests and release tooling (#3720, #3721, #3722).\n\nFull diff: https://github.com/wcpos/monorepo/compare/v2.0.1...v2.0.2\n\n\nDesktop build of WCPOS app **2.0.2**. Available for macOS 13 or later (Intel + Apple Silicon), Windows, and Linux (`.deb` / `.rpm`).\n",
+			"hasUpdate": true,
+			"currentVersion": "2.0.5"
+		}
+	},
+	"electron/linux-x64/2.0.5?format=deb": {
+		"status": 200,
+		"data": {
+			"version": "2.0.6",
+			"name": "v2.0.6",
+			"assets": [
+				{
+					"name": "woocommerce-pos_2.0.6_amd64.deb",
+					"contentType": "application/x-debian-package",
+					"size": 106040706,
+					"url": "https://github.com/wcpos/electron/releases/download/v2.0.6/woocommerce-pos_2.0.6_amd64.deb"
+				}
+			],
+			"releaseDate": "2026-11-22T02:10:24Z",
+			"notes": "WCPOS 2.0.2 fixes the cart line's Edit and Remove strip on a mouse, where an open strip could not be closed and a double click could remove the line, and stops a payment recorded in a hidden tab from reporting that the store has not answered.\n\nUpgrade and compatibility\n- Works with every 2.0.x plugin. No plugin update is needed.\n\nFixed\n- With a mouse, an open Edit and Remove strip on a cart line can be closed: it has a Close button where the line total was, and Escape, a click elsewhere, scrolling the cart or opening another line also close it. Only one line is open at a time, and a double click on a line total no longer removes the line. With the keyboard, Enter on the total opens the strip on Edit and Tab moves through Edit, Remove and Close. Touch is unchanged: a short swipe opens the strip and a long swipe left removes the line (#3723).\n- A payment recorded while the browser tab or window was hidden waits until the app is awake and is then sent, instead of ending with \"store has not answered\" although nothing had been sent (#3719).\n\nDeveloper and contract changes\n- The native WebView applies `targetOrigin` to incoming messages, admitting the store's own www and https landing; this reaches phones and tablets with the next mobile update (#3693).\n\nMaintenance\n- CI, tests and release tooling (#3720, #3721, #3722).\n\nFull diff: https://github.com/wcpos/monorepo/compare/v2.0.1...v2.0.2\n\n\nDesktop build of WCPOS app **2.0.2**. Available for macOS 13 or later (Intel + Apple Silicon), Windows, and Linux (`.deb` / `.rpm`).\n",
+			"releaseUrl": "https://github.com/wcpos/electron/releases/tag/v2.0.6",
+			"hasUpdate": true,
+			"currentVersion": "2.0.5"
+		}
+	},
+	"electron/linux-x64/2.0.5?format=rpm": {
+		"status": 200,
+		"data": {
+			"version": "2.0.6",
+			"name": "v2.0.6",
+			"assets": [
+				{
+					"name": "woocommerce-pos-2.0.6-1.x86_64.rpm",
+					"contentType": "application/x-redhat-package-manager",
+					"size": 110804149,
+					"url": "https://github.com/wcpos/electron/releases/download/v2.0.6/woocommerce-pos-2.0.6-1.x86_64.rpm"
+				}
+			],
+			"releaseDate": "2026-11-22T02:10:24Z",
+			"notes": "WCPOS 2.0.2 fixes the cart line's Edit and Remove strip on a mouse, where an open strip could not be closed and a double click could remove the line, and stops a payment recorded in a hidden tab from reporting that the store has not answered.\n\nUpgrade and compatibility\n- Works with every 2.0.x plugin. No plugin update is needed.\n\nFixed\n- With a mouse, an open Edit and Remove strip on a cart line can be closed: it has a Close button where the line total was, and Escape, a click elsewhere, scrolling the cart or opening another line also close it. Only one line is open at a time, and a double click on a line total no longer removes the line. With the keyboard, Enter on the total opens the strip on Edit and Tab moves through Edit, Remove and Close. Touch is unchanged: a short swipe opens the strip and a long swipe left removes the line (#3723).\n- A payment recorded while the browser tab or window was hidden waits until the app is awake and is then sent, instead of ending with \"store has not answered\" although nothing had been sent (#3719).\n\nDeveloper and contract changes\n- The native WebView applies `targetOrigin` to incoming messages, admitting the store's own www and https landing; this reaches phones and tablets with the next mobile update (#3693).\n\nMaintenance\n- CI, tests and release tooling (#3720, #3721, #3722).\n\nFull diff: https://github.com/wcpos/monorepo/compare/v2.0.1...v2.0.2\n\n\nDesktop build of WCPOS app **2.0.2**. Available for macOS 13 or later (Intel + Apple Silicon), Windows, and Linux (`.deb` / `.rpm`).\n",
+			"releaseUrl": "https://github.com/wcpos/electron/releases/tag/v2.0.6",
+			"hasUpdate": true,
+			"currentVersion": "2.0.5"
+		}
+	},
+	"electron/linux-x64/2.0.5": {
+		"status": 200,
+		"data": {
+			"version": "2.0.6",
+			"name": "v2.0.6",
+			"assets": [],
+			"releaseDate": "2026-11-22T02:10:24Z",
+			"notes": "WCPOS 2.0.2 fixes the cart line's Edit and Remove strip on a mouse, where an open strip could not be closed and a double click could remove the line, and stops a payment recorded in a hidden tab from reporting that the store has not answered.\n\nUpgrade and compatibility\n- Works with every 2.0.x plugin. No plugin update is needed.\n\nFixed\n- With a mouse, an open Edit and Remove strip on a cart line can be closed: it has a Close button where the line total was, and Escape, a click elsewhere, scrolling the cart or opening another line also close it. Only one line is open at a time, and a double click on a line total no longer removes the line. With the keyboard, Enter on the total opens the strip on Edit and Tab moves through Edit, Remove and Close. Touch is unchanged: a short swipe opens the strip and a long swipe left removes the line (#3723).\n- A payment recorded while the browser tab or window was hidden waits until the app is awake and is then sent, instead of ending with \"store has not answered\" although nothing had been sent (#3719).\n\nDeveloper and contract changes\n- The native WebView applies `targetOrigin` to incoming messages, admitting the store's own www and https landing; this reaches phones and tablets with the next mobile update (#3693).\n\nMaintenance\n- CI, tests and release tooling (#3720, #3721, #3722).\n\nFull diff: https://github.com/wcpos/monorepo/compare/v2.0.1...v2.0.2\n\n\nDesktop build of WCPOS app **2.0.2**. Available for macOS 13 or later (Intel + Apple Silicon), Windows, and Linux (`.deb` / `.rpm`).\n",
+			"releaseUrl": "https://github.com/wcpos/electron/releases/tag/v2.0.6",
+			"hasUpdate": true,
+			"currentVersion": "2.0.5"
+		}
+	}
+}
