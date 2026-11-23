@@ -259,7 +259,8 @@ process.on('beforeExit', () => {
 
 (async () => {
 	try {
-		const { AutoUpdater, isOfferedUpdate, isValidAssetList } = await import('./update');
+		const { AutoUpdater, isFromOfferedRelease, isOfferedUpdate, isValidAssetList } =
+			await import('./update');
 		const updater = new AutoUpdater({ isDestroyed: () => false } as never);
 
 		// Three hourly ticks land while the first dialog is still open.
@@ -778,6 +779,8 @@ process.on('beforeExit', () => {
 		appVersion = '1.11.0-next.3';
 
 		manifestVersion = '1.11.0-next.4';
+		const assetUrlBeforeNext = assetUrl;
+		assetUrl = 'https://github.com/wcpos/electron/releases/download/v1.11.0-next.4/app.zip';
 		const scheduledNext = nextUpdater.checkForUpdates();
 		await flush();
 		assert.equal(openDialogs.length, dialogsBeforeStable + 1, 'scheduled: next.4 is offered');
@@ -788,6 +791,7 @@ process.on('beforeExit', () => {
 		assert.equal(openDialogs.length, dialogsBeforeStable + 2, 'manual: next.4 is offered');
 		openDialogs[openDialogs.length - 1].resolve({ response: 2 });
 		await manualNext;
+		assetUrl = assetUrlBeforeNext;
 
 		// init() on a next build runs the start-up check and registers the hourly one; it
 		// used to return early on any prerelease version.
@@ -819,6 +823,7 @@ process.on('beforeExit', () => {
 
 		// A manifest whose assets could write outside the download directory, or fetch from
 		// anywhere but the wcpos/electron releases, is rejected before the user is asked anything.
+		// On macOS the assets must also come from the offered version's release.
 		const github = 'https://github.com/wcpos/electron/releases/download/v9.9.9';
 		const rejected: [string, () => void][] = [
 			['name ../escape.zip', () => (assetNames = ['../escape.zip'])],
@@ -845,6 +850,31 @@ process.on('beforeExit', () => {
 						'https://github.com/wcpos/electron/releases/download/../../../x/y/releases/download/v1/app.zip'),
 			],
 			['plain http', () => (assetUrl = `${github.replace('https:', 'http:')}/app.zip`)],
+			[
+				'older release',
+				() => (assetUrl = 'https://github.com/wcpos/electron/releases/download/v2.0.3/app.zip'),
+			],
+			[
+				'longer tag',
+				() => (assetUrl = 'https://github.com/wcpos/electron/releases/download/v9.9.90/app.zip'),
+			],
+			[
+				'encoded slash',
+				() =>
+					(assetUrl =
+						'https://github.com/wcpos/electron/releases/download/v9.9.9/..%2Fv2.0.3%2Fapp.zip'),
+			],
+			[
+				'older release beside the offered one',
+				() =>
+					(manifestAssets = [
+						{ name: 'app.zip', url: `${github}/app.zip` },
+						{
+							name: 'old.zip',
+							url: 'https://github.com/wcpos/electron/releases/download/v2.0.3/old.zip',
+						},
+					]),
+			],
 			['assets object', () => (manifestAssets = { name: 'app.zip', url: `${github}/app.zip` })],
 			['assets empty', () => (manifestAssets = [])],
 			[
@@ -902,6 +932,16 @@ process.on('beforeExit', () => {
 			true,
 			'the real v2.0.5 assets are accepted'
 		);
+		const realZip = [
+			{
+				name: 'WCPOS-darwin-arm64-2.0.5.zip',
+				url: 'https://github.com/wcpos/electron/releases/download/v2.0.5/WCPOS-darwin-arm64-2.0.5.zip',
+				contentType: 'application/zip',
+				size: 1024,
+			},
+		];
+		assert.equal(isFromOfferedRelease(realZip, '2.0.5'), true, 'the v2.0.5 zip is from v2.0.5');
+		assert.equal(isFromOfferedRelease(realZip, '2.0.6'), false, 'the v2.0.5 zip is not v2.0.6');
 
 		// A body shorter than the manifest's size is a truncated package: it is deleted and the
 		// installer never sees it. Earlier cases left installers on disk; clear them first.

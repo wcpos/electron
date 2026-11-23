@@ -96,6 +96,17 @@ export function isValidAssetList(assets: unknown): assets is Asset[] {
 	});
 }
 
+// Squirrel.Mac checks the bundle's signature but not its version, so on macOS every asset must
+// come from the offered version's release, or an older signed build could be installed.
+export function isFromOfferedRelease(assets: Asset[], version: string): boolean {
+	const prefix = `${releaseAssetPrefix.pathname}v${version}/`;
+	return assets.every((asset) => {
+		const { protocol, pathname } = new URL(asset.url);
+		if (protocol !== 'https:') return isDevelopment;
+		return pathname.startsWith(prefix) && /^[\w.\-]+$/.test(pathname.slice(prefix.length));
+	});
+}
+
 export interface UpdaterHandle {
 	init: () => void;
 	manualCheckForUpdates: (menuItem: MenuItem) => Promise<void>;
@@ -470,7 +481,10 @@ export class AutoUpdater implements UpdaterHandle {
 				return false;
 			}
 
-			if (!isValidAssetList(assets)) {
+			if (
+				!isValidAssetList(assets) ||
+				(process.platform === 'darwin' && !isFromOfferedRelease(assets, version))
+			) {
 				logger.error('Update manifest rejected: invalid assets');
 				return false;
 			}
