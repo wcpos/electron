@@ -818,13 +818,32 @@ process.on('beforeExit', () => {
 		manifestVersion = '9.9.9';
 
 		// A manifest whose assets could write outside the download directory, or fetch from
-		// anywhere but the release host, is rejected before the user is asked anything.
+		// anywhere but the wcpos/electron releases, is rejected before the user is asked anything.
 		const github = 'https://github.com/wcpos/electron/releases/download/v9.9.9';
 		const rejected: [string, () => void][] = [
 			['name ../escape.zip', () => (assetNames = ['../escape.zip'])],
 			['name ..', () => (assetNames = ['..'])],
 			['file: URL', () => (assetUrl = 'file:///etc/passwd')],
 			['other host', () => (assetUrl = 'https://evil.example/app.zip')],
+			[
+				'other account',
+				() =>
+					(assetUrl = 'https://github.com/someone-else/electron/releases/download/v9.9.9/app.zip'),
+			],
+			[
+				'other repo',
+				() => (assetUrl = 'https://github.com/wcpos/other/releases/download/v9.9.9/app.zip'),
+			],
+			[
+				'not a release download',
+				() => (assetUrl = 'https://github.com/wcpos/electron/archive/app.zip'),
+			],
+			[
+				'dot segments out',
+				() =>
+					(assetUrl =
+						'https://github.com/wcpos/electron/releases/download/../../../x/y/releases/download/v1/app.zip'),
+			],
 			['plain http', () => (assetUrl = `${github.replace('https:', 'http:')}/app.zip`)],
 			['assets object', () => (manifestAssets = { name: 'app.zip', url: `${github}/app.zip` })],
 			['assets empty', () => (manifestAssets = [])],

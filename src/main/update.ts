@@ -47,8 +47,9 @@ const DOWNLOAD_DIR_PREFIX = 'update-';
 // since been reused, so the directory looks live forever. A week is far longer than any
 // download and still bounds the disk use.
 const ORPHAN_DIR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-// Hosts release assets are served from; the update server lists GitHub release download URLs.
-const ALLOWED_ASSET_HOSTS: ReadonlySet<string> = new Set(['github.com']);
+// Release assets are served only from the wcpos/electron GitHub releases.
+const RELEASE_ASSET_PREFIX = 'https://github.com/wcpos/electron/releases/download/';
+const releaseAssetPrefix = new URL(RELEASE_ASSET_PREFIX);
 // An asset is saved under its own name, so the name must be a plain file name with no path in it.
 const ASSET_NAME = /^[\w.\- ]+$/;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
@@ -68,7 +69,7 @@ export function isOfferedUpdate(offered: unknown, current: string): boolean {
 
 // The manifest's assets name the files written into the download directory and the URLs they
 // are fetched from, so an update is offered only when every asset is a plain file name served
-// over https from the release host.
+// over https from the wcpos/electron releases.
 export function isValidAssetList(assets: unknown): assets is Asset[] {
 	if (!Array.isArray(assets) || assets.length === 0) return false;
 	return assets.every((asset) => {
@@ -85,7 +86,12 @@ export function isValidAssetList(assets: unknown): assets is Asset[] {
 		} catch {
 			return false;
 		}
-		if (parsed.protocol === 'https:') return ALLOWED_ASSET_HOSTS.has(parsed.hostname);
+		if (parsed.protocol === 'https:') {
+			return (
+				parsed.origin === releaseAssetPrefix.origin &&
+				parsed.pathname.startsWith(releaseAssetPrefix.pathname)
+			);
+		}
 		return isDevelopment && parsed.protocol === 'http:' && parsed.hostname === 'localhost';
 	});
 }
