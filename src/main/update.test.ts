@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -877,6 +877,19 @@ process.on('beforeExit', () => {
 		assetNames = ['app.zip'];
 		assetUrl = STREAMING_ASSET_URL;
 		manifestAssets = undefined;
+
+		// What the update server returns to a 2.0.5 app for v2.0.6, one entry per query the app
+		// makes. Rebuilt from the v2.0.6 release metadata; each body is byte-for-byte the length of
+		// the live response (2026-11-23). Every installable query must pass, or real updates stop
+		// being offered. Linux with no detected package format gets no assets, so no offer.
+		const liveFeed: Record<string, { data: { assets: unknown } }> = JSON.parse(
+			readFileSync(path.join(__dirname, 'fixtures', 'update-feed-2.0.6.json'), 'utf8')
+		);
+		assert.equal(Object.keys(liveFeed).length, 6, 'the live feed fixture holds six queries');
+		for (const [query, response] of Object.entries(liveFeed)) {
+			const installable = query !== 'electron/linux-x64/2.0.5';
+			assert.equal(isValidAssetList(response.data.assets), installable, `live feed ${query}`);
+		}
 
 		// The real v2.0.5 release assets must all pass, or real updates stop being offered.
 		const realNames = [
