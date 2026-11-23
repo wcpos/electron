@@ -28,6 +28,7 @@ mutableModule._load = function patchedLoad(
 	try {
 		const fakeWindow = { id: 'main-window' };
 		const calls: string[] = [];
+		const readyOrder: string[] = [];
 		const updaterWindows: unknown[] = [];
 		const scannerWindows: unknown[] = [];
 		const mark =
@@ -41,7 +42,12 @@ mutableModule._load = function patchedLoad(
 			setMainWindow: (): void => {},
 		};
 		const fakeDeps = {
-			whenReady: async (): Promise<void> => undefined,
+			applyHardwareAcceleration: (): void => {
+				readyOrder.push('hardware-acceleration');
+			},
+			whenReady: async (): Promise<void> => {
+				readyOrder.push('when-ready');
+			},
 			loadTranslations: mark('translations'),
 			clearPendingAppDataOnStartup: mark('clear-pending-app-data'),
 			installExtensions: mark('install-extensions'),
@@ -118,6 +124,11 @@ mutableModule._load = function patchedLoad(
 		assert.deepEqual(updaterWindows, [fakeWindow]);
 		assert.deepEqual(scannerWindows, [fakeWindow]);
 		assert.deepEqual(calls, phaseNames);
+		assert.deepEqual(
+			readyOrder.slice(0, 2),
+			['hardware-acceleration', 'when-ready'],
+			'boot applies the stored hardware acceleration setting before ready'
+		);
 
 		// Without a main window, boot still registers the window-independent phases
 		// (auth handler, protocol, menu) so a window re-created on macOS `activate`
