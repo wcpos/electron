@@ -486,6 +486,13 @@ export class AutoUpdater implements UpdaterHandle {
 				(process.platform === 'darwin' && !isFromOfferedRelease(assets, version))
 			) {
 				logger.error('Update manifest rejected: invalid assets');
+				// An empty list is what Linux with no detected package format gets: nothing to install,
+				// so still "up to date". Anything else was a real update we refused, so a manual check
+				// says it could not complete rather than claiming the app is current.
+				if (manual && !(Array.isArray(assets) && assets.length === 0)) {
+					this.showInfoBox(t('menu.check_for_updates'), t('update.could_not_check_for_updates'));
+					return undefined;
+				}
 				return false;
 			}
 
@@ -507,6 +514,17 @@ export class AutoUpdater implements UpdaterHandle {
 		}
 	}
 
+	// Not awaited: the box stays open while the menu item is re-enabled.
+	private showInfoBox(title: string, message: string): void {
+		const options = { title, message };
+		const parent = this.dialogParent();
+		if (parent) {
+			dialog.showMessageBox(parent, options);
+		} else {
+			dialog.showMessageBox(options);
+		}
+	}
+
 	public async manualCheckForUpdates(menuItem: MenuItem) {
 		if (menuItem) {
 			menuItem.enabled = false;
@@ -515,16 +533,7 @@ export class AutoUpdater implements UpdaterHandle {
 		try {
 			const hasUpdate = await this.checkForUpdates(true);
 			if (hasUpdate === false) {
-				const options = {
-					title: t('update.no_updates'),
-					message: t('update.current_version_is_up-to-date'),
-				};
-				const parent = this.dialogParent();
-				if (parent) {
-					dialog.showMessageBox(parent, options);
-				} else {
-					dialog.showMessageBox(options);
-				}
+				this.showInfoBox(t('update.no_updates'), t('update.current_version_is_up-to-date'));
 			}
 		} finally {
 			if (menuItem) {

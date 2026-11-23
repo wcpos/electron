@@ -821,6 +821,40 @@ process.on('beforeExit', () => {
 		appVersion = '1.0.0';
 		manifestVersion = '9.9.9';
 
+		// A newer release whose manifest is refused: a manual check says the check failed rather
+		// than "up to date", and a scheduled check stays silent. An empty asset list (Linux with
+		// no detected package format) is still "up to date".
+		backing.delete('remindLaterTimestamp');
+		const refusedUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		const refusedMenu = { enabled: true };
+		const messages = () => noUpdateDialogs.map((box) => (box as { message?: string }).message);
+		assetNames = ['../escape.zip'];
+		const refusedDialogs = openDialogs.length;
+		const refusedBoxes = noUpdateDialogs.length;
+		await refusedUpdater.manualCheckForUpdates(refusedMenu as never);
+		assert.deepEqual(
+			[messages().slice(refusedBoxes), openDialogs.length],
+			[['update.could_not_check_for_updates'], refusedDialogs],
+			'manual: a refused manifest says the check failed'
+		);
+		const scheduledBoxes = noUpdateDialogs.length;
+		assert.equal(await refusedUpdater.checkForUpdates(), false);
+		assert.deepEqual(
+			[noUpdateDialogs.length, openDialogs.length],
+			[scheduledBoxes, refusedDialogs],
+			'scheduled: a refused manifest shows nothing'
+		);
+		assetNames = ['app.zip'];
+		manifestAssets = [];
+		const emptyBoxes = noUpdateDialogs.length;
+		await refusedUpdater.manualCheckForUpdates(refusedMenu as never);
+		assert.deepEqual(
+			[messages().slice(emptyBoxes), openDialogs.length],
+			[['update.current_version_is_up-to-date'], refusedDialogs],
+			'manual: an empty asset list is still "up to date"'
+		);
+		manifestAssets = undefined;
+
 		// A manifest whose assets could write outside the download directory, or fetch from
 		// anywhere but the wcpos/electron releases, is rejected before the user is asked anything.
 		// On macOS the assets must also come from the offered version's release.
