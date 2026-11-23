@@ -40,11 +40,16 @@ const installStarted: string[] = [];
 // The release manifest names one asset. By default its download never completes, so a "Yes"
 // answer leaves a download stalled in the background; the streaming asset instead hands the
 // test a fetch it resolves by hand with a body it closes by hand.
-const STALLED_ASSET_URL = 'https://updates.test/app.zip';
-const STREAMING_ASSET_URL = 'https://updates.test/app-streaming.zip';
-const FAILING_ASSET_URL = 'https://updates.test/app-failing.zip';
+const STALLED_ASSET_URL = 'https://github.com/wcpos/electron/releases/download/v9.9.9/app.zip';
+const STREAMING_ASSET_URL =
+	'https://github.com/wcpos/electron/releases/download/v9.9.9/app-streaming.zip';
+const FAILING_ASSET_URL =
+	'https://github.com/wcpos/electron/releases/download/v9.9.9/app-failing.zip';
 let assetUrl = STALLED_ASSET_URL;
 let assetNames = ['app.zip'];
+// The manifest-validation cases at the end replace the whole assets field, or the size it gives.
+let manifestAssets: unknown;
+let assetSize = 1;
 // The running app's version and the manifest's offered version. The channel cases at the end
 // change them; every earlier case runs on these defaults.
 let appVersion = '1.0.0';
@@ -69,12 +74,14 @@ const foundUpdatePayload = async (url: string): Promise<unknown> => {
 			name: 'Next',
 			releaseDate: '2026-09-15',
 			notes: '',
-			assets: assetNames.map((name) => ({
-				name,
-				url: assetUrl,
-				contentType: 'application/zip',
-				size: 1,
-			})),
+			assets:
+				manifestAssets ??
+				assetNames.map((name) => ({
+					name,
+					url: assetUrl,
+					contentType: 'application/zip',
+					size: assetSize,
+				})),
 		}),
 	};
 };
@@ -225,6 +232,12 @@ const downloadedInstallers = () =>
 	updateDirs()
 		.map((dir) => path.join(dir, 'app.zip'))
 		.filter((file) => existsSync(file));
+// Everything under the test temp root that is not inside a per-update directory.
+const outsideUpdateDirs = () =>
+	readdirSync(tempRoot, { recursive: true })
+		.map(String)
+		.filter((entry) => !entry.startsWith(path.join('NTWRK', 'update-')))
+		.sort();
 
 // The install hand-off this file exercises only exists on macOS and Windows: on Linux
 // installUpdates reveals the file and returns before touching the singleton autoUpdater. CI
@@ -246,7 +259,7 @@ process.on('beforeExit', () => {
 
 (async () => {
 	try {
-		const { AutoUpdater, isOfferedUpdate } = await import('./update');
+		const { AutoUpdater, isOfferedUpdate, isValidAssetList } = await import('./update');
 		const updater = new AutoUpdater({ isDestroyed: () => false } as never);
 
 		// Three hourly ticks land while the first dialog is still open.
@@ -803,6 +816,102 @@ process.on('beforeExit', () => {
 		}
 		appVersion = '1.0.0';
 		manifestVersion = '9.9.9';
+
+		// A manifest whose assets could write outside the download directory, or fetch from
+		// anywhere but the release host, is rejected before the user is asked anything.
+		const github = 'https://github.com/wcpos/electron/releases/download/v9.9.9';
+		const rejected: [string, () => void][] = [
+			['name ../escape.zip', () => (assetNames = ['../escape.zip'])],
+			['name ..', () => (assetNames = ['..'])],
+			['file: URL', () => (assetUrl = 'file:///etc/passwd')],
+			['other host', () => (assetUrl = 'https://evil.example/app.zip')],
+			['plain http', () => (assetUrl = `${github.replace('https:', 'http:')}/app.zip`)],
+			['assets object', () => (manifestAssets = { name: 'app.zip', url: `${github}/app.zip` })],
+			['assets empty', () => (manifestAssets = [])],
+			[
+				'negative size',
+				() => (manifestAssets = [{ name: 'app.zip', url: `${github}/app.zip`, size: -1 }]),
+			],
+		];
+		const manifestUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		for (const [label, arrange] of rejected) {
+			assetNames = ['app.zip'];
+			assetUrl = STREAMING_ASSET_URL;
+			manifestAssets = undefined;
+			arrange();
+			const dialogsBefore: number = openDialogs.length;
+			const installsBefore: number = installStarted.length;
+			const filesBefore = outsideUpdateDirs();
+			const check = manifestUpdater.checkForUpdates();
+			await flush();
+			assert.equal(openDialogs.length, dialogsBefore, `${label}: no Found Updates dialog`);
+			assert.equal(await check, false, `${label}: the check resolves false`);
+			await flush();
+			assert.equal(installStarted.length, installsBefore, `${label}: nothing handed off`);
+			assert.deepEqual(outsideUpdateDirs(), filesBefore, `${label}: no file outside update dirs`);
+			assert.equal(
+				loggedErrors[loggedErrors.length - 1],
+				'Update manifest rejected: invalid assets',
+				label
+			);
+		}
+		assetNames = ['app.zip'];
+		assetUrl = STREAMING_ASSET_URL;
+		manifestAssets = undefined;
+
+		// The real v2.0.5 release assets must all pass, or real updates stop being offered.
+		const realNames = [
+			'RELEASES',
+			'WCPOS-2.0.5-arm64.dmg',
+			'WCPOS-2.0.5-Setup.exe',
+			'WCPOS-2.0.5-x64.dmg',
+			'WCPOS-darwin-arm64-2.0.5.zip',
+			'WCPOS-darwin-x64-2.0.5.zip',
+			'woocommerce-pos-2.0.5-1.x86_64.rpm',
+			'woocommerce-pos_2.0.5_amd64.deb',
+			'WooCommercePOS-2.0.5-full.nupkg',
+		];
+		assert.equal(
+			isValidAssetList(
+				realNames.map((name) => ({
+					name,
+					url: `https://github.com/wcpos/electron/releases/download/v2.0.5/${name}`,
+					contentType: 'application/octet-stream',
+					size: 1024,
+				}))
+			),
+			true,
+			'the real v2.0.5 assets are accepted'
+		);
+
+		// A body shorter than the manifest's size is a truncated package: it is deleted and the
+		// installer never sees it. Earlier cases left installers on disk; clear them first.
+		for (const dir of updateDirs()) rmSync(dir, { recursive: true, force: true });
+		assetSize = 5;
+		const shortUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		const installsBeforeShort = installStarted.length;
+		const applyingBeforeShort = applying();
+		const downloadsBeforeShort = pendingDownloads.length;
+		const shortCheck = shortUpdater.checkForUpdates();
+		await flush();
+		openDialogs[openDialogs.length - 1].resolve({ response: 0 });
+		assert.equal(await shortCheck, true);
+		await waitFor(() => pendingDownloads.length > downloadsBeforeShort);
+		assert.ok(pendingDownloads.length > downloadsBeforeShort, 'the short download started');
+		let shortBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+		pendingDownloads[pendingDownloads.length - 1](
+			streamingResponse((controller) => {
+				shortBody = controller;
+			})
+		);
+		await flush();
+		shortBody?.close();
+		await waitFor(() => applying() > applyingBeforeShort);
+		await flush();
+		assert.equal(applying(), applyingBeforeShort + 1, 'the short download is reported');
+		assert.equal(installStarted.length, installsBeforeShort, 'a short download is not installed');
+		assert.deepEqual(downloadedInstallers(), [], 'and is not left on disk');
+		assetSize = 1;
 
 		finished = true;
 		console.log('update.test.ts passed');

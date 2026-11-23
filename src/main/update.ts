@@ -47,6 +47,10 @@ const DOWNLOAD_DIR_PREFIX = 'update-';
 // since been reused, so the directory looks live forever. A week is far longer than any
 // download and still bounds the disk use.
 const ORPHAN_DIR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Hosts release assets are served from; the update server lists GitHub release download URLs.
+const ALLOWED_ASSET_HOSTS: ReadonlySet<string> = new Set(['github.com']);
+// An asset is saved under its own name, so the name must be a plain file name with no path in it.
+const ASSET_NAME = /^[\w.\- ]+$/;
 const updateServer = isDevelopment ? 'http://localhost:8080' : 'https://updates.wcpos.com';
 const store = new Store<UpdateStoreSchema>();
 
@@ -60,6 +64,30 @@ export function isOfferedUpdate(offered: unknown, current: string): boolean {
 	}
 	const channel = (version: string) => String(semver.prerelease(version)?.[0] ?? '');
 	return channel(offered) === channel(current) && semver.gt(offered, current);
+}
+
+// The manifest's assets name the files written into the download directory and the URLs they
+// are fetched from, so an update is offered only when every asset is a plain file name served
+// over https from the release host.
+export function isValidAssetList(assets: unknown): assets is Asset[] {
+	if (!Array.isArray(assets) || assets.length === 0) return false;
+	return assets.every((asset) => {
+		if (!asset || typeof asset !== 'object') return false;
+		const { name, url, size } = asset as Record<string, unknown>;
+		if (typeof name !== 'string' || name !== path.basename(name) || !ASSET_NAME.test(name)) {
+			return false;
+		}
+		if (name === '.' || name === '..' || typeof url !== 'string') return false;
+		if (size !== undefined && !(Number.isFinite(size) && (size as number) >= 0)) return false;
+		let parsed: URL;
+		try {
+			parsed = new URL(url);
+		} catch {
+			return false;
+		}
+		if (parsed.protocol === 'https:') return ALLOWED_ASSET_HOSTS.has(parsed.hostname);
+		return isDevelopment && parsed.protocol === 'http:' && parsed.hostname === 'localhost';
+	});
 }
 
 export interface UpdaterHandle {
@@ -194,7 +222,8 @@ export class AutoUpdater implements UpdaterHandle {
 		dir: string,
 		name: string,
 		url: string,
-		showProgress = true
+		showProgress = true,
+		expectedSize?: number
 	): Promise<string | undefined> {
 		const pipeline = promisify(stream.pipeline);
 		const filePath = path.join(dir, name);
@@ -228,6 +257,12 @@ export class AutoUpdater implements UpdaterHandle {
 		} finally {
 			progressBar?.close();
 			progressBar = undefined;
+		}
+
+		// A body of any other size than the manifest's is not the release package: never install it.
+		if (expectedSize > 0 && statSync(filePath).size !== expectedSize) {
+			rmSync(filePath, { force: true });
+			throw new Error(`Update download size mismatch for ${name}`);
 		}
 
 		return name !== 'RELEASES' ? filePath : undefined;
@@ -342,7 +377,7 @@ export class AutoUpdater implements UpdaterHandle {
 			// program the user can run, so the package never displaces a recorded installer.
 			const downloads = await Promise.allSettled(
 				assets.map(async (asset) => {
-					const filePath = await this.download(dir, asset.name, asset.url);
+					const filePath = await this.download(dir, asset.name, asset.url, undefined, asset.size);
 					if (filePath && (!targetPath || targetPath.endsWith('.nupkg'))) {
 						targetPath = filePath;
 					}
@@ -426,6 +461,11 @@ export class AutoUpdater implements UpdaterHandle {
 			const hasUpdate = isOfferedUpdate(version, app.getVersion());
 
 			if (!hasUpdate) {
+				return false;
+			}
+
+			if (!isValidAssetList(assets)) {
+				logger.error('Update manifest rejected: invalid assets');
 				return false;
 			}
 
