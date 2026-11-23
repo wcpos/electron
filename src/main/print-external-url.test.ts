@@ -136,7 +136,7 @@ async function main() {
 	// 2. Bad URL scheme: no window, exactly one onPrintError.
 	{
 		const job = startJob({ externalURL: 'file:///etc/passwd', printJobId: 'job-2' });
-		assert.equal(job.created, 0, 'a non-http(s) URL must not open a window');
+		assert.equal(job.created, 0, 'a URL that is not a printable URL must not open a window');
 		assert.deepEqual(job.sent, [['onPrintError-job-2', 'Invalid print URL']]);
 	}
 
@@ -255,6 +255,52 @@ async function main() {
 		job.win.destroyed = true;
 		assert.doesNotThrow(() => mock.timers.tick(1000), 'closing a destroyed window must not throw');
 		assert.equal(job.win.closeCalls, 0);
+	}
+
+	// 12. A data:text/html receipt (system printer) prints like an http(s) page.
+	{
+		const job = startJob({
+			externalURL: 'data:text/html;charset=utf-8,%3Cp%3Ereceipt%3C%2Fp%3E',
+			printJobId: 'job-12',
+		});
+		assert.equal(job.created, 1, 'a data:text/html receipt must open one print window');
+		job.win.emit('did-finish-load');
+		await flush();
+		assert.deepEqual(channels(job.sent), ['onBeforePrint-job-12', 'onAfterPrint-job-12']);
+		mock.timers.tick(1000);
+		assert.equal(job.win.closeCalls, 1, 'the data: receipt window closes after the delay');
+	}
+
+	// 13. Other data: media types are refused: no window, exactly one onPrintError.
+	for (const [externalURL, printJobId] of [
+		['data:text/plain,x', 'job-13a'],
+		['data:image/svg+xml,%3Csvg%2F%3E', 'job-13b'],
+	]) {
+		const job = startJob({ externalURL, printJobId });
+		assert.equal(job.created, 0, `${externalURL} must not open a window`);
+		assert.deepEqual(job.sent, [[`onPrintError-${printJobId}`, 'Invalid print URL']]);
+	}
+
+	// 14. A print dialog left open past the load timeout is not reported or closed under the user.
+	{
+		let closeDialog: () => void = () => {};
+		BrowserWindowMock.nextPrint = () => new Promise<void>((resolve) => (closeDialog = resolve));
+		const job = startJob({ externalURL: VALID_URL, printJobId: 'job-14' });
+		BrowserWindowMock.nextPrint = () => Promise.resolve();
+		job.win.emit('did-finish-load');
+		await flush();
+		mock.timers.tick(60_000);
+		assert.deepEqual(
+			channels(job.sent),
+			['onBeforePrint-job-14'],
+			'the load timer must stop once the page has loaded'
+		);
+		assert.equal(job.win.closeCalls, 0, 'the window must stay open while the dialog is open');
+		closeDialog();
+		await flush();
+		assert.deepEqual(channels(job.sent), ['onBeforePrint-job-14', 'onAfterPrint-job-14']);
+		mock.timers.tick(1000);
+		assert.equal(job.win.closeCalls, 1, 'the window closes after the dialog and the delay');
 	}
 
 	mock.timers.reset();

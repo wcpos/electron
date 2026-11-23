@@ -7,9 +7,17 @@ const PRINT_LOAD_TIMEOUT_MS = 30_000;
 // printJobId is built into reply channel names, so it must be a short plain token.
 const PRINT_JOB_ID = /^[\w-]{1,64}$/;
 
-function isHttpURL(value: unknown): value is string {
+// The renderer sends system-printer receipts as data:text/html URLs.
+function isPrintableURL(value: unknown): value is string {
 	try {
-		return typeof value === 'string' && ['http:', 'https:'].includes(new URL(value).protocol);
+		if (typeof value !== 'string') return false;
+		const { protocol } = new URL(value);
+		if (protocol === 'http:' || protocol === 'https:') return true;
+		const lower = value.toLowerCase();
+		return (
+			protocol === 'data:' &&
+			(lower.startsWith('data:text/html,') || lower.startsWith('data:text/html;'))
+		);
 	} catch {
 		return false;
 	}
@@ -58,6 +66,8 @@ function printExternalURL(externalURL: string, printJobId: string, event: IpcMai
 
 	// Wait for the content to finish loading
 	printWindow.webContents.once('did-finish-load', () => {
+		// The page has loaded; the print dialog may stay open as long as the user needs.
+		clearTimeout(loadTimeout);
 		logger.info('Page loaded, sending onBeforePrint');
 		// Notify the renderer process that onBeforePrint can be called
 		event.sender.send(`onBeforePrint-${printJobId}`);
@@ -120,7 +130,7 @@ ipcMain.on('print-external-url', (event, args) => {
 		logger.warn('Rejected print request: invalid printJobId');
 		return;
 	}
-	if (!isHttpURL(externalURL)) {
+	if (!isPrintableURL(externalURL)) {
 		logger.warn('Rejected print request: invalid print URL');
 		event.sender.send(`onPrintError-${printJobId}`, 'Invalid print URL');
 		return;
