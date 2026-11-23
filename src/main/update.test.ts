@@ -920,6 +920,20 @@ process.on('beforeExit', () => {
 			const installable = query !== 'electron/linux-x64/2.0.5';
 			assert.equal(isValidAssetList(response.data.assets), installable, `live feed ${query}`);
 		}
+		// The macOS feed's assets come from the offered version's own release.
+		for (const query of ['electron/darwin-arm64/2.0.5', 'electron/darwin-x64/2.0.5']) {
+			const assets = liveFeed[query].data.assets as Parameters<typeof isFromOfferedRelease>[0];
+			assert.equal(
+				isFromOfferedRelease(assets, '2.0.6'),
+				true,
+				`live feed ${query} is from v2.0.6`
+			);
+			assert.equal(
+				isFromOfferedRelease(assets, '2.0.7'),
+				false,
+				`live feed ${query} is not v2.0.7`
+			);
+		}
 
 		// The real v2.0.5 release assets must all pass, or real updates stop being offered.
 		const realNames = [
