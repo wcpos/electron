@@ -105,12 +105,22 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 function startJob(args: { externalURL: unknown; printJobId: unknown }) {
 	const sent: unknown[][] = [];
+	let senderDestroyed = false;
 	const before = BrowserWindowMock.created.length;
 	const listener = ipcOnListeners.get('print-external-url');
 	assert.ok(listener, 'print-external-url should register an ipc listener');
-	listener!({ sender: { send: (...msg: unknown[]) => sent.push(msg) } }, args);
+	const sender = {
+		isDestroyed: () => senderDestroyed,
+		send: (...msg: unknown[]) => {
+			// Like Electron, sending to a destroyed WebContents throws.
+			if (senderDestroyed) throw new Error('Object has been destroyed');
+			sent.push(msg);
+		},
+	};
+	listener!({ sender }, args);
 	const win = BrowserWindowMock.created[before];
-	return { sent, win, created: BrowserWindowMock.created.length - before };
+	const destroySender = () => (senderDestroyed = true);
+	return { sent, win, created: BrowserWindowMock.created.length - before, destroySender };
 }
 
 function channels(sent: unknown[][]) {
@@ -233,6 +243,32 @@ async function main() {
 		assert.equal(job.win.closeCalls, 1, 'a timed-out window is closed');
 		mock.timers.tick(30_000);
 		assert.equal(job.sent.length, 1);
+	}
+
+	// 9b. A timed-out job whose sender is gone still closes its window.
+	{
+		const job = startJob({ externalURL: VALID_URL, printJobId: 'job-9b' });
+		job.destroySender();
+		assert.doesNotThrow(
+			() => mock.timers.tick(30_000),
+			'a timed-out job whose sender is gone still closes its window'
+		);
+		assert.deepEqual(job.sent, []);
+		assert.equal(job.win.closeCalls, 1, 'the window is closed exactly once');
+	}
+
+	// 9c. did-finish-load with a destroyed sender sends nothing and does not throw.
+	{
+		const job = startJob({ externalURL: VALID_URL, printJobId: 'job-9c' });
+		job.destroySender();
+		assert.doesNotThrow(
+			() => job.win.emit('did-finish-load'),
+			'did-finish-load with a destroyed sender sends nothing and does not throw'
+		);
+		await flush();
+		assert.deepEqual(job.sent, []);
+		mock.timers.tick(1000);
+		assert.equal(job.win.closeCalls, 1);
 	}
 
 	// 10. The print window cannot open further windows.

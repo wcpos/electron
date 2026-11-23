@@ -42,6 +42,10 @@ function printExternalURL(externalURL: string, printJobId: string, event: IpcMai
 	const closeWindow = () => {
 		if (!printWindow.isDestroyed()) printWindow.close();
 	};
+	// The renderer that asked may be gone; sending to a destroyed WebContents throws.
+	const reply = (channel: string, ...args: unknown[]) => {
+		if (!event.sender.isDestroyed()) event.sender.send(channel, ...args);
+	};
 	let done = false;
 	// Every exit goes through here, so each print job reports exactly one outcome.
 	const finish = (kind: 'after' | 'error', message?: string) => {
@@ -49,10 +53,10 @@ function printExternalURL(externalURL: string, printJobId: string, event: IpcMai
 		done = true;
 		clearTimeout(loadTimeout);
 		if (kind === 'error') {
-			event.sender.send(`onPrintError-${printJobId}`, message);
+			reply(`onPrintError-${printJobId}`, message);
 			closeWindow();
 		} else {
-			event.sender.send(`onAfterPrint-${printJobId}`);
+			reply(`onAfterPrint-${printJobId}`);
 			setTimeout(closeWindow, 1000); // Adjust the delay as needed
 		}
 	};
@@ -70,7 +74,7 @@ function printExternalURL(externalURL: string, printJobId: string, event: IpcMai
 		clearTimeout(loadTimeout);
 		logger.info('Page loaded, sending onBeforePrint');
 		// Notify the renderer process that onBeforePrint can be called
-		event.sender.send(`onBeforePrint-${printJobId}`);
+		reply(`onBeforePrint-${printJobId}`);
 
 		/**
 		 * There seems to be a bug which prevents the print dialog from showing if no printers are installed.
