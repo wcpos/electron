@@ -710,6 +710,21 @@ process.on('beforeExit', () => {
 		await waitFor(() => feeds() > beforeFeedFail);
 		assert.equal(feeds(), beforeFeedFail + 1, 'a throwing hand-off does not wedge the session');
 
+		// A Remind me later time ahead of the clock (the clock moved backwards) is not a snooze.
+		backing.set('remindLaterTimestamp', Date.now() + 3 * 24 * 60 * 60 * 1000);
+		const futureSnoozeUpdater = new AutoUpdater({ isDestroyed: () => false } as never);
+		const dialogsBeforeFutureSnooze = openDialogs.length;
+		const futureSnoozeCheck = futureSnoozeUpdater.checkForUpdates();
+		await flush();
+		assert.equal(
+			openDialogs.length,
+			dialogsBeforeFutureSnooze + 1,
+			'a remindLaterTimestamp in the future does not suppress the check'
+		);
+		openDialogs[openDialogs.length - 1].resolve({ response: 2 });
+		assert.equal(await futureSnoozeCheck, true);
+		backing.delete('remindLaterTimestamp');
+
 		// The update server offers its latest stable release to every build, next builds
 		// included. Only a newer version on the build's own channel may be offered, and the
 		// prerelease must stay in the comparison.

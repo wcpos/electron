@@ -459,7 +459,9 @@ export class AutoUpdater implements UpdaterHandle {
 		const remindLaterTimestamp = store.get('remindLaterTimestamp', 0);
 		const now = Date.now();
 
-		if (!manual && remindLaterTimestamp && now - remindLaterTimestamp < REMIND_LATER_DURATION) {
+		// A timestamp ahead of the clock (it was moved backwards) is not a snooze.
+		const snoozeAge = now - remindLaterTimestamp;
+		if (!manual && remindLaterTimestamp && snoozeAge >= 0 && snoozeAge < REMIND_LATER_DURATION) {
 			logger.info('Update check skipped due to Remind me later selection.');
 			return false;
 		}
