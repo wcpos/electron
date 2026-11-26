@@ -1,11 +1,12 @@
 import * as path from 'path';
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import serve from 'electron-serve';
 
 import { guardMainFrameNavigation } from './app-origin';
 import { getInstallId } from './install-id';
 import { logger as log } from './log';
+import { openExternalSafely } from './safe-external-url';
 import { applyWindowColorScheme, isWindowColorScheme, titleBarOptions } from './title-bar';
 import { isDevelopment } from './util';
 import { revealWhenReady } from './window-reveal';
@@ -90,8 +91,7 @@ export const createWindow = (): BrowserWindow => {
 	// Open external URLs in the user's default browser
 	// Auth is now handled via IPC in auth-handler.ts
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-		log.info(`Opening in external browser: ${url}`);
-		shell.openExternal(url);
+		void openExternalSafely(url);
 		return { action: 'deny' };
 	});
 
