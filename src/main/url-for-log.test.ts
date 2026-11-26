@@ -16,12 +16,15 @@ try {
 			'https://user:fixture-pass@demo.example.com:8443/a/b?c=fixture-query',
 			'https://demo.example.com:8443/a/b',
 		],
+		['mailto:fixture-user@example.com?subject=fixture-query', 'mailto:'],
+		['tel:+15550000000', 'tel:'],
 		['not a url fixture-query', '<unparsable url>'],
 	];
 	for (const [input, expected] of cases) {
 		const output = urlForLog(input);
 		assert.equal(output, expected);
 		assert.equal(output.includes('fixture'), false);
+		if (expected === 'tel:') assert.equal(output.includes('5550000000'), false);
 	}
 
 	for (const file of ['auth-handler.ts', 'protocol.ts']) {

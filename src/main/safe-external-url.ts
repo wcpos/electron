@@ -27,7 +27,7 @@ export async function openExternalSafely(url: unknown): Promise<boolean> {
 		logger.warn('Refused to open external URL:', urlForLog(String(url)));
 		return false;
 	}
-	const allowed = url as string;
+	const allowed = new URL(url as string).href;
 	logger.info('Opening external URL:', urlForLog(allowed));
 	try {
 		await shell.openExternal(allowed);
