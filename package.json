@@ -68,6 +68,7 @@
 		"test:storage-measure": "ts-node src/main/storage-measure.test.ts",
 		"test:clear-data": "ts-node src/main/clear-data.test.ts",
 		"test:external-window-isolation": "ts-node src/main/external-window-isolation.test.ts",
+		"test:print-external-url": "ts-node src/main/print-external-url.test.ts",
 		"test:auth-handler": "ts-node src/main/auth-handler.test.ts",
 		"test:frame-headers": "ts-node src/main/frame-headers.test.ts",
 		"test:title-bar": "ts-node src/main/title-bar.test.ts",

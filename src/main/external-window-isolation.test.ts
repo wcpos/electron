@@ -18,6 +18,8 @@ const createdWindows: { partition?: string }[] = [];
 class BrowserWindowMock {
 	webContents = {
 		on() {},
+		once() {},
+		setWindowOpenHandler() {},
 		executeJavaScript: () => Promise.resolve(),
 	};
 
@@ -115,6 +117,8 @@ async function main() {
 	);
 
 	console.log('external window isolation assertions passed');
+	// The print window's load timeout would otherwise hold the process open for 30 s.
+	process.exit(0);
 }
 
 main().catch((err) => {
