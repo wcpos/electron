@@ -80,6 +80,7 @@ async function isPending(p: Promise<unknown>): Promise<boolean> {
 }
 
 async function main() {
+	process.exitCode = 1;
 	try {
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		const { initAuthHandler } = require('./auth-handler');
@@ -111,6 +112,7 @@ async function main() {
 			{ preventDefault() {} },
 			'wcpos://auth?access_token=abc'
 		);
+		assert.equal(await isPending(promise), false);
 		assert.deepEqual(await promise, { type: 'success', params: { access_token: 'abc' } });
 	}
 
@@ -125,6 +127,7 @@ async function main() {
 		assert.equal(await isPending(promise), true);
 		assert.equal(window.closeCalls, 0);
 		window.emit('closed');
+		assert.equal(await isPending(promise), false);
 		assert.deepEqual(await promise, { type: 'dismiss' });
 	}
 
@@ -141,6 +144,7 @@ async function main() {
 			{ authUrl: 'https://store.example.com/wp-login.php', redirectUri: 'wcpos://auth' }
 		);
 		const window = createdWindows[2];
+		assert.equal(await isPending(promise), false);
 		assert.deepEqual(await promise, {
 			type: 'error',
 			error:
@@ -149,6 +153,7 @@ async function main() {
 		assert.equal(window.closeCalls, 1);
 	}
 
+	process.exitCode = 0;
 	console.log('auth handler assertions passed');
 }
 
