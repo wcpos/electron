@@ -144,6 +144,12 @@ export function encodePsCommand(script: string): string {
 	return Buffer.from(script, 'utf16le').toString('base64');
 }
 
+// Resolve the system PowerShell rather than whatever `powershell.exe` the search order finds first.
+export function powershellPath(): string {
+	const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+	return path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
 const PRINT_TIMEOUT_MS = 20_000; // renderer gives up at 30s — fail first with a real error
 
 export async function printRawToSpooler(printerName: string, data: Buffer): Promise<void> {
@@ -173,7 +179,7 @@ function createWinspoolDelivery(printerName: string, file: string): Delivery {
 		send(_bytes, ctx): Promise<void> {
 			return new Promise<void>((resolve, reject) => {
 				child = spawn(
-					'powershell.exe',
+					powershellPath(),
 					[
 						'-NoProfile',
 						'-NonInteractive',
