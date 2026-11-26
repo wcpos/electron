@@ -10,6 +10,7 @@ import {
 } from './main/boot';
 import { initAuthHandler } from './main/auth-handler';
 import { clearPendingAppDataOnStartup } from './main/clear-data';
+import { toggleHardwareAcceleration } from './main/config';
 import { installExtensions } from './main/extensions';
 import { registerBluetoothSelection } from './main/bluetooth-select';
 import { registerScannerDeviceSelection } from './main/device-select';
@@ -50,6 +51,7 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 const bootDeps: BootDeps = {
+	applyHardwareAcceleration: toggleHardwareAcceleration,
 	whenReady: () =>
 		app.whenReady().then(() => {
 			registerFrameHeaderRelaxation(session.defaultSession);

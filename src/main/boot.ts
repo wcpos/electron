@@ -13,6 +13,8 @@ export interface AppUpdater {
 }
 
 export interface BootDeps {
+	/** Applies the stored hardware acceleration setting; Electron only honours it before ready. */
+	applyHardwareAcceleration: () => void;
 	whenReady: () => Promise<unknown>;
 	loadTranslations: () => void | Promise<void>;
 	clearPendingAppDataOnStartup: () => void | Promise<void>;
@@ -205,6 +207,7 @@ export function bootPlan(deps: BootDeps): BootPhase[] {
 
 /** Executes bootPlan() against app.whenReady() and returns the assembled AppContext. */
 export async function boot(deps: BootDeps): Promise<AppContext> {
+	deps.applyHardwareAcceleration();
 	await deps.whenReady();
 
 	const ctx: Partial<AppContext> = {};
