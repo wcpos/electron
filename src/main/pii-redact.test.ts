@@ -101,6 +101,26 @@ assert.deepEqual(
 	sdkContexts(),
 	'keeps os 10.0.26100, chrome 142.0.7444.59 and app telemetry contexts'
 );
+const gpuAndBrowserContexts = () => ({
+	gpu: {
+		name: 'NVIDIA GeForce RTX 3060',
+		vendor_name: 'NVIDIA',
+		driver_version: '31.0.15.5222',
+		id: 9476,
+		vendor_id: 4318,
+	},
+	gpu_1: { name: 'Intel(R) UHD Graphics 630', driver_version: '31.0.101.2125', id: 16018 },
+	browser: { name: 'Chrome', version: '142.0.7444.59' },
+});
+assert.deepEqual(
+	maskPersonalDataInEvent({ contexts: gpuAndBrowserContexts() })?.contexts,
+	gpuAndBrowserContexts(),
+	'keeps gpu 31.0.15.5222, gpu_1 31.0.101.2125 and browser 142.0.7444.59 contexts'
+);
+const maskedGpuX = maskPersonalDataInEvent({
+	contexts: { gpu_x: { driver_version: '31.0.15.5222' } },
+});
+assert.equal(maskedGpuX?.contexts.gpu_x.driver_version, '[PHONE]', 'masks gpu_x 31.0.15.5222');
 const customer = { email: 'jane@example.com', phone: '+61 412 345 678' };
 const mixed = maskPersonalDataInEvent({
 	contexts: { ...sdkContexts(), customer: { ...customer } },

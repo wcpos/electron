@@ -41,9 +41,12 @@ export function shouldDropEvent(event: SentryEventLike, state: ShutdownState): b
 }
 
 // Filled by the Sentry SDK itself; they carry versions, not personal data.
+// This includes the Sentry GPU integration's gpu and gpu_<N> contexts and the browser context.
 const SDK_CONTEXT_KEYS: ReadonlySet<string> = new Set([
 	'os',
 	'chrome',
+	'gpu',
+	'browser',
 	'runtime',
 	'node',
 	'app',
@@ -51,6 +54,10 @@ const SDK_CONTEXT_KEYS: ReadonlySet<string> = new Set([
 	'culture',
 	'trace',
 ]);
+
+function isSdkContextKey(key: string): boolean {
+	return SDK_CONTEXT_KEYS.has(key) || /^gpu_\d+$/.test(key);
+}
 
 export interface BreadcrumbLike {
 	message?: string;
@@ -73,7 +80,7 @@ export function maskPersonalDataInEvent<T extends SentryEventLike>(event: T): T 
 		if (event.contexts != null) {
 			const contexts: Record<string, unknown> = {};
 			for (const [key, value] of Object.entries(event.contexts)) {
-				contexts[key] = SDK_CONTEXT_KEYS.has(key) ? value : scrubPiiValues(value);
+				contexts[key] = isSdkContextKey(key) ? value : scrubPiiValues(value);
 			}
 			event.contexts = contexts;
 		}
