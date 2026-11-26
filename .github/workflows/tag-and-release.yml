@@ -7,13 +7,12 @@ name: Publish
 #           the releases page; GitHub's "latest" (what updates.wcpos.com serves) never points at
 #           a prerelease, and a next-lane build is only ever offered a newer build of its own lane
 #           (update.ts isOfferedUpdate).
-# A push to main builds Linux only; a push to next builds Linux and Windows x64. Dispatch with
-# platform=all for signed macOS installers. Windows installers are unsigned on every lane.
+# Dispatch only (since 2026-11-17). A push to main or next starts no run: the push build it
+# used to start (Linux, opening the draft) was cancelled by hand on every release train before
+# the real `platform=all` dispatch (roadmap RELEASE-CHECKLIST E1), and translation and sync
+# merges paid for a 20-minute Linux build nobody shipped. Windows installers are unsigned on
+# every lane.
 on:
-  push:
-    branches:
-      - main
-      - next
   workflow_dispatch:
     inputs:
       monorepo_ref:
@@ -34,7 +33,7 @@ on:
           - linux
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.platform || 'push' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.platform }}
   cancel-in-progress: false
 
 permissions:
@@ -48,7 +47,6 @@ jobs:
       version: ${{ steps.lane.outputs.version }}
       monorepo_ref: ${{ steps.pin.outputs.ref }}
       monorepo_sha: ${{ steps.source.outputs.sha }}
-    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos' || github.event.inputs.platform == 'macos-arm64' || github.event.inputs.platform == 'windows' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: Resolve monorepo ref
@@ -336,7 +334,7 @@ jobs:
     runs-on: windows-2022
     env:
       WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'next') || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
 
     steps:
       - name: Check out Git repository
@@ -410,7 +408,7 @@ jobs:
 
   validate-flathub-extra-data:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: Check out Git repository
@@ -436,7 +434,7 @@ jobs:
     runs-on: ubuntu-24.04 # ubuntu-latest became 26.04 on 2026-10-25: its rpm 4.20 broke electron-installer-redhat's %install (cp usr/*), 1.11.6 publish-linux
     env:
       WCPOS_LANE: ${{ needs.build-expo.outputs.lane }}
-    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+    if: ${{ github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
 
     steps:
       - name: Check out Git repository
