@@ -3,6 +3,7 @@ import { BrowserWindow, ipcMain } from 'electron';
 import { logger as log } from './log';
 import { urlForLog } from './url-for-log';
 import { getMainWindow } from './window';
+import { revealWhenReady } from './window-reveal';
 
 import type { AuthPromptParams, AuthResult } from '../ipc-channels';
 
@@ -109,7 +110,7 @@ export function initAuthHandler(): void {
 			};
 
 			// Show window when ready
-			authWindow.once('ready-to-show', () => {
+			revealWhenReady(authWindow, () => {
 				authWindow.show();
 				// Focus the auth window so user can interact with it
 				authWindow.focus();

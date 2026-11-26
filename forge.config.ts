@@ -36,6 +36,16 @@ async function copyRuntimeExternalDependency(packageName: string, buildPath: str
 	await copy(sourcePath, destinationPath, { dereference: true });
 }
 
+// `pnpm run rebuild:all` compiles usb on the CI runner (ubuntu-24.04, glibc 2.39), so the
+// binary in usb/build/Release needs GLIBC_2.38. node-gyp-build prefers build/Release over
+// prebuilds/, so on glibc < 2.38 (Debian 12 has 2.36) the main process failed to load usb and
+// no window opened. Removing usb/build from the Linux package makes node-gyp-build load usb's
+// own N-API prebuild instead (needs only GLIBC_2.17).
+export async function removeCompiledUsbBuildOnLinux(buildPath: string, platform: string): Promise<void> {
+	if (platform !== 'linux') return;
+	await remove(path.join(buildPath, 'node_modules', 'usb', 'build'));
+}
+
 const config: ForgeConfig = {
 	packagerConfig: {
 		name: 'WCPOS',
@@ -69,6 +79,7 @@ const config: ForgeConfig = {
 			for (const packageName of runtimeExternalDependencies) {
 				await copyRuntimeExternalDependency(packageName, buildPath);
 			}
+			await removeCompiledUsbBuildOnLinux(buildPath, platform);
 
 			// serialport re-exports all @serialport/* sub-packages (parsers, bindings, stream).
 			// Some of these do not export `./package.json` so they cannot be copied individually

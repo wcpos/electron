@@ -27,6 +27,8 @@ class BrowserWindowMock {
 
 	once() {}
 	on() {}
+	show() {}
+	focus() {}
 	loadURL(): Promise<void> {
 		return new Promise<void>(() => {});
 	}
