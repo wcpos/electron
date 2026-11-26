@@ -56,16 +56,22 @@ test("every publish job checks the lane version after applying it", () => {
   }
 });
 
-test("next-lane pushes publish Windows; main pushes do not", () => {
+test("Publish is dispatch-only: no push trigger, and Windows builds only when the platform input asks", () => {
   const text = readFileSync(new URL(".github/workflows/tag-and-release.yml", root), "utf8");
   const lines = text.split("\n");
+  const on = lines.indexOf("on:");
+  assert.ok(on >= 0, "workflow has no on: block");
+  const onEnd = lines.findIndex((line, index) => index > on && /^[a-z]/.test(line));
+  const triggers = lines.slice(on + 1, onEnd < 0 ? undefined : onEnd).filter((line) => /^  [a-z_]+:/.test(line));
+  assert.deepEqual(triggers, ["  workflow_dispatch:"], `Publish must start only by dispatch, found triggers: ${triggers.join(", ")}`);
   const start = lines.indexOf("  publish-windows:");
   assert.ok(start >= 0, "publish-windows job is missing");
   const end = lines.findIndex((line, index) => index > start && /^  [a-z0-9-]+:$/.test(line));
   const block = lines.slice(start, end < 0 ? undefined : end);
   const condition = block.find((line) => line.startsWith("    if:"));
   assert.ok(condition, "publish-windows job has no condition");
-  assert.ok(condition.includes("github.event_name == 'push' && github.ref_name == 'next'"));
-  assert.ok(!condition.includes("github.ref_name == 'main'"));
+  assert.ok(!condition.includes("github.event_name"), "publish-windows must not branch on the event: there is no push run");
+  assert.ok(!condition.includes("github.ref_name"), "publish-windows must not branch on the lane");
   assert.ok(condition.includes("github.event.inputs.platform == 'windows'"));
+  assert.ok(condition.includes("github.event.inputs.platform == 'all'"));
 });

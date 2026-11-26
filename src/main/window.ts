@@ -8,6 +8,7 @@ import { getInstallId } from './install-id';
 import { logger as log } from './log';
 import { applyWindowColorScheme, isWindowColorScheme, titleBarOptions } from './title-bar';
 import { isDevelopment } from './util';
+import { revealWhenReady } from './window-reveal';
 
 // Keep in sync with src/preload.ts.
 const APP_VERSION_ARG_PREFIX = '--wcpos-app-version=';
@@ -71,7 +72,7 @@ export const createWindow = (): BrowserWindow => {
 	// Load the application
 	loadURL(mainWindow);
 
-	mainWindow.on('ready-to-show', () => {
+	revealWhenReady(mainWindow, () => {
 		if (!mainWindow) {
 			throw new Error('"mainWindow" is not defined');
 		}

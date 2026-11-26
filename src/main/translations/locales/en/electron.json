@@ -20,6 +20,7 @@
 	"menu.request_a_feature": "Request a Feature",
 	"menu.view": "View",
 	"update.a_new_version_is_available_do": "A new version ({version}) is available. Do you want to update now?",
+	"update.could_not_check_for_updates": "Couldn't check for updates. Try again later.",
 	"update.current_version_is_up-to-date": "Current version is up-to-date.",
 	"update.downloading_update": "Downloading update...",
 	"update.found_updates": "Found Updates",

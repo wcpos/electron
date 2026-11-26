@@ -17,6 +17,7 @@ class FakeBrowserWindow {
 	static instances: FakeBrowserWindow[] = [];
 	readonly handlers = new Map<string, Handler[]>();
 	readonly scripts: string[] = [];
+	showCalls = 0;
 	readonly webContents = {
 		executeJavaScript: (script: string) => {
 			this.scripts.push(script);
@@ -29,6 +30,9 @@ class FakeBrowserWindow {
 	}
 
 	setMenu() {}
+	show() {
+		this.showCalls++;
+	}
 	loadURL() {
 		return Promise.resolve();
 	}
@@ -110,6 +114,34 @@ try {
 		[-1, 0.5, -1, -1],
 		'a live main window still gets the taskbar progress and its reset'
 	);
+
+	// Debian 13 GNOME (Wayland): a hidden window never fires ready-to-show, so Linux shows the
+	// progress window at once. macOS and Windows still wait for ready-to-show.
+	const realPlatform = process.platform;
+	try {
+		const { ProgressBar } = require('./progress-bar') as typeof import('./progress-bar');
+		const latest = () => FakeBrowserWindow.instances[FakeBrowserWindow.instances.length - 1];
+
+		Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+		new ProgressBar();
+		assert.equal(
+			latest().showCalls,
+			1,
+			'Linux must show the progress window without waiting for ready-to-show (Wayland never fires it for a hidden window)'
+		);
+
+		Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+		new ProgressBar();
+		assert.equal(
+			latest().showCalls,
+			0,
+			'macOS must not show the progress window before ready-to-show'
+		);
+		latest().emit('ready-to-show');
+		assert.equal(latest().showCalls, 1, 'macOS must show the progress window on ready-to-show');
+	} finally {
+		Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+	}
 
 	console.log('progress-bar.test.ts passed');
 } catch (error) {
