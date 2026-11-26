@@ -1008,6 +1008,29 @@ process.on('beforeExit', () => {
 			true,
 			'the real v2.0.5 assets are accepted'
 		);
+		const zipFromOrigin = (origin: string) => [
+			{
+				name: 'WCPOS-darwin-arm64-2.0.5.zip',
+				url: `${origin}/wcpos/electron/releases/download/v2.0.5/WCPOS-darwin-arm64-2.0.5.zip`,
+				contentType: 'application/zip',
+				size: 1024,
+			},
+		];
+		assert.equal(
+			isValidAssetList(zipFromOrigin('https://example.com')),
+			false,
+			'a foreign host with the release path is rejected'
+		);
+		assert.equal(
+			isValidAssetList(zipFromOrigin('https://github.com.example.com')),
+			false,
+			'a lookalike GitHub host is rejected'
+		);
+		assert.equal(
+			isValidAssetList(zipFromOrigin('http://example.com')),
+			false,
+			'http from a host other than localhost is rejected'
+		);
 		const realZip = [
 			{
 				name: 'WCPOS-darwin-arm64-2.0.5.zip',
