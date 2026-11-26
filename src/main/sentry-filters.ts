@@ -102,7 +102,12 @@ export function maskPersonalDataInEvent<T extends SentryEventLike>(event: T): T 
 export function maskPersonalDataInBreadcrumb<T extends BreadcrumbLike>(breadcrumb: T): T | null {
 	try {
 		if (breadcrumb.message != null) breadcrumb.message = scrubPii(String(breadcrumb.message));
+		const query = breadcrumb.data?.['url.query'];
 		breadcrumb.data = scrubPiiValues(breadcrumb.data) as Record<string, unknown>;
+		if (typeof query === 'string') {
+			// Sentry strips the leading '?', so the first parameter would not be decoded.
+			breadcrumb.data['url.query'] = scrubPii(`?${query}`).slice(1);
+		}
 		return breadcrumb;
 	} catch {
 		return null;
