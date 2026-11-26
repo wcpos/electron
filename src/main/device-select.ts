@@ -65,18 +65,16 @@ export function registerScannerDeviceSelection(window: BrowserWindow): void {
 		(details) =>
 			(details.deviceType === 'serial' || details.deviceType === 'hid') && isAppUrl(details.origin)
 	);
-	// 'media' must stay grantable: once a check handler is registered it answers
-	// EVERY navigator.permissions.query(), and Electron's default request handler
-	// already grants getUserMedia — denying the check here made the POS camera
-	// scanner re-show its "Allow camera" gate on every open (the app could never
-	// observe the granted state), while the camera itself worked fine.
+	// 'media' must stay true for the app: once a check handler is registered it
+	// answers EVERY navigator.permissions.query(), and permissions.ts grants the app
+	// document getUserMedia — denying the check here made the POS camera scanner
+	// re-show its "Allow camera" gate on every open (the app could never observe
+	// the granted state), while the camera itself worked fine.
 	session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
-		// 'media' is answered exactly as before this hardening: unconditionally.
-		// It is not a device-selection permission, so it is out of scope here, and
-		// tightening it on origin/frame risks re-breaking the camera gate above if
-		// requestingOrigin or isMainFrame is not populated for a check. Narrowing
-		// it is a separate, separately-verified change.
-		if (permission === 'media') return true;
+		// 'media' is granted to the app origin only; store pages in an iframe get
+		// false. It does not require isMainFrame or webContents, so the scanner gate
+		// keeps working if either is not populated for a check.
+		if (permission === 'media') return isAppUrl(requestingOrigin);
 		return (
 			isThisWindow(webContents || undefined) &&
 			(permission === 'serial' || permission === 'hid') &&

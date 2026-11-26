@@ -83,7 +83,7 @@ try {
 	webContents.mainFrame = { id: 'main-frame-after-navigation', url: 'wcpos://-/index.html' };
 
 	// Permission handlers grant serial + hid only, and only to the trusted
-	// main frame of this window. 'media' stays unconditionally grantable.
+	// main frame of this window. 'media' is granted to the app origin only.
 	assert.equal(
 		session.devicePermissionHandler!({
 			deviceType: 'serial',
@@ -129,11 +129,18 @@ try {
 		}),
 		false
 	);
-	// media checks must pass, or navigator.permissions.query({name:'camera'})
-	// reports "denied" and the POS camera scanner re-asks on every open. This
-	// holds regardless of origin/frame — see the handler's carve-out comment.
+	// media checks pass for the app origin only: navigator.permissions.query
+	// ({name:'camera'}) must read "granted" there or the POS camera scanner re-asks
+	// on every open. Any other origin is denied.
 	assert.equal(
 		session.permissionCheckHandler!(null, 'media', 'https://evil.example', {
+			isMainFrame: false,
+		}),
+		false
+	);
+	// The app origin is enough: no webContents or main-frame requirement for media.
+	assert.equal(
+		session.permissionCheckHandler!(null, 'media', 'wcpos://-', {
 			isMainFrame: false,
 		}),
 		true

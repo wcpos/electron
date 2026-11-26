@@ -64,6 +64,7 @@
 		"test:rxdb-ipc-attachments": "ts-node src/rxdb-ipc-attachments.test.ts",
 		"test:image-cache": "ts-node src/main/image-cache.test.ts",
 		"test:app-origin": "ts-node src/main/app-origin.test.ts",
+		"test:permissions": "ts-node src/main/permissions.test.ts",
 		"test:storage-measure": "ts-node src/main/storage-measure.test.ts",
 		"test:clear-data": "ts-node src/main/clear-data.test.ts",
 		"test:external-window-isolation": "ts-node src/main/external-window-isolation.test.ts",

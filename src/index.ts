@@ -17,6 +17,7 @@ import { registerScannerDeviceSelection } from './main/device-select';
 import { registerFrameHeaderRelaxation } from './main/frame-headers';
 import { logger } from './main/log';
 import { registerNovuBridge } from './main/novu';
+import { registerPermissionHandlers } from './main/permissions';
 import { initializeRxdbStorageBridge } from './main/rxdb-storage';
 import { registerMenu } from './main/menu';
 import { initProtocolHandling } from './main/protocol';
@@ -55,6 +56,7 @@ const bootDeps: BootDeps = {
 	whenReady: () =>
 		app.whenReady().then(() => {
 			registerFrameHeaderRelaxation(session.defaultSession);
+			registerPermissionHandlers();
 			// Route every main-process global fetch consumer (Novu SDK REST, translation
 			// catalogs, image cache) through Chromium's stack — system proxy + OS trust
 			// store — instead of Node's undici. net.fetch is only callable after ready.
