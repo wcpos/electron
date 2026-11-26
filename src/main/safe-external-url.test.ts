@@ -9,7 +9,8 @@ type ModuleWithMutableLoad = typeof Module & {
 
 const shellCalls: string[] = [];
 let rejectNextOpen = false;
-const logs: { info: unknown[][]; warn: unknown[][]; error: unknown[][] } = {
+const logs: { debug: unknown[][]; info: unknown[][]; warn: unknown[][]; error: unknown[][] } = {
+	debug: [],
 	info: [],
 	warn: [],
 	error: [],
@@ -38,7 +39,9 @@ mutableModule._load = function patchedLoad(
 	if (request === './log') {
 		return {
 			logger: {
-				debug() {},
+				debug(...args: unknown[]) {
+					logs.debug.push(args);
+				},
 				info(...args: unknown[]) {
 					logs.info.push(args);
 				},
@@ -65,6 +68,7 @@ const { openExternalSafely } = safeModule;
 
 function reset() {
 	shellCalls.length = 0;
+	logs.debug.length = 0;
 	logs.info.length = 0;
 	logs.warn.length = 0;
 	logs.error.length = 0;
@@ -104,13 +108,23 @@ async function main() {
 	for (const input of opened) {
 		reset();
 		assert.equal(await openExternalSafely(input), true, `${input} is opened`);
-		assert.deepEqual(shellCalls, [input], `${input} reaches the shell once, unchanged`);
+		assert.deepEqual(
+			shellCalls,
+			[new URL(input).href],
+			`${input} reaches the shell once as parsed`
+		);
+		if (input === 'HTTPS://EXAMPLE.COM/') assert.deepEqual(shellCalls, ['https://example.com/']);
 		assert.equal(logs.warn.length, 0, `${input} logs no warning`);
 		assert.deepEqual(
 			logs.info,
 			[['Opening external URL:', urlForLog(input)]],
 			`${input} is logged redacted`
 		);
+		if (input.startsWith('mailto:') || input.startsWith('tel:')) {
+			for (const arg of Object.values(logs).flat(2)) {
+				assert.doesNotMatch(String(arg), /someone@example\.com|5551234567/);
+			}
+		}
 	}
 
 	reset();

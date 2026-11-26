@@ -92,6 +92,8 @@
 		"test:renderer-log": "ts-node src/main/log.test.ts",
 		"test:url-for-log": "ts-node src/main/url-for-log.test.ts",
 		"test:safe-external-url": "ts-node src/main/safe-external-url.test.ts",
+		"test:open-external-url": "ts-node src/main/open-external-url.test.ts",
+		"test:window-open-handler": "ts-node --files src/main/window-open-handler.test.ts",
 		"test:smoke-packaged": "node scripts/smoke-packaged-app.mjs",
 		"test:sqlite-basics-node": "ts-node src/main/sqlite-basics-node.test.ts",
 		"test:rxdb-storage": "ts-node src/main/rxdb-storage.test.ts",
