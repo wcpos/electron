@@ -90,6 +90,18 @@ assert.deepEqual(
 	{ message: '[PHONE]', data: { phone: '[PHONE]' } },
 	'masks breadcrumb message +34 612 345 678 and phone 0612345678'
 );
+assert.equal(
+	maskPersonalDataInBreadcrumb({ data: { 'url.query': 'q=%2B61%20412%20345%20678&x=1' } })?.data[
+		'url.query'
+	],
+	'q=[PHONE]&x=1',
+	'masks an encoded phone in the first breadcrumb query parameter'
+);
+assert.equal(
+	maskPersonalDataInBreadcrumb({ data: { 'url.query': 'page=2&per_page=10' } })?.data['url.query'],
+	'page=2&per_page=10',
+	'preserves a non-personal breadcrumb query without adding a question mark'
+);
 
 const sdkContexts = () => ({
 	os: { name: 'Windows', version: '10.0.26100' },
