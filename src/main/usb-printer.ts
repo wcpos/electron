@@ -120,6 +120,9 @@ function createUsbDelivery(deviceKey: string, device: Device): Delivery {
 			) as OutEndpoint | undefined;
 			if (!out) throw new Error('USB printer interface has no bulk OUT endpoint');
 
+			// node-usb's default endpoint timeout is 0 (none). Without one, a transfer to a stalled
+			// printer outlives the delivery timeout and prints a stale receipt when the printer wakes.
+			out.timeout = USB_PRINT_TIMEOUT_MS;
 			await new Promise<void>((resolve, reject) => {
 				out.transfer(bytes, (err) => (err ? reject(err) : resolve()));
 			});

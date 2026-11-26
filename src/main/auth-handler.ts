@@ -3,6 +3,7 @@ import { BrowserWindow, ipcMain } from 'electron';
 import { logger as log } from './log';
 import { urlForLog } from './url-for-log';
 import { getMainWindow } from './window';
+import { revealWhenReady } from './window-reveal';
 
 import type { AuthPromptParams, AuthResult } from '../ipc-channels';
 
@@ -109,7 +110,7 @@ export function initAuthHandler(): void {
 			};
 
 			// Show window when ready
-			authWindow.once('ready-to-show', () => {
+			revealWhenReady(authWindow, () => {
 				authWindow.show();
 				// Focus the auth window so user can interact with it
 				authWindow.focus();
@@ -167,6 +168,14 @@ export function initAuthHandler(): void {
 
 			// Load the auth URL
 			authWindow.loadURL(authUrl).catch((err) => {
+				// ERR_ABORTED (-3): the initial navigation was replaced by a newer one (a JS
+				// or meta redirect on the auth page, or our own preventDefault on the
+				// redirect URI). The window carries on with that navigation, so this is not
+				// a failure; did-fail-load above ignores -3 for the same reason.
+				if (err?.code === 'ERR_ABORTED' || err?.errno === -3) {
+					log.info('Auth page initial load aborted by a newer navigation');
+					return;
+				}
 				log.error(`Failed to load auth URL: ${err.message}`);
 				resolveOnce({
 					type: 'error',

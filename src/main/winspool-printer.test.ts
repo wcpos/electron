@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import Module from 'node:module';
+import path from 'node:path';
 
 type ModuleWithMutableLoad = typeof Module & {
 	_load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
@@ -7,12 +9,23 @@ type ModuleWithMutableLoad = typeof Module & {
 
 const mutableModule = Module as ModuleWithMutableLoad;
 const originalLoad = mutableModule._load;
+const spawned: { command: string; args: readonly string[] }[] = [];
+function fakeSpawn(command: string, args: readonly string[]) {
+	spawned.push({ command, args });
+	const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter(), kill() {} });
+	process.nextTick(() => child.emit('close', 0));
+	return child;
+}
 mutableModule._load = function patchedLoad(
 	request: string,
 	parent: NodeModule | null,
 	isMain: boolean
 ) {
 	if (request === 'electron') return {};
+	if (request === 'node:child_process') {
+		const real = originalLoad.call(this, request, parent, isMain) as object;
+		return { ...real, spawn: fakeSpawn };
+	}
 	if (request === './log') {
 		return { logger: { error() {}, info() {}, warn() {}, debug() {} } };
 	}
@@ -20,8 +33,14 @@ mutableModule._load = function patchedLoad(
 };
 
 try {
-	const { WINSPOOL_PREFIX, RAW_PRINT_PS_SCRIPT, encodePsCommand, filterSpoolerPrinters } =
-		require('./winspool-printer') as typeof import('./winspool-printer');
+	const {
+		WINSPOOL_PREFIX,
+		RAW_PRINT_PS_SCRIPT,
+		encodePsCommand,
+		filterSpoolerPrinters,
+		powershellPath,
+		printRawToSpooler,
+	} = require('./winspool-printer') as typeof import('./winspool-printer');
 
 	// Virtual queues present on every Windows install are excluded; real queues map to
 	// `winspool:<queue name>` ids carrying the OpenPrinterW-compatible name.
@@ -57,7 +76,42 @@ try {
 	assert.ok(RAW_PRINT_PS_SCRIPT.includes('$env:WCPOS_RAW_PRINT_PRINTER'));
 	assert.ok(RAW_PRINT_PS_SCRIPT.includes('$env:WCPOS_RAW_PRINT_FILE'));
 
-	console.log('winspool-printer tests passed');
+	const savedSystemRoot = process.env.SystemRoot;
+	const savedWindir = process.env.windir;
+	try {
+		process.env.SystemRoot = 'D:\\Win';
+		assert.equal(
+			powershellPath(),
+			'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+			'powershellPath resolves under the Windows directory'
+		);
+		delete process.env.SystemRoot;
+		delete process.env.windir;
+		assert.equal(
+			powershellPath(),
+			'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+			'powershellPath resolves under the Windows directory'
+		);
+	} finally {
+		if (savedSystemRoot === undefined) delete process.env.SystemRoot;
+		else process.env.SystemRoot = savedSystemRoot;
+		if (savedWindir === undefined) delete process.env.windir;
+		else process.env.windir = savedWindir;
+	}
+
+	void printRawToSpooler('Test Printer', Buffer.from('x'))
+		.then(() => {
+			const message =
+				'printRawToSpooler spawns the absolute System32\\WindowsPowerShell\\v1.0\\powershell.exe path';
+			assert.equal(spawned.length, 1, message);
+			assert.equal(spawned[0].command, powershellPath(), message);
+			assert.ok(path.win32.isAbsolute(spawned[0].command), message);
+			console.log('winspool-printer tests passed');
+		})
+		.catch((err: unknown) => {
+			console.error(err);
+			process.exitCode = 1;
+		});
 } finally {
 	mutableModule._load = originalLoad;
 }

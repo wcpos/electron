@@ -18,15 +18,15 @@ type LocaleInfo = {
 const store = new Store<Record<string, TranslationRecord>>();
 // On next, this is wcpos/translations' moving jsDelivr branch ref, refreshed by the CDN within about 12 hours.
 // On main, the release workflow replaces it with a CalVer tag; resolve this one-line conflict in main's favour when merging next.
-const TRANSLATION_VERSION = '2026.11.24';
+const TRANSLATION_VERSION = '2026.11.28';
 // A rolling ref must be re-fetched because its content changes under the same name.
-// (Named REF, not VERSION, so the release bump regex `TRANSLATION_VERSION = '2026.11.24'` cannot match it.)
+// (Named REF, not VERSION, so the release bump regex `TRANSLATION_VERSION = '2026.11.28'` cannot match it.)
 // Typed as string: on main TRANSLATION_VERSION is a CalVer literal and the `===` below would
 // otherwise be a TypeScript no-overlap error (TS2367) on every release.
 const ROLLING_TRANSLATION_REF: string = 'next';
-// Boot awaits the translations phase before creating the window, and a rolling read
-// re-fetches even with a warm cache, so bound that request and fall back to the cache.
-const ROLLING_FETCH_TIMEOUT_MS = 5000;
+// Boot awaits the translations phase before creating the window, so
+// every CDN request is bounded and falls back to the cache (or English).
+const TRANSLATION_FETCH_TIMEOUT_MS = 5000;
 const TRANSLATION_CACHE_NAMESPACE = 'translations';
 const TRANSLATION_CACHE_KEY_PATTERN = /^translations:(?:\d{4}\.\d+\.\d+|next):[A-Za-z0-9_-]+$/;
 const LEGACY_TRANSLATION_CACHE_KEY_PATTERN = /^\d{4}\.\d+\.\d+:[A-Za-z0-9_-]+$/;
@@ -77,11 +77,8 @@ class ElectronStoreBackend {
 		namespace: string
 	): Promise<TranslationRecord | null> {
 		const url = this.buildUrl(language, namespace);
-		const init =
-			TRANSLATION_VERSION === ROLLING_TRANSLATION_REF
-				? { signal: AbortSignal.timeout(ROLLING_FETCH_TIMEOUT_MS) }
-				: undefined;
-		return fetch(url, init).then((response) => {
+		const signal = AbortSignal.timeout(TRANSLATION_FETCH_TIMEOUT_MS);
+		return fetch(url, { signal }).then((response) => {
 			if (!response.ok) return null;
 			return response.json();
 		});
