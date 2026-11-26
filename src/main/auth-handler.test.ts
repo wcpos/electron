@@ -37,6 +37,8 @@ class BrowserWindowMock {
 	isDestroyed() {
 		return false;
 	}
+	show() {}
+	focus() {}
 	close() {
 		this.closeCalls++;
 	}
