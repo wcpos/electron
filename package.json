@@ -87,6 +87,7 @@
 		"test:window-reveal": "ts-node --files src/main/window-reveal.test.ts",
 		"test:linux-package-format": "ts-node src/main/linux-package-format.test.ts",
 		"test:sentry-hygiene": "ts-node --files src/main/sentry-hygiene.test.ts",
+		"test:pii-redact": "ts-node src/main/pii-redact.test.ts",
 		"test:renderer-log": "ts-node src/main/log.test.ts",
 		"test:url-for-log": "ts-node src/main/url-for-log.test.ts",
 		"test:safe-external-url": "ts-node src/main/safe-external-url.test.ts",
