@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 
 import webpack from 'webpack';
 
-import forgeConfig from '../forge.config';
+import forgeConfig, { removeCompiledUsbBuildOnLinux } from '../forge.config';
 import pkg from '../package.json';
 import { mainConfig } from '../webpack.main.config';
 
@@ -124,6 +124,83 @@ async function main() {
 		}
 	} finally {
 		fs.rmSync(buildPath, { recursive: true, force: true });
+	}
+
+	// Unit, seeded: a plain install has no usb/build, only CI's rebuild:all creates it, so seed one.
+	const seededPath = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-usb-build-')));
+	try {
+		const seededUsb = path.join(seededPath, 'node_modules', 'usb');
+		const compiledBinding = path.join(seededUsb, 'build', 'Release', 'usb_bindings.node');
+		const prebuild = path.join(seededUsb, 'prebuilds', 'linux-x64', 'node.napi.glibc.node');
+		fs.mkdirSync(path.dirname(compiledBinding), { recursive: true });
+		fs.mkdirSync(path.dirname(prebuild), { recursive: true });
+		fs.writeFileSync(compiledBinding, 'compiled');
+		fs.writeFileSync(prebuild, 'prebuild');
+
+		for (const otherPlatform of ['darwin', 'win32']) {
+			await removeCompiledUsbBuildOnLinux(seededPath, otherPlatform);
+			assert.ok(
+				fs.existsSync(compiledBinding),
+				`the compiled usb binding must be kept on ${otherPlatform}; only Linux drops it`
+			);
+		}
+
+		await removeCompiledUsbBuildOnLinux(seededPath, 'linux');
+		assert.ok(
+			!fs.existsSync(path.join(seededUsb, 'build')),
+			'Linux package must not ship the CI-compiled usb binding (needs GLIBC_2.38; Debian 12 has 2.36)'
+		);
+		assert.ok(
+			fs.existsSync(prebuild),
+			"Linux package must keep usb's N-API prebuild (GLIBC_2.17), which Debian 12 loads instead"
+		);
+	} finally {
+		fs.rmSync(seededPath, { recursive: true, force: true });
+	}
+
+	// Hook, linux: the packaged usb must resolve to its prebuild, not build/Release.
+	const linuxBuildPath = fs.realpathSync(
+		fs.mkdtempSync(path.join(os.tmpdir(), 'wcpos-package-runtime-linux-'))
+	);
+	try {
+		const linuxWebpackMainPath = path.join(linuxBuildPath, '.webpack', 'main');
+		fs.mkdirSync(linuxWebpackMainPath, { recursive: true });
+		fs.writeFileSync(path.join(linuxWebpackMainPath, 'index.js'), '// packaged main entry');
+
+		await forgeConfig.hooks.packageAfterPrune(
+			forgeConfig as any,
+			linuxBuildPath,
+			'45.2.3',
+			'linux',
+			'x64'
+		);
+
+		const linuxUsb = path.join(linuxBuildPath, 'node_modules', 'usb');
+		assert.ok(
+			!fs.existsSync(path.join(linuxUsb, 'build')),
+			'Linux package must not ship the CI-compiled usb binding (needs GLIBC_2.38; Debian 12 has 2.36)'
+		);
+		assert.ok(
+			fs.existsSync(path.join(linuxUsb, 'prebuilds', 'linux-x64', 'node.napi.glibc.node')),
+			"Linux package must ship usb's linux-x64 N-API prebuild; without it Debian 12 cannot load usb"
+		);
+
+		if (process.platform === 'linux' && process.arch === 'x64') {
+			const nodeGypBuild = createRequire(path.join(linuxWebpackMainPath, 'index.js'))(
+				path.join(linuxBuildPath, 'node_modules', 'node-gyp-build')
+			) as { resolve: (dir: string) => string };
+			const resolved = nodeGypBuild.resolve(linuxUsb);
+			assert.ok(
+				resolved.endsWith(path.join('prebuilds', 'linux-x64', 'node.napi.glibc.node')),
+				`packaged usb must load its N-API prebuild on Linux so Debian 12 (glibc 2.36) starts, got ${resolved}`
+			);
+		} else {
+			console.log(
+				`skipped node-gyp-build resolve check for the Linux package (host is ${process.platform}-${process.arch}, needs linux-x64)`
+			);
+		}
+	} finally {
+		fs.rmSync(linuxBuildPath, { recursive: true, force: true });
 	}
 }
 

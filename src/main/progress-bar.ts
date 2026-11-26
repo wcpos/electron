@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron';
 
 import { t } from './translations';
 import { getMainWindow } from './window';
+import { revealWhenReady } from './window-reveal';
 
 export class ProgressBar {
 	private mainWindow: BrowserWindow | null;
@@ -37,9 +38,7 @@ export class ProgressBar {
 
 		win.loadURL('data:text/html;charset=UTF8,' + encodeURIComponent(htmlContent));
 
-		win.once('ready-to-show', () => {
-			win.show();
-		});
+		revealWhenReady(win, () => win.show());
 
 		win.on('closed', () => {
 			this.progressWindow = null;
